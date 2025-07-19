@@ -1,0 +1,111 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  role      Role      @default(OPERADOR)
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  services  Service[]
+}
+
+model Client {
+  id           String       @id @default(uuid())
+  name         String
+  address      String
+  cuit         String       @unique
+  contact      String
+  taxCondition TaxCondition @default(CONSUMIDOR_FINAL)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  services     Service[]
+  account      Account?
+}
+
+model Technician {
+  id        String    @id @default(uuid())
+  name      String
+  specialty String
+  status    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  services  Service[]
+}
+
+model Service {
+  id            String        @id @default(uuid())
+  description   String
+  status        ServiceStatus @default(PENDIENTE)
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  technicianId  String?
+  technician    Technician?   @relation(fields: [technicianId], references: [id])
+  operatorId    String
+  operator      User          @relation(fields: [operatorId], references: [id])
+  visitDate     DateTime?
+  receiptImages String[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  invoice       Invoice?
+}
+
+model Invoice {
+  id        String        @id @default(uuid())
+  serviceId String        @unique
+  service   Service       @relation(fields: [serviceId], references: [id])
+  amount    Float
+  status    InvoiceStatus @default(PENDIENTE)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model Account {
+  id        String   @id @default(uuid())
+  clientId  String   @unique
+  client    Client   @relation(fields: [clientId], references: [id])
+  balance   Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Role {
+  ADMIN
+  OPERADOR
+  TECNICO
+}
+
+enum ServiceStatus {
+  PENDIENTE
+  ASIGNADO
+  CON_REMITO
+  FACTURADO
+}
+
+enum InvoiceStatus {
+  PENDIENTE
+  EMITIDA
+  PAGADA
+}
+
+enum TaxCondition {
+  RESPONSABLE_INSCRIPTO
+  MONOTRIBUTO
+  EXENTO
+  CONSUMIDOR_FINAL
+}

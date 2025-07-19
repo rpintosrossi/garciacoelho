@@ -1,0 +1,30 @@
+const express = require('express');
+const router = express.Router();
+const authRoutes = require('./authRoutes');
+const userRoutes = require('./userRoutes');
+const buildingRoutes = require('./buildingRoutes');
+const administratorRoutes = require('./administratorRoutes');
+const paymentMethodRoutes = require('./paymentMethodRoutes');
+const paymentController = require('../controllers/paymentController');
+const remitoController = require('../controllers/remitoController');
+const serviceRoutes = require('./serviceRoutes');
+const technicianRoutes = require('./technicianRoutes');
+const clientRoutes = require('./clientRoutes');
+const dashboardRoutes = require('./dashboardRoutes');
+const reportRoutes = require('./reportRoutes');
+
+router.use('/auth', authRoutes);
+router.use('/users', userRoutes);
+router.use('/buildings', buildingRoutes);
+router.use('/administrators', administratorRoutes);
+router.use('/payment-methods', paymentMethodRoutes);
+router.use('/services', serviceRoutes);
+router.use('/technicians', technicianRoutes);
+router.use('/clients', clientRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/reports', reportRoutes);
+router.post('/payments', paymentController.createPayment);
+router.get('/payments', paymentController.getPayments);
+router.post('/remitos', remitoController.createRemito);
+
+module.exports = router; 
