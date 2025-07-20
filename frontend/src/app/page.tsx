@@ -7,10 +7,10 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // Pequeño delay para permitir que el healthcheck funcione
+    // Delay más largo para permitir que el healthcheck funcione
     const timer = setTimeout(() => {
       router.push('/login');
-    }, 1000);
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, [router]);
@@ -18,13 +18,17 @@ export default function Home() {
   return (
     <div style={{ 
       display: 'flex', 
+      flexDirection: 'column',
       justifyContent: 'center', 
       alignItems: 'center', 
       height: '100vh',
       fontSize: '18px',
-      fontFamily: 'Arial, sans-serif'
+      fontFamily: 'Arial, sans-serif',
+      textAlign: 'center'
     }}>
-      Cargando...
+      <h1>Garcia Coelho</h1>
+      <p>Sistema de gestión de servicios</p>
+      <p>Cargando...</p>
     </div>
   );
 }

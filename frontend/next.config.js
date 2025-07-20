@@ -14,17 +14,7 @@ const nextConfig = {
         destination: 'http://localhost:3001/api/:path*'
       }
     ]
-  },
-  env: {
-    PORT: process.env.PORT || '3001'
-  },
-  experimental: {
-    serverComponentsExternalPackages: []
-  },
-  // Configuración para Railway
-  output: 'standalone',
-  poweredByHeader: false,
-  compress: true
+  }
 }
 
 module.exports = nextConfig 
