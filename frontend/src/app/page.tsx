@@ -7,12 +7,14 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // Delay más largo para permitir que el healthcheck funcione
-    const timer = setTimeout(() => {
-      router.push('/login');
-    }, 3000);
+    // Solo redirigir si no estamos en el healthcheck
+    if (window.location.pathname === '/') {
+      const timer = setTimeout(() => {
+        router.push('/login');
+      }, 2000);
 
-    return () => clearTimeout(timer);
+      return () => clearTimeout(timer);
+    }
   }, [router]);
 
   return (
@@ -28,7 +30,7 @@ export default function Home() {
     }}>
       <h1>Garcia Coelho</h1>
       <p>Sistema de gestión de servicios</p>
-      <p>Cargando...</p>
+      <p>Redirigiendo al login...</p>
     </div>
   );
 }
