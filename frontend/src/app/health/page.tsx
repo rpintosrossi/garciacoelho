@@ -1,13 +1,14 @@
-export default function HealthCheck() {
+export default function HealthPage() {
   return (
     <div style={{ 
-      padding: '20px', 
-      fontFamily: 'Arial, sans-serif',
-      textAlign: 'center'
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      height: '100vh',
+      fontSize: '24px',
+      fontFamily: 'Arial, sans-serif'
     }}>
-      <h1>✅ Garcia Coelho Frontend</h1>
-      <p>Status: OK</p>
-      <p>Timestamp: {new Date().toISOString()}</p>
+      OK
     </div>
   );
 } 
