@@ -15,10 +15,8 @@ const nextConfig = {
       }
     ]
   },
-  // Configuración para desarrollo
-  experimental: {
-    serverComponentsExternalPackages: []
-  }
+  // Configuración corregida
+  serverExternalPackages: []
 }
 
 module.exports = nextConfig 
