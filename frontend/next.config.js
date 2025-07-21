@@ -15,18 +15,10 @@ const nextConfig = {
       }
     ]
   },
-  // Configuración específica para Railway
+  // Configuración para desarrollo
   experimental: {
     serverComponentsExternalPackages: []
-  },
-  // Asegurar que Next.js escuche en todas las interfaces
-  serverRuntimeConfig: {
-    hostname: '0.0.0.0',
-    port: process.env.PORT || 3001
-  },
-  // Configuración para producción
-  output: 'standalone',
-  poweredByHeader: false
+  }
 }
 
 module.exports = nextConfig 
