@@ -1,16 +1,19 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const router = useRouter();
+
   useEffect(() => {
-    console.log('[PAGE] Home page loaded');
-    console.log('[PAGE] Environment:', {
-      NODE_ENV: process.env.NODE_ENV,
-      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL
-    });
-  }, []);
+    // Solo redirigir después de un delay más largo
+    const timer = setTimeout(() => {
+      router.push('/login');
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [router]);
 
   return (
     <div style={{ 
@@ -26,16 +29,9 @@ export default function Home() {
     }}>
       <h1>Garcia Coelho</h1>
       <p>Sistema de gestión de servicios</p>
-      <p>✅ Aplicación funcionando correctamente</p>
+      <p>Redirigiendo al login en 5 segundos...</p>
       <p style={{ fontSize: '14px', marginTop: '20px', color: '#666' }}>
-        <a href="/login" style={{ color: '#007bff', textDecoration: 'none' }}>
-          Ir al login →
-        </a>
-      </p>
-      <p style={{ fontSize: '12px', marginTop: '10px', color: '#999' }}>
-        <a href="/api/debug" style={{ color: '#666', textDecoration: 'none' }}>
-          Debug Info
-        </a>
+        Si no se redirige automáticamente, haz clic <a href="/login" style={{ color: '#007bff' }}>aquí</a>
       </p>
     </div>
   );
