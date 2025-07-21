@@ -7,14 +7,12 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // Solo redirigir si no estamos en el healthcheck
-    if (window.location.pathname === '/') {
-      const timer = setTimeout(() => {
-        router.push('/login');
-      }, 2000);
+    // Solo redirigir después de un delay más largo
+    const timer = setTimeout(() => {
+      router.push('/login');
+    }, 5000);
 
-      return () => clearTimeout(timer);
-    }
+    return () => clearTimeout(timer);
   }, [router]);
 
   return (
@@ -26,11 +24,15 @@ export default function Home() {
       height: '100vh',
       fontSize: '18px',
       fontFamily: 'Arial, sans-serif',
-      textAlign: 'center'
+      textAlign: 'center',
+      padding: '20px'
     }}>
       <h1>Garcia Coelho</h1>
       <p>Sistema de gestión de servicios</p>
-      <p>Redirigiendo al login...</p>
+      <p>Redirigiendo al login en 5 segundos...</p>
+      <p style={{ fontSize: '14px', marginTop: '20px', color: '#666' }}>
+        Si no se redirige automáticamente, haz clic <a href="/login" style={{ color: '#007bff' }}>aquí</a>
+      </p>
     </div>
   );
 }
