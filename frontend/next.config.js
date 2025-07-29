@@ -17,8 +17,9 @@ const nextConfig = {
   },
   // Configuración específica para Railway
   experimental: {
-    serverComponentsExternalPackages: []
+    // serverComponentsExternalPackages: [] // Eliminado, ya no es válido
   },
+  serverExternalPackages: [],
   // Asegurar que Next.js escuche en todas las interfaces
   serverRuntimeConfig: {
     hostname: '0.0.0.0',
