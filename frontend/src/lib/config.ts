@@ -1,12 +1,17 @@
+const cleanUrl = (url = '') => {
+  // Elimina espacios en blanco y el punto y coma final si existe
+  return url.trim().replace(/;$/, '');
+};
+
 export const config = {
   // API URL - usar la URL del backend en Railway
-  apiUrl: process.env.NEXT_PUBLIC_API_URL || 
+  apiUrl: cleanUrl(process.env.NEXT_PUBLIC_API_URL) || 
     (process.env.NODE_ENV === 'production' 
       ? 'https://backend-production-6dca.up.railway.app/api'
       : 'http://localhost:3000/api'),
   
   // App URL
-  appUrl: process.env.NEXT_PUBLIC_APP_URL || 
+  appUrl: cleanUrl(process.env.NEXT_PUBLIC_APP_URL) || 
     (process.env.NODE_ENV === 'production'
       ? 'https://garciacoelho-production.up.railway.app'
       : 'http://localhost:8080'),
