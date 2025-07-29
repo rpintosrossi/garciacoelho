@@ -3,11 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 8080",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "node prod-start.js",
-    "lint": "next lint",
-    "postinstall": "echo 'Build completed successfully'"
+    "start": "node start.js",
+    "lint": "next lint"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

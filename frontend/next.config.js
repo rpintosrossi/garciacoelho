@@ -1,7 +1,4 @@
 /** @type {import('next').NextConfig} */
-
-const isProduction = process.env.NODE_ENV === 'production';
-
 const nextConfig = {
   reactStrictMode: true,
   eslint: {
@@ -10,17 +7,26 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
-  // Configuración para Railway
-  output: 'standalone',
-  poweredByHeader: false,
-  
-  // Asegurar que los assets se sirvan desde la URL correcta en producción
-  assetPrefix: isProduction ? 'https://garciacoelho-production.up.railway.app' : undefined,
-
-  // Configuración del servidor
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://localhost:3001/api/:path*'
+      }
+    ]
+  },
+  // Configuración específica para Railway
   experimental: {
     serverComponentsExternalPackages: []
-  }
+  },
+  // Asegurar que Next.js escuche en todas las interfaces
+  serverRuntimeConfig: {
+    hostname: '0.0.0.0',
+    port: process.env.PORT || 3001
+  },
+  // Configuración para producción
+  output: 'standalone',
+  poweredByHeader: false
 }
 
 module.exports = nextConfig 
