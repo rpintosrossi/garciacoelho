@@ -13,10 +13,6 @@ const nextConfig = {
   // Configuración del servidor
   experimental: {
     serverComponentsExternalPackages: []
-  },
-  // Variables de entorno
-  env: {
-    PORT: process.env.PORT || '8080'
   }
 }
 
