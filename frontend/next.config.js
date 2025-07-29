@@ -7,28 +7,14 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: 'http://localhost:8080/api/:path*'
-      }
-    ]
-  },
-  // Configuración específica para Railway
-  experimental: {
-    // serverComponentsExternalPackages: [] // Eliminado, ya no es válido
-  },
-  serverExternalPackages: [],
-  // Asegurar que Next.js escuche en todas las interfaces
-  serverRuntimeConfig: {
-    hostname: '0.0.0.0',
-    port: process.env.PORT || 8080
-  },
-  // Configuración para producción
+  // Configuración para Railway
   output: 'standalone',
   poweredByHeader: false,
-  // Configuración adicional para Railway
+  // Configuración del servidor
+  experimental: {
+    serverComponentsExternalPackages: []
+  },
+  // Variables de entorno
   env: {
     PORT: process.env.PORT || '8080'
   }
