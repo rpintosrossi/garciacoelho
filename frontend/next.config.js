@@ -11,7 +11,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3001/api/:path*'
+        destination: 'http://localhost:8080/api/:path*'
       }
     ]
   },
@@ -22,11 +22,15 @@ const nextConfig = {
   // Asegurar que Next.js escuche en todas las interfaces
   serverRuntimeConfig: {
     hostname: '0.0.0.0',
-    port: process.env.PORT || 3001
+    port: process.env.PORT || 8080
   },
   // Configuración para producción
   output: 'standalone',
-  poweredByHeader: false
+  poweredByHeader: false,
+  // Configuración adicional para Railway
+  env: {
+    PORT: process.env.PORT || '8080'
+  }
 }
 
 module.exports = nextConfig 

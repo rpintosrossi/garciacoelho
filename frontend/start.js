@@ -1,12 +1,12 @@
 const { spawn } = require('child_process');
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 8080;
 
-console.log(`Starting Next.js server on port ${port}`);
+console.log(`Starting Next.js standalone server on port ${port}`);
 console.log(`Environment: ${process.env.NODE_ENV}`);
 console.log(`Host: 0.0.0.0`);
 
-const child = spawn('npx', ['next', 'start', '-p', port.toString(), '-H', '0.0.0.0'], {
+const child = spawn('node', ['.next/standalone/server.js'], {
   stdio: 'inherit',
   env: {
     ...process.env,
