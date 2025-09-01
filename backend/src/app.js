@@ -184,6 +184,16 @@ app.get('/test-data', async (req, res) => {
   }
 });
 
+// Ruta específica de health check para Railway
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    message: 'Garcia Coelho API funcionando correctamente',
+    status: 'OK',
+    timestamp: new Date().toISOString()
+  });
+});
+});
+
 // Rutas
 app.use('/api', mainRoutes);
 
