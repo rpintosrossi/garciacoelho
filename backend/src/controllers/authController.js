@@ -5,44 +5,37 @@ const prisma = new PrismaClient();
 
 const login = async (req, res) => {
   try {
-    console.log('[AUTH] Iniciando proceso de login');
-    console.log('[AUTH] Body recibido:', req.body);
+    console.log('[AUTH] Iniciando proceso de login para:', req.body.email);
     
     const { email, password } = req.body;
 
     if (!email || !password) {
-      console.log('[AUTH] Error: Email o password faltante');
       return res.status(400).json({ 
         message: 'Email y contraseña son requeridos',
         type: 'VALIDATION_ERROR'
       });
     }
 
-    console.log('[AUTH] Buscando usuario con email:', email);
     const user = await prisma.user.findUnique({
       where: { email }
     });
 
     if (!user) {
-      console.log('[AUTH] Usuario no encontrado');
       return res.status(401).json({ 
         message: 'No existe un usuario con ese email',
         type: 'USER_NOT_FOUND'
       });
     }
 
-    console.log('[AUTH] Usuario encontrado, verificando contraseña');
     const validPassword = await bcrypt.compare(password, user.password);
 
     if (!validPassword) {
-      console.log('[AUTH] Contraseña incorrecta');
       return res.status(401).json({ 
         message: 'Contraseña incorrecta',
         type: 'INVALID_PASSWORD'
       });
     }
 
-    console.log('[AUTH] Contraseña válida, generando token');
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,

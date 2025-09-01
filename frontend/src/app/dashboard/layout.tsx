@@ -30,13 +30,15 @@ import {
   AccountCircle as AccountCircleIcon,
   Settings as SettingsIcon,
   Assessment as AssessmentIcon,
-  Inventory as InventoryIcon
+  Inventory as InventoryIcon,
+  LocationOn as LocationOnIcon
 } from '@mui/icons-material';
 import { useRouter, usePathname } from 'next/navigation';
 import ServicesSidebar from '@/components/ServicesSidebar';
 import { CategoryProvider } from '@/contexts/CategoryContext';
 import api from '@/lib/axios';
 import logo from '/public/logo.png';
+import { useAuth } from '@/contexts/AuthContext';
 
 const drawerWidth = 240;
 
@@ -52,41 +54,22 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [userName, setUserName] = useState('');
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    // Obtener el nombre y rol del usuario autenticado
-    const fetchUser = async () => {
-      try {
-        const res = await api.get('/auth/me');
-        setUserName(res.data.name);
-        setUserRole(res.data.role);
-      } catch (e) {
-        setUserName('Usuario');
-        setUserRole(null);
-      } finally {
-        setLoadingUser(false);
-      }
-    };
-    fetchUser();
-  }, []);
-
-  useEffect(() => {
-    if (!loadingUser && userRole === 'TECNICO') {
+    if (!authLoading && user?.role === 'TECNICO') {
       if (pathname !== '/dashboard/technician') {
         router.replace('/dashboard/technician');
       }
     }
-  }, [userRole, loadingUser, pathname, router]);
+  }, [user?.role, authLoading, pathname, router]);
 
   // Si es técnico y no está en la ruta correcta, no renderizar nada
-  if (loadingUser) return null;
-  if (userRole === 'TECNICO' && pathname !== '/dashboard/technician') return null;
+  if (authLoading) return null;
+  if (user?.role === 'TECNICO' && pathname !== '/dashboard/technician') return null;
 
   // Si es técnico, ocultar menú y AppBar
-  if (userRole === 'TECNICO' && pathname === '/dashboard/technician') {
+  if (user?.role === 'TECNICO' && pathname === '/dashboard/technician') {
     return <Box component="main" sx={{ flexGrow: 1, p: 3, width: '100%', mt: 4 }}>{children}</Box>;
   }
 
@@ -132,6 +115,11 @@ export default function DashboardLayout({
       text: 'Edificios',
       icon: <BuildingIcon sx={{ color: '#4caf50' }} />,
       path: '/dashboard/buildings',
+    },
+    {
+      text: 'Zonas',
+      icon: <LocationOnIcon sx={{ color: '#673ab7' }} />,
+      path: '/dashboard/zones',
     },
     {
       text: 'Usuarios',
@@ -217,12 +205,13 @@ export default function DashboardLayout({
                           selected={pathname === subItem.path}
                           sx={{ 
                             pl: 4,
+                            transition: 'all 0.2s ease-in-out',
                             '&.Mui-selected': {
-                              backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                              borderLeft: '4px solid',
+                              backgroundColor: 'rgba(33, 150, 243, 0.08)',
+                              borderLeft: '3px solid',
                               borderLeftColor: item.icon.props.sx.color,
                               '&:hover': {
-                                backgroundColor: 'rgba(0, 0, 0, 0.08)',
+                                backgroundColor: 'rgba(33, 150, 243, 0.12)',
                               },
                             },
                             '&:hover': {
@@ -254,12 +243,13 @@ export default function DashboardLayout({
                 selected={pathname === item.path}
                 onClick={() => router.push(item.path)}
                 sx={{
+                  transition: 'all 0.2s ease-in-out',
                   '&.Mui-selected': {
-                    backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                    borderLeft: '4px solid',
+                    backgroundColor: 'rgba(33, 150, 243, 0.08)',
+                    borderLeft: '3px solid',
                     borderLeftColor: item.icon.props.sx.color,
                     '&:hover': {
-                      backgroundColor: 'rgba(0, 0, 0, 0.08)',
+                      backgroundColor: 'rgba(33, 150, 243, 0.12)',
                     },
                   },
                   '&:hover': {
@@ -309,12 +299,13 @@ export default function DashboardLayout({
                   selected={pathname === item.path}
                   sx={{ 
                     pl: 4,
+                    transition: 'all 0.2s ease-in-out',
                     '&.Mui-selected': {
-                      backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                      borderLeft: '4px solid',
+                      backgroundColor: 'rgba(33, 150, 243, 0.08)',
+                      borderLeft: '3px solid',
                       borderLeftColor: item.icon.props.sx.color,
                       '&:hover': {
-                        backgroundColor: 'rgba(0, 0, 0, 0.08)',
+                        backgroundColor: 'rgba(33, 150, 243, 0.12)',
                       },
                     },
                     '&:hover': {
@@ -385,7 +376,7 @@ export default function DashboardLayout({
             <Box sx={{ flexGrow: 1 }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                {userName}
+                {user?.name}
               </Typography>
               <IconButton
                 color="inherit"
@@ -404,7 +395,7 @@ export default function DashboardLayout({
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
             >
-              <MenuItem disabled>{userName}</MenuItem>
+              <MenuItem disabled>{user?.name}</MenuItem>
               <MenuItem onClick={handleProfile}>Configurar mi perfil</MenuItem>
               <MenuItem onClick={handleLogout}>Cerrar sesión</MenuItem>
             </Menu>

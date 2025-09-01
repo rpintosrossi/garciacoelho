@@ -26,6 +26,7 @@ import {
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
+import { cachedApi } from '@/lib/axios';
 
 interface Service {
   id: string;
@@ -74,7 +75,7 @@ export default function ServicesPage() {
         ...filters
       });
 
-      const response = await api.get(`/services?${queryParams}`);
+      const response = await cachedApi.get(`/services?${queryParams}`);
       setServices(response.data.services);
       setPagination(response.data.pagination);
     } catch (error) {
@@ -86,6 +87,48 @@ export default function ServicesPage() {
   useEffect(() => {
     fetchServices();
   }, [pagination.page, filters]);
+
+  // Escuchar cambios en servicios para actualizar automáticamente
+  useEffect(() => {
+    const handleServicesChanged = () => {
+      console.log('🔄 [SERVICES] Cambio detectado, actualizando lista...');
+      // Limpiar caché y recargar
+      cachedApi.clearCacheFor('/services');
+      fetchServices();
+    };
+
+    // Función para verificar cambios en localStorage
+    const checkLocalStorageChanges = () => {
+      const lastUpdate = localStorage.getItem('servicesLastUpdate');
+      const updateType = localStorage.getItem('servicesUpdateType');
+      
+      if (lastUpdate && updateType === 'receipt_uploaded') {
+        console.log('🔄 [SERVICES] Cambio de remito detectado en localStorage, actualizando...');
+        // Limpiar el flag para evitar actualizaciones múltiples
+        localStorage.removeItem('servicesLastUpdate');
+        localStorage.removeItem('servicesUpdateType');
+        // Actualizar la lista
+        cachedApi.clearCacheFor('/services');
+        fetchServices();
+      }
+    };
+
+    // Verificar cambios cada 2 segundos
+    const interval = setInterval(checkLocalStorageChanges, 2000);
+
+    // Suscribirse a cambios en servicios
+    cachedApi.onServicesChanged(handleServicesChanged);
+
+    // Escuchar eventos personalizados también
+    window.addEventListener('servicesChanged', handleServicesChanged);
+
+    // Limpiar suscripción al desmontar
+    return () => {
+      clearInterval(interval);
+      cachedApi.offServicesChanged(handleServicesChanged);
+      window.removeEventListener('servicesChanged', handleServicesChanged);
+    };
+  }, []);
 
   const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setPagination(prev => ({ ...prev, page: value }));

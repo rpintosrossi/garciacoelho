@@ -12,6 +12,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import { Cancel } from '@mui/icons-material';
 import ClientLayout from '@/app/ClientLayout';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Trabajo {
   id: string;
@@ -33,7 +34,7 @@ export default function TechnicianTasksPage() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [tab, setTab] = useState<'pendientes' | 'conRemito'>('pendientes');
-  const [user, setUser] = useState<{name: string, email: string} | null>(null);
+  const { user } = useAuth();
   const [anularId, setAnularId] = useState<string | null>(null);
   const [anulando, setAnulando] = useState(false);
   const router = useRouter();
@@ -63,15 +64,6 @@ export default function TechnicianTasksPage() {
 
   useEffect(() => {
     fetchTrabajos();
-    // Obtener datos del usuario
-    const fetchUser = async () => {
-      try {
-        const res = await api.get('/auth/me');
-        setUser({ name: res.data.name, email: res.data.email });
-      } catch {}
-    };
-    fetchUser();
-    // eslint-disable-next-line
   }, [dateFilter, tab]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, trabajoId: string) => {

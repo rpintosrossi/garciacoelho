@@ -4,6 +4,9 @@ const prisma = new PrismaClient();
 // Registrar un pago y asociar a facturas o remitos
 const createPayment = async (req, res) => {
   try {
+    console.log('💰 [PAYMENT] Iniciando creación de pago...');
+    console.log('💰 [PAYMENT] Body recibido:', req.body);
+    
     const { 
       amount, 
       date, 
@@ -45,6 +48,17 @@ const createPayment = async (req, res) => {
     const comprobante = `PAGO-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`;
 
     // Crear el pago principal
+    console.log('💰 [PAYMENT] Creando pago con datos:', {
+      amount: montoFinal,
+      originalAmount: montoOriginal,
+      discount: montoDescuento,
+      discountReason: discountReason || null,
+      date: new Date(date),
+      paymentMethodId,
+      comprobante,
+      method: '',
+    });
+    
     const pago = await prisma.payment.create({
       data: {
         amount: montoFinal,
@@ -57,11 +71,14 @@ const createPayment = async (req, res) => {
         method: '',
       }
     });
+    
+    console.log('💰 [PAYMENT] Pago creado exitosamente:', pago.id);
 
     // Asociar documentos con sus montos específicos
     if (docsToAssociate && docsToAssociate.length > 0) {
+      console.log('💰 [PAYMENT] Asociando documentos:', docsToAssociate);
       for (const doc of docsToAssociate) {
-        await prisma.paymentDocument.create({
+        const paymentDoc = await prisma.paymentDocument.create({
           data: {
             paymentId: pago.id,
             invoiceId: doc.type === 'FACTURA' ? doc.id : null,
@@ -69,10 +86,17 @@ const createPayment = async (req, res) => {
             amount: parseFloat(doc.amount) || 0
           }
         });
+        console.log('💰 [PAYMENT] Documento asociado:', paymentDoc.id);
       }
+    } else {
+      console.log('💰 [PAYMENT] No hay documentos para asociar');
     }
 
-    res.status(201).json(pago);
+    res.status(201).json({
+      ...pago,
+      message: 'Pago registrado exitosamente',
+      documentsAssociated: docsToAssociate ? docsToAssociate.length : 0
+    });
   } catch (error) {
     console.error('Error al registrar pago:', error);
     res.status(500).json({ message: 'Error al registrar pago' });

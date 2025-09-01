@@ -31,6 +31,7 @@ import {
 } from 'recharts';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
+import { cachedApi } from '@/lib/axios';
 
 const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => (
   <Card sx={{
@@ -74,8 +75,8 @@ export default function DashboardPage() {
       setError(null);
       try {
         const [quickStatsRes, serviceStatsRes] = await Promise.all([
-          api.get('/dashboard/quick-stats'),
-          api.get('/services/stats')
+          cachedApi.get('/dashboard/quick-stats'),
+          cachedApi.get('/services/stats')
         ]);
         setStats(quickStatsRes.data);
         // Formatear datos para el gráfico

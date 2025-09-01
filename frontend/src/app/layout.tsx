@@ -5,6 +5,7 @@ import ThemeRegistry from "@/components/ThemeRegistry";
 import { Box } from "@mui/material";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ServiceCountsProvider } from '../hooks/useServiceCounts';
+import { CommonDataProvider } from '@/contexts/CommonDataContext';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -33,11 +34,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
         <AuthProvider>
-          <ServiceCountsProvider>
-            <ThemeRegistry>
-              {children}
-            </ThemeRegistry>
-          </ServiceCountsProvider>
+          <CommonDataProvider>
+            <ServiceCountsProvider>
+              <ThemeRegistry>
+                {children}
+              </ThemeRegistry>
+            </ServiceCountsProvider>
+          </CommonDataProvider>
         </AuthProvider>
       </body>
     </html>

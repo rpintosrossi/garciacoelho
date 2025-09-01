@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { cachedApi } from '@/lib/axios';
 
 interface BuildingDebtReport {
   buildingId: string;
@@ -54,10 +55,7 @@ export default function BuildingDebtReport() {
     try {
       setLoading(true);
       setError(null);
-      const token = localStorage.getItem('token');
-      const response = await api.get('/reports/building-debt', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await cachedApi.get('/reports/building-debt');
       setReports(response.data);
     } catch (err) {
       setError('Error al cargar el reporte de deuda de edificios');

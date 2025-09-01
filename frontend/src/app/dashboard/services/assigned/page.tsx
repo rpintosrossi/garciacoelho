@@ -21,6 +21,8 @@ import {
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import axios from '@/lib/axios';
+import { cachedApi } from '@/lib/axios';
+import { useCommonData } from '@/contexts/CommonDataContext';
 
 interface Service {
   id: string;
@@ -45,9 +47,8 @@ interface PaginationData {
 }
 
 export default function AssignedServices() {
+  const { administrators, buildings } = useCommonData();
   const [services, setServices] = useState<Service[]>([]);
-  const [administrators, setAdministrators] = useState<any[]>([]);
-  const [buildings, setBuildings] = useState<any[]>([]);
   const [selectedAdmin, setSelectedAdmin] = useState<any | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,16 +76,10 @@ export default function AssignedServices() {
         queryParams.append('buildingId', selectedBuilding.id);
       }
 
-      const [servicesRes, adminsRes, buildingsRes] = await Promise.all([
-        axios.get(`/services?${queryParams}`),
-        axios.get('/administrators'),
-        axios.get('/buildings'),
-      ]);
+      const servicesRes = await cachedApi.get(`/services?${queryParams}`);
 
       setServices(servicesRes.data.services);
       setPagination(servicesRes.data.pagination);
-      setAdministrators(adminsRes.data);
-      setBuildings(buildingsRes.data);
       setError(null);
     } catch (err) {
       setError('Error al cargar los datos');

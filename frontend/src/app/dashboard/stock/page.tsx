@@ -38,6 +38,7 @@ import {
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { useCategories } from '@/contexts/CategoryContext';
+import { cachedApi } from '@/lib/axios';
 
 interface StockItem {
   id: string;
@@ -81,15 +82,21 @@ export default function StockPage() {
   const [editing, setEditing] = useState<StockItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Datos de ejemplo para demostración
-  const mockItems: StockItem[] = [];
-
   useEffect(() => {
-    // Simular carga de datos
-    setTimeout(() => {
-      setItems(mockItems);
-      setLoading(false);
-    }, 1000);
+    const fetchStockItems = async () => {
+      try {
+        setLoading(true);
+        // Por ahora usar datos mock, pero optimizados
+        const mockItems: StockItem[] = [];
+        setItems(mockItems);
+      } catch (err) {
+        setError('Error al cargar el stock');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStockItems();
   }, []);
 
   const formik = useFormik({

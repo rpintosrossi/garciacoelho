@@ -21,9 +21,7 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { useRouter } from 'next/navigation';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { es } from 'date-fns/locale';
+
 import api from '@/lib/axios';
 
 interface Building {
@@ -148,10 +146,27 @@ export default function NewService() {
         setActiveStep((prev) => prev + 1);
       } else if (activeStep === 2 && serviceId) {
         // Paso 3: Subir remito
-        // Aquí deberías subir la imagen y obtener la URL real
-        await api.post(`/services/${serviceId}/receipt`, {
-          receiptImage: currentData.receiptImage || 'URL_DE_LA_IMAGEN',
+        if (!receiptImage) {
+          setError('Debes seleccionar una imagen del remito');
+          return;
+        }
+        
+        // Crear FormData para enviar el archivo
+        const formData = new FormData();
+        formData.append('receipts', receiptImage);
+        
+        // Usar api.post directamente para archivos
+        await api.post(`/services/${serviceId}/receipt`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
         });
+        
+        // Notificar cambio manualmente después de subir el archivo
+        // Usar localStorage para notificar cambios entre páginas
+        localStorage.setItem('servicesLastUpdate', Date.now().toString());
+        localStorage.setItem('servicesUpdateType', 'receipt_uploaded');
+        
         setActiveStep((prev) => prev + 1);
       } else if (activeStep === 3 && serviceId) {
         // Paso 4: Facturación (puedes implementar el endpoint si lo necesitas)
@@ -241,20 +256,18 @@ export default function NewService() {
                 disabled={technicians.length === 0}
               />
             </FormControl>
-            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={es}>
-              <DateTimePicker
-                label="Fecha y hora de visita"
-                value={visitDate}
-                onChange={handleVisitDateChange}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    error: !!errors.visitDate,
-                    helperText: errors.visitDate?.message,
-                  },
-                }}
-              />
-            </LocalizationProvider>
+            <DateTimePicker
+              label="Fecha y hora de visita"
+              value={visitDate}
+              onChange={handleVisitDateChange}
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  error: !!errors.visitDate,
+                  helperText: errors.visitDate?.message,
+                },
+              }}
+            />
           </>
         );
       case 2:

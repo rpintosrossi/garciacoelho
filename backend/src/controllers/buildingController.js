@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 // Obtener todos los edificios
 const getBuildings = async (req, res) => {
   try {
+    // Obtener edificios con administrador y cuenta en una sola consulta
     const buildings = await prisma.building.findMany({
       include: {
         administrator: true,
@@ -11,54 +12,102 @@ const getBuildings = async (req, res) => {
       }
     });
 
-    // Calcular el saldo real para cada edificio
+    // Obtener todos los servicios, facturas y remitos en consultas separadas optimizadas
+    const allServices = await prisma.service.findMany({
+      where: {
+        buildingId: { in: buildings.map(b => b.id) }
+      },
+      include: {
+        invoice: true,
+        remitos: true
+      }
+    });
+
+    // Obtener todos los payment documents en una sola consulta
+    const allPaymentDocs = await prisma.paymentDocument.findMany({
+      where: {
+        OR: [
+          { invoiceId: { in: allServices.map(s => s.invoice?.id).filter(Boolean) } },
+          { remitoId: { in: allServices.flatMap(s => s.remitos.map(r => r.id)) } }
+        ]
+      },
+      include: { payment: true }
+    });
+
+    // Crear mapas para acceso rápido
+    const servicesByBuilding = allServices.reduce((acc, service) => {
+      if (!acc[service.buildingId]) acc[service.buildingId] = [];
+      acc[service.buildingId].push(service);
+      return acc;
+    }, {});
+
+    const paymentDocsByInvoice = allPaymentDocs.reduce((acc, pd) => {
+      if (pd.invoiceId) {
+        if (!acc[pd.invoiceId]) acc[pd.invoiceId] = [];
+        acc[pd.invoiceId].push(pd);
+      }
+      return acc;
+    }, {});
+
+    const paymentDocsByRemito = allPaymentDocs.reduce((acc, pd) => {
+      if (pd.remitoId) {
+        if (!acc[pd.remitoId]) acc[pd.remitoId] = [];
+        acc[pd.remitoId].push(pd);
+      }
+      return acc;
+    }, {});
+
+    // Calcular saldos para cada edificio
     const buildingsWithBalance = await Promise.all(buildings.map(async (building) => {
-      // Obtener servicios del edificio
-      const services = await prisma.service.findMany({
-        where: { buildingId: building.id },
-        include: {
-          invoice: true,
-          remitos: true
-        }
-      });
-      const invoices = services.map(s => s.invoice).filter(Boolean);
-      const invoiceIds = invoices.map(inv => inv.id);
-      const remitos = services.flatMap(s => s.remitos);
-      const remitoIds = remitos.map(r => r.id);
+      const buildingServices = servicesByBuilding[building.id] || [];
+      const invoices = buildingServices.map(s => s.invoice).filter(Boolean);
+      const remitos = buildingServices.flatMap(s => s.remitos);
 
-      // Buscar PaymentDocuments asociados a facturas y remitos de este edificio
-      const paymentDocs = await prisma.paymentDocument.findMany({
-        where: {
-          OR: [
-            { invoiceId: { in: invoiceIds } },
-            { remitoId: { in: remitoIds } }
-          ]
-        },
-        include: { payment: true }
-      });
-
-      // Calcular saldo normalmente (descuentos no afectan el cálculo de deuda pendiente)
+      // Calcular saldo usando la misma lógica que la cuenta corriente
       let saldo = 0;
       
-      // Sumar todas las facturas y remitos
+      // Sumar todas las facturas (como en la cuenta corriente)
       for (const inv of invoices) {
-        if (inv) saldo += inv.amount;
-      }
-      for (const rem of remitos) {
-        saldo += rem.amount;
+        saldo += inv.amount;
       }
       
-      // Restar todos los pagos usando el monto original del pago
-      for (const pd of paymentDocs) {
-        const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
-        saldo -= montoOriginalPago;
+      // Restar todos los pagos (como en la cuenta corriente)
+      for (const inv of invoices) {
+        const paymentDocs = paymentDocsByInvoice[inv.id] || [];
+        for (const pd of paymentDocs) {
+          const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
+          saldo -= montoOriginalPago;
+        }
       }
 
-      // Actualizar el saldo en la cuenta
-      await prisma.account.update({
-        where: { buildingId: building.id },
-        data: { balance: saldo }
-      });
+      // DEBUG: Agregar logs para identificar la discrepancia
+      console.log(`🔍 [DEBUG] Edificio ${building.name} (${building.id}):`);
+      console.log(`  - Facturas: ${invoices.length}, Total: ${invoices.reduce((sum, inv) => sum + inv.amount, 0)}`);
+      console.log(`  - Remitos: ${remitos.length}, Total: ${remitos.reduce((sum, rem) => sum + rem.amount, 0)} (NO incluidos en saldo)`);
+      
+      let totalPagos = 0;
+      let facturasEfectivo = 0;
+      for (const inv of invoices) {
+        if (inv.paymentMethod === 'EFECTIVO') {
+          facturasEfectivo++;
+          console.log(`  - Factura en efectivo: ${inv.id}, monto: ${inv.amount}`);
+        }
+        const paymentDocs = paymentDocsByInvoice[inv.id] || [];
+        for (const pd of paymentDocs) {
+          totalPagos += (pd.payment.originalAmount || pd.payment.amount);
+        }
+      }
+      console.log(`  - Facturas en efectivo: ${facturasEfectivo}`);
+      console.log(`  - Pagos totales (incluyendo efectivo): ${totalPagos}`);
+      console.log(`  - Saldo calculado: ${saldo}`);
+
+      // Actualizar el saldo en la cuenta solo si es diferente
+      if (building.account && Math.abs(building.account.balance - saldo) > 0.01) {
+        await prisma.account.update({
+          where: { buildingId: building.id },
+          data: { balance: saldo }
+        });
+      }
 
       return {
         ...building,
@@ -102,7 +151,24 @@ const getBuildingById = async (req, res) => {
 // Crear un nuevo edificio
 const createBuilding = async (req, res) => {
   try {
-    const { name, address, cuit, contact, taxCondition, administratorId } = req.body;
+    const { 
+      name, 
+      address, 
+      cuit, 
+      contact, 
+      taxCondition, 
+      administratorId,
+      debtThreshold,
+      rating,
+      managerPhone,
+      generalInfo,
+      doormanType,
+      floors,
+      apartments,
+      phones,
+      phoneNames,
+      locality
+    } = req.body;
 
     // Verificar que el administrador existe
     const administrator = await prisma.administrator.findUnique({
@@ -133,6 +199,16 @@ const createBuilding = async (req, res) => {
         contact,
         taxCondition,
         administratorId,
+        debtThreshold: debtThreshold || 30,
+        rating: rating || 1,
+        managerPhone,
+        generalInfo,
+        doormanType,
+        floors,
+        apartments,
+        phones: phones || [],
+        phoneNames: phoneNames || [],
+        locality,
         account: {
           create: {
             balance: 0
@@ -156,7 +232,24 @@ const createBuilding = async (req, res) => {
 const updateBuilding = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, address, cuit, contact, taxCondition, administratorId } = req.body;
+    const { 
+      name, 
+      address, 
+      cuit, 
+      contact, 
+      taxCondition, 
+      administratorId,
+      debtThreshold,
+      rating,
+      managerPhone,
+      generalInfo,
+      doormanType,
+      floors,
+      apartments,
+      phones,
+      phoneNames,
+      locality
+    } = req.body;
 
     // Verificar que el administrador existe si se está cambiando
     if (administratorId) {
@@ -192,7 +285,17 @@ const updateBuilding = async (req, res) => {
         cuit,
         contact,
         taxCondition,
-        administratorId
+        administratorId,
+        debtThreshold,
+        rating,
+        managerPhone,
+        generalInfo,
+        doormanType,
+        floors,
+        apartments,
+        phones,
+        phoneNames,
+        locality
       },
       include: {
         administrator: true,
@@ -548,6 +651,308 @@ const getPendingInvoices = async (req, res) => {
   }
 };
 
+// Obtener localidades disponibles para edificios
+const getAvailableLocalities = async (req, res) => {
+  try {
+    const localities = await prisma.zoneLocality.findMany({
+      select: {
+        locality: true
+      },
+      orderBy: {
+        locality: 'asc'
+      }
+    });
+
+    // Obtener localidades únicas
+    const uniqueLocalities = [...new Set(localities.map(l => l.locality))];
+    
+    res.json(uniqueLocalities);
+  } catch (error) {
+    console.error('Error al obtener localidades disponibles:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Obtener detalles de cuenta corriente de un edificio específico
+const getBuildingAccountDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Verificar que el edificio existe
+    const building = await prisma.building.findUnique({
+      where: { id },
+      include: {
+        administrator: true,
+        account: true
+      }
+    });
+
+    if (!building) {
+      return res.status(404).json({ message: 'Edificio no encontrado' });
+    }
+
+    // Obtener todos los servicios del edificio
+    const services = await prisma.service.findMany({
+      where: { buildingId: id },
+      include: {
+        invoice: true,
+        technician: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    // Obtener todas las facturas del edificio (incluyendo las de efectivo)
+    const invoices = services.map(s => s.invoice).filter(Boolean);
+    const invoiceIds = invoices.map(inv => inv.id);
+
+    // Obtener todos los pagos asociados a las facturas de este edificio
+    const paymentDocs = await prisma.paymentDocument.findMany({
+      where: {
+        invoiceId: { in: invoiceIds }
+      },
+      include: {
+        payment: {
+          include: {
+            paymentMethod: true
+          }
+        },
+        invoice: true
+      },
+      orderBy: {
+        payment: {
+          createdAt: 'asc'
+        }
+      }
+    });
+
+    // Crear un mapa de facturas con sus pagos asociados
+    const invoicesWithPayments = invoices.map(invoice => {
+      const associatedPayments = paymentDocs
+        .filter(pd => pd.invoiceId === invoice.id)
+        .map(pd => pd.payment);
+      
+      // Para facturas con método de pago EFECTIVO, considerar que ya están pagadas
+      const isEfectivo = invoice.paymentMethod === 'EFECTIVO';
+      const totalPaid = isEfectivo ? invoice.amount : associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
+      const remaining = isEfectivo ? 0 : invoice.amount - associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
+      
+      const result = {
+        id: invoice.id,
+        type: 'invoice',
+        amount: invoice.amount,
+        status: isEfectivo ? 'PAGADO' : invoice.status,
+        paymentMethod: invoice.paymentMethod,
+        createdAt: invoice.createdAt,
+        service: services.find(s => s.invoice?.id === invoice.id),
+        payments: associatedPayments,
+        totalPaid: totalPaid,
+        remaining: remaining,
+        isEfectivo: isEfectivo
+      };
+      
+      console.log('🔍 [BACKEND] Factura procesada:', {
+        id: result.id,
+        paymentMethod: result.paymentMethod,
+        isEfectivo: result.isEfectivo,
+        status: result.status
+      });
+      
+      return result;
+    });
+
+    // Crear un array cronológico de todas las transacciones
+    const allTransactions = [];
+    
+    invoicesWithPayments.forEach(invoice => {
+      // Agregar la factura
+      const transactionToAdd = {
+        ...invoice,
+        displayType: 'invoice'
+      };
+      
+      console.log('🔍 [BACKEND] Agregando transacción:', {
+        id: transactionToAdd.id,
+        displayType: transactionToAdd.displayType,
+        paymentMethod: transactionToAdd.paymentMethod,
+        isEfectivo: transactionToAdd.paymentMethod === 'EFECTIVO'
+      });
+      
+      allTransactions.push(transactionToAdd);
+      
+      // Solo agregar pagos adicionales si NO es una factura en efectivo
+      // (las facturas en efectivo ya están consideradas como pagadas)
+      if (!invoice.isEfectivo) {
+        invoice.payments.forEach(payment => {
+          allTransactions.push({
+            id: payment.id,
+            type: 'payment',
+            amount: payment.originalAmount || payment.amount,
+            status: 'PAGADO',
+            createdAt: payment.createdAt,
+            comprobante: payment.comprobante,
+            paymentMethod: payment.paymentMethod,
+            discount: payment.discount,
+            discountReason: payment.discountReason,
+            associatedInvoiceId: invoice.id,
+            displayType: 'payment'
+          });
+        });
+      }
+    });
+
+    // Ordenar por fecha de creación
+    allTransactions.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    // Calcular saldo actual
+    const totalInvoices = invoices.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalPayments = paymentDocs.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
+    const currentBalance = totalInvoices - totalPayments;
+
+    // DEBUG: Agregar logs para comparar con los listados
+    console.log(`🔍 [DEBUG] Cuenta corriente edificio ${building.name} (${id}):`);
+    console.log(`  - Facturas: ${invoices.length}, Total: ${totalInvoices}`);
+    console.log(`  - Pagos totales: ${totalPayments}`);
+    console.log(`  - Saldo calculado: ${currentBalance}`);
+
+    console.log('🔍 [BACKEND] Enviando respuesta final:', {
+      totalTransactions: allTransactions.length,
+      sampleTransaction: allTransactions[0] ? {
+        id: allTransactions[0].id,
+        displayType: allTransactions[0].displayType,
+        paymentMethod: allTransactions[0].paymentMethod
+      } : null
+    });
+    
+    res.json({
+      building,
+      transactions: allTransactions,
+      summary: {
+        totalInvoices,
+        totalPayments,
+        currentBalance,
+        totalTransactions: allTransactions.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener detalles de cuenta del edificio:', error);
+    res.status(500).json({ message: 'Error al obtener detalles de cuenta del edificio' });
+  }
+};
+
+// Registrar pago para un edificio específico
+const createBuildingPayment = async (req, res) => {
+  try {
+    const {
+      buildingId,
+      invoiceId,
+      remitoId,
+      paymentMethodId,
+      amount,
+      date,
+      comprobante,
+      discount,
+      discountReason,
+      documents
+    } = req.body;
+
+    // Verificar que el edificio existe
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId }
+    });
+
+    if (!building) {
+      return res.status(404).json({ message: 'Edificio no encontrado' });
+    }
+
+    // Verificar que la factura o el remito existe
+    let invoiceOrRemito;
+    if (invoiceId) {
+      invoiceOrRemito = await prisma.invoice.findUnique({
+        where: { id: invoiceId }
+      });
+    } else if (remitoId) {
+      invoiceOrRemito = await prisma.remito.findUnique({
+        where: { id: remitoId }
+      });
+    } else {
+      return res.status(400).json({ message: 'Debe especificar invoiceId o remitoId' });
+    }
+
+    if (!invoiceOrRemito) {
+      return res.status(404).json({ message: 'Factura o Remito no encontrado' });
+    }
+
+    // Verificar que el método de pago existe
+    const paymentMethod = await prisma.paymentMethod.findUnique({
+      where: { id: paymentMethodId }
+    });
+
+    if (!paymentMethod) {
+      return res.status(404).json({ message: 'Método de pago no encontrado' });
+    }
+
+    // Verificar que el monto es positivo
+    if (amount <= 0) {
+      return res.status(400).json({ message: 'El monto del pago debe ser positivo' });
+    }
+
+    // Verificar que el monto no excede el saldo pendiente de la factura/remito
+    const paymentDocuments = await prisma.paymentDocument.findMany({
+      where: {
+        invoiceId: invoiceId,
+        remitoId: remitoId
+      },
+      include: {
+        payment: true
+      }
+    });
+
+    const totalPaid = paymentDocuments.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
+    const remaining = invoiceOrRemito.amount - totalPaid;
+
+    if (amount > remaining) {
+      return res.status(400).json({ message: `El monto del pago (${formatCurrency(amount)}) excede el saldo pendiente (${formatCurrency(remaining)})` });
+    }
+
+    // Crear el documento de pago
+    const paymentDocument = await prisma.paymentDocument.create({
+      data: {
+        invoiceId: invoiceId,
+        remitoId: remitoId,
+        payment: {
+          create: {
+            paymentMethodId: paymentMethodId,
+            amount: amount,
+            date: date,
+            comprobante: comprobante,
+            discount: discount,
+            discountReason: discountReason,
+            documents: documents || []
+          }
+        }
+      },
+      include: {
+        payment: true
+      }
+    });
+
+    // Actualizar el saldo de la cuenta del edificio
+    const newBalance = building.account.balance - amount;
+    await prisma.account.update({
+      where: { buildingId: buildingId },
+      data: { balance: newBalance }
+    });
+
+    res.status(201).json(paymentDocument);
+  } catch (error) {
+    console.error('Error al registrar pago:', error);
+    res.status(500).json({ message: 'Error al registrar pago' });
+  }
+};
+
 module.exports = {
   getBuildings,
   getBuildingById,
@@ -556,5 +961,8 @@ module.exports = {
   deleteBuilding,
   getBuildingAccount,
   getBuildingAccountMovements,
-  getPendingInvoices
+  getPendingInvoices,
+  getAvailableLocalities,
+  getBuildingAccountDetails,
+  createBuildingPayment
 }; 

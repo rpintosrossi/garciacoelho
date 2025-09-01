@@ -4,34 +4,30 @@ const prisma = new PrismaClient();
 
 const authMiddleware = async (req, res, next) => {
   try {
-    console.log('[AUTH MIDDLEWARE] Nueva petición recibida');
-    console.log('[AUTH MIDDLEWARE] Método:', req.method);
-    console.log('[AUTH MIDDLEWARE] URL:', req.originalUrl);
-    console.log('[AUTH MIDDLEWARE] Headers:', req.headers);
+    // Solo log en desarrollo y para rutas importantes
+    if (process.env.NODE_ENV === 'development' && 
+        (req.originalUrl.includes('/auth/me') || req.originalUrl.includes('/auth/login'))) {
+      console.log('[AUTH MIDDLEWARE] Petición:', req.method, req.originalUrl);
+    }
     
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('[AUTH MIDDLEWARE] No token provided or invalid format');
       return res.status(401).json({ message: 'No token provided' });
     }
 
     const token = authHeader.split(' ')[1];
-    console.log('[AUTH MIDDLEWARE] Token recibido:', token);
     
     if (!token) {
-      console.log('[AUTH MIDDLEWARE] No token provided');
       return res.status(401).json({ message: 'No token provided' });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('[AUTH MIDDLEWARE] Token decodificado:', decoded);
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId }
     });
 
     if (!user) {
-      console.log('[AUTH MIDDLEWARE] User not found');
       return res.status(401).json({ message: 'User not found' });
     }
 
@@ -43,31 +39,30 @@ const authMiddleware = async (req, res, next) => {
         req.user.technicianId = technician.id;
       }
     }
-    console.log('[AUTH MIDDLEWARE] Usuario autenticado:', req.user);
     next();
   } catch (error) {
-    console.log('[AUTH MIDDLEWARE] Error:', error);
+    console.error('[AUTH MIDDLEWARE] Error:', error.message);
     if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ message: 'Invalid token' });
+      return res.status(401).json({ message: 'Token inválido' });
     }
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token expired' });
+      return res.status(401).json({ message: 'Token expirado' });
     }
-    return res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: 'Error en la autenticación' });
   }
 };
 
 const roleMiddleware = (roles) => {
   return (req, res, next) => {
-    console.log('[ROLE] Usuario:', req.user, 'Rol requerido:', roles);
+    // Solo log en desarrollo y cuando hay un error de autorización
     if (!roles.includes(req.user.role)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[ROLE] Acceso denegado - Usuario:', req.user.email, 'Rol:', req.user.role, 'Requerido:', roles);
+      }
       return res.status(403).json({ message: 'Unauthorized role' });
     }
     next();
   };
 };
 
-module.exports = {
-  authMiddleware,
-  roleMiddleware
-}; 
+module.exports = { authMiddleware, roleMiddleware }; 

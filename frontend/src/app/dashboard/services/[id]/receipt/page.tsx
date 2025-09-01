@@ -31,7 +31,8 @@ export default function ReceiptPage() {
   const [administrators, setAdministrators] = useState<any[]>([]);
   const [selectedAdmin, setSelectedAdmin] = useState<any | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
-  const [receiptImage, setReceiptImage] = useState<File | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [remitoNumber, setRemitoNumber] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -65,28 +66,50 @@ export default function ReceiptPage() {
     setSelectedBuilding(building);
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setReceiptImage(file);
+      // Validar tipo de archivo
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Solo se permiten archivos JPG y PDF');
+        return;
+      }
+      
+      // Validar tamaño (máximo 10MB)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (file.size > maxSize) {
+        setError('El archivo es demasiado grande. Máximo 10MB');
+        return;
+      }
+      
+      setReceiptFile(file);
+      setError('');
     }
   };
 
   const handleSave = async () => {
-    if (!receiptImage) {
-      setError('Debes subir una imagen del remito');
+    if (!receiptFile) {
+      setError('Debes subir un archivo del remito');
       return;
     }
+    
     setSaving(true);
     setError('');
     try {
-      // Aquí deberías subir la imagen y obtener la URL real
-      await api.post(`/services/${id}/receipt`, {
-        receiptImage: 'URL_DE_LA_IMAGEN',
+      const formData = new FormData();
+      formData.append('receipts', receiptFile);
+      formData.append('remitoNumber', remitoNumber.trim());
+      
+      await api.post(`/services/${id}/receipt`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
-      router.push('/dashboard/services/receipt');
-    } catch (err) {
-      setError('Error al subir el remito');
+      router.push('/dashboard/services/invoiced');
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.message || 'Error al subir el remito';
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -139,29 +162,51 @@ export default function ReceiptPage() {
         <Typography variant="subtitle1"><b>Edificio:</b> {service?.building?.name}</Typography>
         <Typography variant="subtitle1"><b>Descripción:</b> {service?.description}</Typography>
       </Paper>
-      <input
-        accept="image/*"
-        type="file"
-        onChange={handleImageUpload}
-        style={{ display: 'none' }}
-        id="receipt-image"
-      />
-      <label htmlFor="receipt-image">
-        <Button variant="contained" component="span">
-          Subir imagen del remito
-        </Button>
-      </label>
-      {receiptImage && (
-        <Typography variant="body2" color="success.main">
-          Imagen cargada: {receiptImage.name}
-        </Typography>
-      )}
+      
+      <Stack spacing={3}>
+        {/* Campo de número de remito */}
+        <TextField
+          label="Número de Remito (opcional)"
+          value={remitoNumber}
+          onChange={(e) => setRemitoNumber(e.target.value)}
+          fullWidth
+          placeholder="Ej: REM-2024-001 o A12345 (se generará automáticamente si no ingresas uno)"
+          helperText="Ingresa el número de remito o déjalo vacío para generar uno automáticamente"
+        />
+        
+        {/* Subida de archivo */}
+        <Box>
+          <input
+            accept=".jpg,.jpeg,.pdf"
+            type="file"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+            id="receipt-file"
+          />
+          <label htmlFor="receipt-file">
+            <Button variant="contained" component="span">
+              📄 Subir Remito (JPG o PDF)
+            </Button>
+          </label>
+          {receiptFile && (
+            <Box mt={1}>
+              <Typography variant="body2" color="success.main">
+                ✅ Archivo cargado: {receiptFile.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Tipo: {receiptFile.type} | Tamaño: {(receiptFile.size / 1024 / 1024).toFixed(2)} MB
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Stack>
+      
       <Box mt={3} display="flex" justifyContent="flex-end">
         <Button
           variant="contained"
           color="primary"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !receiptFile}
         >
           Guardar Remito
         </Button>

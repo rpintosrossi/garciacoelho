@@ -17,11 +17,17 @@ import {
   Autocomplete,
   TextField,
   Pagination,
-  Stack
+  Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
-import axios from '@/lib/axios';
+import api from '@/lib/axios';
 import { useServiceCounts } from '@/hooks/useServiceCounts';
+import { cachedApi } from '@/lib/axios';
+import { useCommonData } from '@/contexts/CommonDataContext';
 
 interface Service {
   id: string;
@@ -49,9 +55,9 @@ interface PaginationData {
 }
 
 export default function ServicesWithReceipt() {
+  const router = useRouter();
+  const { administrators, buildings } = useCommonData();
   const [services, setServices] = useState<Service[]>([]);
-  const [administrators, setAdministrators] = useState<any[]>([]);
-  const [buildings, setBuildings] = useState<any[]>([]);
   const [selectedAdmin, setSelectedAdmin] = useState<any | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +70,12 @@ export default function ServicesWithReceipt() {
     totalPages: 0
   });
   const { refreshCounts } = useServiceCounts();
+
+  // Estados para el modal de subida de remito
+  const [remitoModalOpen, setRemitoModalOpen] = useState(false);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [remitoNumber, setRemitoNumber] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const fetchServices = async () => {
     try {
@@ -80,16 +92,10 @@ export default function ServicesWithReceipt() {
         queryParams.append('buildingId', selectedBuilding.id);
       }
 
-      const [servicesRes, adminsRes, buildingsRes] = await Promise.all([
-        axios.get(`/services?${queryParams}`),
-        axios.get('/administrators'),
-        axios.get('/buildings'),
-      ]);
+      const servicesRes = await cachedApi.get(`/services?${queryParams}`);
 
       setServices(servicesRes.data.services);
       setPagination(servicesRes.data.pagination);
-      setAdministrators(adminsRes.data);
-      setBuildings(buildingsRes.data);
       setError(null);
     } catch (err) {
       setError('Error al cargar los datos');
@@ -102,31 +108,101 @@ export default function ServicesWithReceipt() {
     fetchServices();
   }, [pagination.page, selectedAdmin, selectedBuilding]);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>, serviceId: string) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) {
-      setError('Debes seleccionar al menos un archivo');
+  const handleUploadClick = (service: Service) => {
+    setSelectedService(service);
+    setRemitoNumber('');
+    setSelectedFile(null);
+    setRemitoModalOpen(true);
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validar tipo de archivo
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Solo se permiten archivos JPG y PDF');
+        return;
+      }
+      
+      // Validar tamaño (máximo 10MB)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (file.size > maxSize) {
+        setError('El archivo es demasiado grande. Máximo 10MB');
+        return;
+      }
+      
+      setSelectedFile(file);
+      setError('');
+    }
+  };
+
+  const handleUploadRemito = async () => {
+    if (!selectedService || !selectedFile) {
+      setError('Debes seleccionar un archivo');
       return;
     }
-    setUploadingId(serviceId);
+
+    setUploadingId(selectedService.id);
     setError('');
+    
     try {
       const formData = new FormData();
-      Array.from(files).forEach((file) => {
-        formData.append('receipts', file);
-      });
-      await axios.post(`/services/${serviceId}/receipt`, formData, {
+      formData.append('receipts', selectedFile);
+      formData.append('remitoNumber', remitoNumber.trim());
+      
+      const response = await api.post(`/services/${selectedService.id}/receipt`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
-      fetchServices(); // Recargar los servicios después de subir el remito
+      
+      console.log('Respuesta exitosa:', response);
+      console.log('Respuesta data:', response.data);
+      
+      console.log('Cerrando modal...');
+      setRemitoModalOpen(false);
+      setRemitoNumber('');
+      setSelectedFile(null);
+      
+      console.log('Actualizando servicios...');
+      await fetchServices();
+      
+      console.log('Actualizando conteos...');
       await refreshCounts();
-    } catch (err) {
-      setError('Error al subir el remito');
+      
+      console.log('Redirigiendo a facturación...');
+      // Redirigir a la página de facturación
+      const serviceId = selectedService.id;
+      setSelectedService(null);
+      router.push('/dashboard/services/invoiced');
+    } catch (err: any) {
+      console.error('Error completo:', err);
+      console.error('Error response:', err.response);
+      console.error('Error data:', err.response?.data);
+      console.error('Error message:', err.message);
+      console.error('Error name:', err.name);
+      
+      let errorMessage = 'Error al subir el remito';
+      
+      if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setUploadingId(null);
     }
+  };
+
+  const handleCloseModal = () => {
+    setRemitoModalOpen(false);
+    setSelectedService(null);
+    setRemitoNumber('');
+    setSelectedFile(null);
+    setError('');
   };
 
   const handleAdminChange = (_: any, newValue: any) => {
@@ -215,24 +291,14 @@ export default function ServicesWithReceipt() {
                 <TableCell>{service.technician?.name}</TableCell>
                 <TableCell>{new Date(service.createdAt).toLocaleDateString()}</TableCell>
                 <TableCell>
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    style={{ display: 'none' }}
-                    id={`upload-remito-${service.id}`}
-                    multiple
-                    onChange={(e) => handleFileChange(e, service.id)}
-                  />
-                  <label htmlFor={`upload-remito-${service.id}`}>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      component="span"
-                      disabled={uploadingId === service.id}
-                    >
-                      Subir Remito
-                    </Button>
-                  </label>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => handleUploadClick(service)}
+                    disabled={uploadingId === service.id}
+                  >
+                    Subir Remito
+                  </Button>
                   {uploadingId === service.id && (
                     <CircularProgress size={20} sx={{ ml: 2 }} />
                   )}
@@ -252,6 +318,65 @@ export default function ServicesWithReceipt() {
           />
         </Box>
       )}
+
+      {/* Modal para subir remito */}
+      <Dialog open={remitoModalOpen} onClose={handleCloseModal} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Subir Remito - {selectedService?.building?.name}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              <b>Descripción:</b> {selectedService?.description}
+            </Typography>
+            
+            <TextField
+              label="Número de Remito (opcional)"
+              value={remitoNumber}
+              onChange={(e) => setRemitoNumber(e.target.value)}
+              fullWidth
+              placeholder="Ej: REM-2024-001 o A12345 (se generará automáticamente si no ingresas uno)"
+              helperText="Ingresa el número de remito o déjalo vacío para generar uno automáticamente"
+              sx={{ mb: 2 }}
+            />
+            
+            <Box>
+              <input
+                accept=".jpg,.jpeg,.pdf"
+                type="file"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+                id="remito-file-input"
+              />
+              <label htmlFor="remito-file-input">
+                <Button variant="contained" component="span">
+                  📄 Seleccionar Archivo (JPG o PDF)
+                </Button>
+              </label>
+              {selectedFile && (
+                <Box mt={1}>
+                  <Typography variant="body2" color="success.main">
+                    ✅ Archivo seleccionado: {selectedFile.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Tipo: {selectedFile.type} | Tamaño: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseModal}>Cancelar</Button>
+          <Button 
+            onClick={handleUploadRemito} 
+            variant="contained"
+            disabled={!selectedFile || uploadingId === selectedService?.id}
+          >
+            {uploadingId === selectedService?.id ? 'Subiendo...' : 'Subir Remito'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 } 

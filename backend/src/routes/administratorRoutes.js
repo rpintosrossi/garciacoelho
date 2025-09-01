@@ -8,7 +8,8 @@ const {
   deleteAdministrator,
   getBuildingsBalances,
   getPendingInvoicesForAdmin,
-  createAdminMassivePayment
+  createAdminMassivePayment,
+  getBuildingAccountDetails
 } = require('../controllers/administratorController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 
@@ -24,5 +25,8 @@ router.delete('/:id', roleMiddleware(['ADMIN', 'OPERADOR']), deleteAdministrator
 router.get('/:id/buildings-balances', roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingsBalances);
 router.get('/:id/pending-invoices', roleMiddleware(['ADMIN', 'OPERADOR']), getPendingInvoicesForAdmin);
 router.post('/:id/massive-payment', roleMiddleware(['ADMIN', 'OPERADOR']), createAdminMassivePayment);
+
+// Ruta para obtener detalles de cuenta de un edificio específico
+router.get('/buildings/:buildingId/account-details', roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingAccountDetails);
 
 module.exports = router; 

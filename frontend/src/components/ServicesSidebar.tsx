@@ -15,10 +15,11 @@ import {
   Person as PersonIcon,
   Receipt as ReceiptIcon,
   AttachMoney as MoneyIcon,
+  PictureAsPdf as PackageIcon,
   ExpandLess,
   ExpandMore,
 } from '@mui/icons-material';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useServiceCounts } from '../hooks/useServiceCounts';
 
 interface ServiceCount {
@@ -32,6 +33,7 @@ export default function ServicesSidebar() {
   const [open, setOpen] = useState(true);
   const { counts, refreshCounts } = useServiceCounts();
   const router = useRouter();
+  const pathname = usePathname();
 
   const handleClick = () => {
     setOpen(!open);
@@ -65,6 +67,13 @@ export default function ServicesSidebar() {
       count: counts.conRemito,
       path: '/dashboard/services/invoiced',
       status: 'CON_REMITO',
+    },
+    {
+      text: 'Paquete',
+      icon: <PackageIcon sx={{ color: '#d32f2f' }} />,
+      count: 0,
+      path: '/dashboard/services/package',
+      status: 'FACTURADO',
     },
   ];
 
@@ -106,8 +115,17 @@ export default function ServicesSidebar() {
           {menuItems.map((item) => (
             <ListItem key={item.text} disablePadding>
               <ListItemButton
+                selected={pathname === item.path}
                 sx={{ 
                   pl: 4,
+                  '&.Mui-selected': {
+                    backgroundColor: 'rgba(33, 150, 243, 0.08)',
+                    borderLeft: '3px solid',
+                    borderLeftColor: item.icon.props.sx.color,
+                    '&:hover': {
+                      backgroundColor: 'rgba(33, 150, 243, 0.12)',
+                    },
+                  },
                   '&:hover': {
                     backgroundColor: 'rgba(0, 0, 0, 0.04)',
                   },
@@ -119,6 +137,8 @@ export default function ServicesSidebar() {
                   primary={item.text}
                   primaryTypographyProps={{
                     fontSize: '0.9rem',
+                    fontWeight: pathname === item.path ? 600 : 400,
+                    color: pathname === item.path ? 'primary.main' : 'inherit',
                   }}
                 />
                 {item.count > 0 && (

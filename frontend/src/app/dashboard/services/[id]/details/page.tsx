@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Box, Typography, Paper, Chip, CircularProgress, Alert, Stack, Divider } from "@mui/material";
+import FileViewer from '@/components/FileViewer';
 import api from '@/lib/axios';
 
 export default function ServiceDetailsPage() {
@@ -68,9 +69,13 @@ export default function ServiceDetailsPage() {
                 {remito.receiptImages && remito.receiptImages.length > 0 && (
                   <Stack direction="row" spacing={1} mt={1}>
                     {remito.receiptImages.map((img: string, i: number) => (
-                      <a key={i} href={img} target="_blank" rel="noopener noreferrer">
-                        <img src={img} alt="Remito" style={{ width: 80, borderRadius: 4, border: '1px solid #eee' }} />
-                      </a>
+                      <FileViewer 
+                        key={i} 
+                        fileUrl={img} 
+                        alt={`Remito ${remito.number}`}
+                        width={80}
+                        height={80}
+                      />
                     ))}
                   </Stack>
                 )}
@@ -85,9 +90,13 @@ export default function ServiceDetailsPage() {
         {service.receiptImages && service.receiptImages.length > 0 ? (
           <Stack direction="row" spacing={1} mt={1}>
             {service.receiptImages.map((img: string, i: number) => (
-              <a key={i} href={img} target="_blank" rel="noopener noreferrer">
-                <img src={img} alt="Remito" style={{ width: 80, borderRadius: 4, border: '1px solid #eee' }} />
-              </a>
+              <FileViewer 
+                key={i} 
+                fileUrl={img} 
+                alt="Remito"
+                width={80}
+                height={80}
+              />
             ))}
           </Stack>
         ) : (

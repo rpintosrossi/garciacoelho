@@ -1,7 +1,7 @@
 "use client";
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode, useMemo } from 'react';
 import { useEffect } from 'react';
-import api from '@/lib/axios';
+import { cachedApi } from '@/lib/axios';
 
 export interface ServiceCount {
   pendientes: number;
@@ -27,7 +27,7 @@ export function ServiceCountsProvider({ children }: { children: ReactNode }) {
 
   const fetchCounts = useCallback(async () => {
     try {
-      const response = await api.get('/services/counts');
+      const response = await cachedApi.get('/services/counts');
       setCounts(response.data);
     } catch (error) {
       // Opcional: manejar error
@@ -35,13 +35,18 @@ export function ServiceCountsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Solo cargar una vez al inicializar, no en intervalos
     fetchCounts();
-    const interval = setInterval(fetchCounts, 60000);
-    return () => clearInterval(interval);
   }, [fetchCounts]);
 
+  // Memoizar el valor del contexto para evitar re-renderizados innecesarios
+  const contextValue = useMemo(() => ({
+    counts,
+    refreshCounts: fetchCounts
+  }), [counts, fetchCounts]);
+
   return (
-    <ServiceCountsContext.Provider value={{ counts, refreshCounts: fetchCounts }}>
+    <ServiceCountsContext.Provider value={contextValue}>
       {children}
     </ServiceCountsContext.Provider>
   );

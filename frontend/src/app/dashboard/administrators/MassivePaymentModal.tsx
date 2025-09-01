@@ -139,6 +139,11 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         paymentMethodId: paymentMethod?.id,
         docsToAssociate
       }, { headers: { Authorization: `Bearer ${token}` } });
+      
+      // Notificar cambio usando localStorage para actualizar paquetes
+      localStorage.setItem('packagesLastUpdate', Date.now().toString());
+      localStorage.setItem('packagesUpdateType', 'payment_registered');
+      
       onSuccess();
       onClose();
     } catch {

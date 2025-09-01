@@ -19,22 +19,35 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginForm) => {
     try {
-      console.log('[LOGIN] Iniciando proceso de login');
       setError(null);
+      console.log('[LOGIN] Intentando iniciar sesión con:', data.email);
+      
       const response = await login(data.email, data.password);
-      console.log('[LOGIN] Login exitoso, respuesta:', response);
+      
+      console.log('[LOGIN] Login exitoso, redirigiendo...');
       
       // Redirigir según el rol del usuario
       if (response.user.role === 'TECNICO') {
-        console.log('[LOGIN] Usuario es técnico, redirigiendo a /technician');
         router.push('/technician');
       } else {
-        console.log('[LOGIN] Usuario no es técnico, redirigiendo a /dashboard');
         router.push('/dashboard');
       }
     } catch (err: any) {
-      console.error('[LOGIN] Error en login:', err);
-      setError(err.response?.data?.message || 'Error al iniciar sesión');
+      console.error('[LOGIN] Error en login:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data
+      });
+      
+      // Mostrar mensaje de error más específico
+      let errorMessage = 'Error al iniciar sesión';
+      if (err.message) {
+        errorMessage = err.message;
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      }
+      
+      setError(errorMessage);
     }
   };
 

@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { getFileUrl, convertToAbsoluteUrls } = require('../utils/fileUtils');
 const prisma = new PrismaClient();
 
 // Obtener todos los servicios
@@ -53,7 +54,8 @@ const getAllServices = async (req, res) => {
           }
         },
         technician: true,
-        invoice: true
+        invoice: true,
+        remitos: true
       },
       orderBy: {
         [sortBy]: sortOrder
@@ -62,8 +64,18 @@ const getAllServices = async (req, res) => {
       take: limitNumber
     });
 
+    // Convertir URLs relativas a absolutas para las imágenes
+    const servicesWithAbsoluteUrls = services.map(service => ({
+      ...service,
+      receiptImages: convertToAbsoluteUrls(service.receiptImages),
+      remitos: service.remitos ? service.remitos.map(remito => ({
+        ...remito,
+        receiptImages: convertToAbsoluteUrls(remito.receiptImages)
+      })) : []
+    }));
+
     res.json({
-      services,
+      services: servicesWithAbsoluteUrls,
       pagination: {
         total,
         page: pageNumber,
@@ -87,6 +99,7 @@ const getServiceById = async (req, res) => {
         building: {
           select: {
             name: true,
+            address: true,
             cuit: true,
             administrator: {
               select: {
@@ -95,12 +108,26 @@ const getServiceById = async (req, res) => {
             }
           }
         },
+        technician: true,
+        remitos: true,
         invoice: true
       }
     });
 
     if (!service) {
       return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    // Convertir URLs relativas a absolutas para las imágenes
+    if (service.receiptImages) {
+      service.receiptImages = convertToAbsoluteUrls(service.receiptImages);
+    }
+    
+    if (service.remitos) {
+      service.remitos = service.remitos.map(remito => ({
+        ...remito,
+        receiptImages: convertToAbsoluteUrls(remito.receiptImages)
+      }));
     }
 
     res.json(service);
@@ -262,19 +289,42 @@ const saveDraft = async (req, res) => {
   }
 };
 
-// Asignar técnico (Paso b: Designación de trabajos)
+// Asignar técnico (Paso b: Designación de trabajos) - VERSIÓN MEJORADA
 const assignTechnician = async (req, res) => {
   try {
+    console.log('👨‍🔧 [ASSIGN] Iniciando asignación de técnico...');
     const { id } = req.params;
     const { technicianId, visitDate } = req.body;
 
+    // Validaciones
+    if (!technicianId) {
+      return res.status(400).json({ 
+        message: 'technicianId es requerido',
+        type: 'VALIDATION_ERROR'
+      });
+    }
+
     // Verificar que el servicio existe
     const service = await prisma.service.findUnique({
-      where: { id }
+      where: { id },
+      include: { technician: true }
     });
 
     if (!service) {
-      return res.status(404).json({ message: 'Servicio no encontrado' });
+      return res.status(404).json({ 
+        message: 'Servicio no encontrado',
+        type: 'SERVICE_NOT_FOUND'
+      });
+    }
+
+    // Verificar que el servicio no esté ya asignado al mismo técnico
+    if (service.technicianId === technicianId && service.status === 'ASIGNADO') {
+      console.log('⚠️ [ASSIGN] Servicio ya asignado al mismo técnico:', technicianId);
+      return res.status(409).json({ 
+        message: 'El servicio ya está asignado a este técnico',
+        type: 'ALREADY_ASSIGNED',
+        currentTechnicianId: service.technicianId
+      });
     }
 
     // Verificar que el técnico existe
@@ -283,14 +333,19 @@ const assignTechnician = async (req, res) => {
     });
 
     if (!technician) {
-      return res.status(404).json({ message: 'Técnico no encontrado' });
+      return res.status(404).json({ 
+        message: 'Técnico no encontrado',
+        type: 'TECHNICIAN_NOT_FOUND'
+      });
     }
+
+    console.log('✅ [ASSIGN] Asignando técnico:', technician.name, 'al servicio:', id);
 
     const updatedService = await prisma.service.update({
       where: { id },
       data: {
         technicianId,
-        visitDate: new Date(visitDate),
+        visitDate: visitDate ? new Date(visitDate) : null,
         status: 'ASIGNADO'
       },
       include: {
@@ -299,10 +354,23 @@ const assignTechnician = async (req, res) => {
       }
     });
 
+    console.log('✅ [ASSIGN] Técnico asignado exitosamente');
     res.json(updatedService);
   } catch (error) {
-    console.error('Error al asignar técnico:', error);
-    res.status(500).json({ message: 'Error al asignar técnico' });
+    console.error('❌ [ASSIGN] Error al asignar técnico:', error);
+    
+    // Manejar errores específicos de Prisma
+    if (error.code === 'P2002') {
+      return res.status(409).json({ 
+        message: 'Ya existe una asignación con estos datos',
+        type: 'DUPLICATE_ASSIGNMENT'
+      });
+    }
+    
+    res.status(500).json({ 
+      message: 'Error interno del servidor al asignar técnico',
+      type: 'SERVER_ERROR'
+    });
   }
 };
 
@@ -312,12 +380,35 @@ const uploadReceipt = async (req, res) => {
     console.log('--- [REMITO] Intentando subir remito ---');
     console.log('Usuario autenticado:', req.user);
     console.log('Archivos recibidos:', req.files);
+    console.log('Datos del formulario:', req.body);
     
     const { id } = req.params;
+    const { remitoNumber } = req.body;
     const files = req.files;
 
     if (!files || files.length === 0) {
       return res.status(400).json({ message: 'No se han subido archivos' });
+    }
+
+    let finalRemitoNumber = remitoNumber?.trim();
+    
+    // Si no se proporciona número de remito, generar uno automáticamente
+    if (!finalRemitoNumber) {
+      let unique = false;
+      let generatedNumber;
+      while (!unique) {
+        // Generar número con formato REM-YYYY-XXXX
+        const year = new Date().getFullYear();
+        const randomNum = Math.floor(1000 + Math.random() * 9000);
+        generatedNumber = `REM-${year}-${randomNum}`;
+        
+        // Verificar si ya existe
+        const exists = await prisma.remito.findUnique({
+          where: { number: generatedNumber }
+        });
+        if (!exists) unique = true;
+      }
+      finalRemitoNumber = generatedNumber;
     }
 
     const service = await prisma.service.findUnique({
@@ -339,27 +430,117 @@ const uploadReceipt = async (req, res) => {
       });
     }
 
-    // Guardar las URLs de las imágenes
-    const imageUrls = files.map(file => `/uploads/${file.filename}`);
-    
-    const updatedService = await prisma.service.update({
-      where: { id },
-      data: {
-        receiptImages: [...(service.receiptImages || []), ...imageUrls],
-        status: 'CON_REMITO'
-      },
-      include: {
-        technician: true
+    // Validar tipos de archivo
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
+    for (const file of files) {
+      if (!allowedTypes.includes(file.mimetype)) {
+        return res.status(400).json({ 
+          message: 'Solo se permiten archivos JPG y PDF' 
+        });
       }
-    });
+      
+      // Validar tamaño (máximo 10MB)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (file.size > maxSize) {
+        return res.status(400).json({ 
+          message: 'El archivo es demasiado grande. Máximo 10MB' 
+        });
+      }
+    }
 
-    res.json({ 
+    // Verificar si ya existe un remito con ese número (solo si se proporcionó manualmente)
+    if (remitoNumber?.trim()) {
+      console.log('Verificando si existe remito con número:', finalRemitoNumber);
+      try {
+        const existingRemito = await prisma.remito.findUnique({
+          where: { number: finalRemitoNumber }
+        });
+
+        if (existingRemito) {
+          console.log('Remito ya existe:', existingRemito);
+          return res.status(400).json({ 
+            message: `Ya existe un remito con el número "${finalRemitoNumber}". Por favor, usa un número diferente.` 
+          });
+        }
+      } catch (dbError) {
+        console.error('Error al verificar remito existente:', dbError);
+        return res.status(500).json({ 
+          message: 'Error al verificar remito existente',
+          error: dbError.message 
+        });
+      }
+    }
+
+    // Guardar las URLs de los archivos con la URL base del backend
+    const fileUrls = files.map(file => getFileUrl(file.filename));
+    console.log('URLs de archivos a guardar:', fileUrls);
+    
+    // Crear el remito en la base de datos
+    console.log('Creando remito con datos:', {
+      serviceId: id,
+      number: finalRemitoNumber,
+      amount: 0,
+      date: new Date(),
+      receiptImages: fileUrls
+    });
+    
+    let remito;
+    try {
+      remito = await prisma.remito.create({
+        data: {
+          serviceId: id,
+          number: finalRemitoNumber,
+          amount: 0, // Se puede actualizar después
+          date: new Date(),
+          receiptImages: fileUrls
+        }
+      });
+      
+      console.log('Remito creado exitosamente:', remito);
+    } catch (remitoError) {
+      console.error('Error al crear remito:', remitoError);
+      return res.status(500).json({ 
+        message: 'Error al crear remito en la base de datos',
+        error: remitoError.message 
+      });
+    }
+    
+    console.log('Actualizando servicio con ID:', id);
+    console.log('ReceiptImages actuales del servicio:', service.receiptImages);
+    console.log('Nuevas URLs a agregar:', fileUrls);
+    
+    let updatedService;
+    try {
+      updatedService = await prisma.service.update({
+        where: { id },
+        data: {
+          receiptImages: [...(service.receiptImages || []), ...fileUrls],
+          status: 'CON_REMITO'
+        },
+        include: {
+          technician: true,
+          remitos: true
+        }
+      });
+      
+      console.log('Servicio actualizado exitosamente:', updatedService);
+    } catch (serviceError) {
+      console.error('Error al actualizar servicio:', serviceError);
+      return res.status(500).json({ 
+        message: 'Error al actualizar servicio',
+        error: serviceError.message 
+      });
+    }
+
+    res.status(200).json({ 
       message: 'Remito subido exitosamente', 
-      service: updatedService 
+      service: updatedService,
+      remito: remito
     });
   } catch (error) {
     console.error('Error al subir remito:', error);
-    res.status(500).json({ message: 'Error al subir remito' });
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ message: 'Error al subir remito', error: error.message });
   }
 };
 
@@ -497,7 +678,11 @@ const getAssignedServicesForTechnician = async (req, res) => {
       where.status = { in: ['ASIGNADO', 'CON_REMITO'] };
     }
 
-    console.log('[TECNICO] Filtros usados:', where);
+    // Solo log en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[TECNICO] Filtros usados:', where);
+    }
+    
     const services = await prisma.service.findMany({
       where,
       include: {
@@ -508,13 +693,10 @@ const getAssignedServicesForTechnician = async (req, res) => {
       orderBy: { visitDate: 'asc' }
     });
 
-    console.log('[TECNICO] Servicios encontrados:', services.length, services.map(s => ({
-      id: s.id,
-      status: s.status,
-      technicianId: s.technicianId,
-      visitDate: s.visitDate,
-      building: s.building?.name
-    })));
+    // Solo log en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[TECNICO] Servicios encontrados:', services.length);
+    }
     
     // Mapear a formato amigable
     const result = services.map(s => {
@@ -524,7 +706,7 @@ const getAssignedServicesForTechnician = async (req, res) => {
       let remitoImagenes = [];
       if (tieneRemito) {
         estadoRemito = 'Remito subido';
-        remitoImagenes = s.remitos.map(r => r.receiptImages).flat();
+        remitoImagenes = s.remitos.map(r => convertToAbsoluteUrls(r.receiptImages)).flat();
       }
 
       // Texto de fecha
@@ -563,11 +745,199 @@ const getAssignedServicesForTechnician = async (req, res) => {
   }
 };
 
+// Crear factura en negro (cobro sin factura)
+const createInformalInvoice = async (req, res) => {
+  try {
+    console.log('--- [FACTURA INFORMAL] Intentando crear cobro sin factura ---');
+    console.log('Usuario autenticado:', req.user);
+    console.log('Datos recibidos:', req.body);
+    console.log('ID del servicio:', req.params.id);
+    
+    const { id } = req.params;
+    const { amount, paymentMethod = 'CUENTA_CORRIENTE' } = req.body;
+    
+    console.log('Método de pago:', paymentMethod);
+
+    if (!amount) {
+      return res.status(400).json({ message: 'El importe es obligatorio' });
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      include: { 
+        technician: true,
+        building: {
+          include: {
+            administrator: true
+          }
+        }
+      }
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    // Verificar que el servicio tiene remito
+    if (service.status !== 'CON_REMITO') {
+      return res.status(400).json({ message: 'El servicio debe tener un remito antes de crear el cobro' });
+    }
+
+    // Verificar permisos (solo ADMIN u OPERADOR pueden crear cobros)
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({ 
+        message: 'Solo un administrador o un operador pueden crear cobros sin factura' 
+      });
+    }
+
+                 // Crear la factura informal usando SQL directo para evitar problemas con el cliente de Prisma
+             const [invoiceResult, updatedService] = await prisma.$transaction([
+               prisma.$queryRaw`INSERT INTO "Invoice" (id, "serviceId", amount, status, "paymentMethod", "createdAt", "updatedAt") VALUES (gen_random_uuid(), ${id}, ${parseFloat(amount)}, 'PENDIENTE', ${paymentMethod}, NOW(), NOW()) RETURNING *`,
+                     prisma.service.update({
+                 where: { id },
+                 data: {
+                   status: 'FACTURADO'
+                 },
+        include: {
+          technician: true,
+          building: {
+            include: {
+              administrator: true
+            }
+          },
+          invoice: true
+        }
+      })
+    ]);
+
+             // Si el método de pago es EFECTIVO, crear el pago inmediatamente
+             if (paymentMethod === 'EFECTIVO') {
+               console.log('--- [FACTURA INFORMAL] Creando pago en efectivo inmediato ---');
+               
+               // Obtener el primer remito del servicio
+               const firstRemito = await prisma.remito.findFirst({
+                 where: { serviceId: id }
+               });
+
+               if (firstRemito) {
+                 // Crear el pago asociado tanto al remito como a la factura
+                 const payment = await prisma.payment.create({
+                   data: {
+                     amount: parseFloat(amount),
+                     date: new Date(),
+                     method: 'EFECTIVO',
+                     comprobante: `COBRO-EFECTIVO-${Date.now()}`,
+                     documents: {
+                       create: [
+                         {
+                           remitoId: firstRemito.id,
+                           amount: parseFloat(amount)
+                         },
+                         {
+                           invoiceId: invoiceResult[0].id, // Asociar también a la factura
+                           amount: parseFloat(amount)
+                         }
+                       ]
+                     }
+                   }
+                 });
+
+                 console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a remito y factura:', payment);
+               }
+             }
+
+                 console.log('--- [FACTURA INFORMAL] Cobro sin factura creado exitosamente ---');
+             console.log('Factura creada:', invoiceResult);
+             console.log('Servicio actualizado:', updatedService);
+
+             res.json({ 
+               message: 'Cobro sin factura creado exitosamente', 
+               service: updatedService,
+               invoice: invoiceResult[0] // El resultado es un array
+             });
+  } catch (error) {
+    console.error('Error al crear cobro sin factura:', error);
+    res.status(500).json({ message: 'Error al crear cobro sin factura' });
+  }
+};
+
+// Crear factura
+const createInvoice = async (req, res) => {
+  try {
+    console.log('--- [FACTURA] Intentando crear factura ---');
+    console.log('Usuario autenticado:', req.user);
+    console.log('Datos recibidos:', req.body);
+    
+    const { id } = req.params;
+    const { invoiceNumber, invoiceAmount, invoiceDate } = req.body;
+
+    if (!invoiceNumber || !invoiceAmount || !invoiceDate) {
+      return res.status(400).json({ message: 'Faltan datos obligatorios de la factura' });
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      include: { technician: true }
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    // Verificar que el servicio tiene remito
+    if (service.status !== 'CON_REMITO') {
+      return res.status(400).json({ message: 'El servicio debe tener un remito antes de facturar' });
+    }
+
+    // Verificar permisos (solo ADMIN u OPERADOR pueden facturar)
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({ 
+        message: 'Solo un administrador o un operador pueden crear facturas' 
+      });
+    }
+
+    // Crear la factura y actualizar el estado del servicio
+    const [invoice, updatedService] = await prisma.$transaction([
+      prisma.invoice.create({
+        data: {
+          serviceId: id,
+          amount: parseFloat(invoiceAmount),
+          status: 'EMITIDA'
+        }
+      }),
+      prisma.service.update({
+        where: { id },
+        data: {
+          status: 'FACTURADO'
+        },
+        include: {
+          technician: true,
+          invoice: true
+        }
+      })
+    ]);
+
+    res.json({ 
+      message: 'Factura creada exitosamente', 
+      service: updatedService,
+      invoice: invoice
+    });
+  } catch (error) {
+    console.error('Error al crear factura:', error);
+    res.status(500).json({ message: 'Error al crear factura' });
+  }
+};
+
 // Anular servicio
 const cancelService = async (req, res) => {
   try {
-    console.log('--- [CANCELAR] Intentando anular servicio ---');
-    console.log('Usuario autenticado:', req.user);
+    // Solo log en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      console.log('--- [CANCELAR] Intentando anular servicio ---');
+      console.log('Usuario autenticado:', req.user);
+    }
     
     const { id } = req.params;
 
@@ -614,6 +984,102 @@ const cancelService = async (req, res) => {
   }
 };
 
+// Importar factura manualmente
+const importInvoice = async (req, res) => {
+  try {
+    console.log('--- [IMPORTAR FACTURA] Intentando importar factura ---');
+    console.log('Usuario autenticado:', req.user);
+    console.log('Archivo recibido:', req.file);
+    console.log('Datos del formulario:', req.body);
+    
+    const { id } = req.params;
+    const { number, amount, date, paymentMethod } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No se ha subido el archivo de factura' });
+    }
+
+    if (!number || !amount) {
+      return res.status(400).json({ message: 'Faltan datos obligatorios: número y monto de factura' });
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      include: { technician: true }
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    // Verificar permisos
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({ 
+        message: 'Solo administradores y operadores pueden importar facturas' 
+      });
+    }
+
+    // Validar tipo de archivo (solo PDF)
+    if (file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ 
+        message: 'Solo se permiten archivos PDF' 
+      });
+    }
+    
+    // Validar tamaño (máximo 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return res.status(400).json({ 
+        message: 'El archivo es demasiado grande. Máximo 10MB' 
+      });
+    }
+
+    // Guardar la URL del archivo
+    const fileUrl = getFileUrl(file.filename);
+    console.log('URL del archivo de factura:', fileUrl);
+    
+    // Crear la factura y actualizar el servicio en una transacción
+    const [invoice, updatedService] = await prisma.$transaction([
+      prisma.invoice.create({
+        data: {
+          serviceId: id,
+          number: number.trim(),
+          amount: parseFloat(amount),
+          date: date ? new Date(date) : new Date(),
+          fileUrl: fileUrl,
+          status: 'EMITIDA',
+          paymentMethod: paymentMethod || 'CUENTA_CORRIENTE'
+        }
+      }),
+      prisma.service.update({
+        where: { id },
+        data: {
+          status: 'FACTURADO'
+        },
+        include: {
+          technician: true,
+          invoice: true
+        }
+      })
+    ]);
+    
+    console.log('Factura importada exitosamente:', invoice);
+    console.log('Servicio actualizado:', updatedService);
+
+    res.status(200).json({ 
+      message: 'Factura importada exitosamente', 
+      service: updatedService,
+      invoice: invoice
+    });
+  } catch (error) {
+    console.error('Error al importar factura:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ message: 'Error al importar factura', error: error.message });
+  }
+};
+
 module.exports = {
   getAllServices,
   getServiceById,
@@ -623,6 +1089,9 @@ module.exports = {
   saveDraft,
   assignTechnician,
   uploadReceipt,
+  createInvoice,
+  createInformalInvoice,
+  importInvoice,
   getTechnicians,
   getServiceCounts,
   getServiceStats,

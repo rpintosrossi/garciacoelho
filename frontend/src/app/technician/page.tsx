@@ -5,6 +5,7 @@ import { Box, Typography, Button, Card, CardContent, Grid, Chip, Dialog, DialogT
 import { DateRange, Today, Event, AllInbox, Camera, PhotoLibrary, Cancel } from '@mui/icons-material';
 import api from '@/lib/axios';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Service {
   id: string;
@@ -25,8 +26,7 @@ export default function TechnicianPage() {
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
+  const { user } = useAuth();
 
   const fetchServices = async (dateFilter: string) => {
     try {
@@ -40,20 +40,6 @@ export default function TechnicianPage() {
   useEffect(() => {
     fetchServices(filter);
   }, [filter]);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await api.get('/auth/me');
-        setUser({ name: res.data.name, email: res.data.email });
-      } catch {
-        setUser(null);
-      } finally {
-        setLoadingUser(false);
-      }
-    };
-    fetchUser();
-  }, []);
 
   const handleFilterChange = (newFilter: 'hoy' | 'maniana' | 'semana' | 'todos') => {
     setFilter(newFilter);
@@ -147,8 +133,6 @@ export default function TechnicianPage() {
                 Cerrar sesión
               </Button>
             </>
-          ) : loadingUser ? (
-            <span>Cargando...</span>
           ) : null}
         </Stack>
       </Box>

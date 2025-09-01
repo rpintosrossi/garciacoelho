@@ -25,6 +25,7 @@ import {
 } from '@mui/icons-material';
 import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { cachedApi } from '@/lib/axios';
 
 interface DebtReport {
   administratorId: string;
@@ -58,10 +59,7 @@ export default function AdminDebtReport() {
     try {
       setLoading(true);
       setError(null);
-      const token = localStorage.getItem('token');
-      const response = await api.get('/reports/admin-debt', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await cachedApi.get('/reports/admin-debt');
       setReports(response.data);
     } catch (err) {
       setError('Error al cargar el reporte de deuda de administradores');

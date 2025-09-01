@@ -1,10 +1,11 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Obtener todos los técnicos
+// Obtener todos los técnicos - VERSIÓN OPTIMIZADA
 const getAllTechnicians = async (req, res) => {
   try {
-    console.log('Buscando técnicos...');
+    console.log('👨‍🔧 [TECHNICIANS] Iniciando consulta optimizada...');
+    
     const technicians = await prisma.technician.findMany({
       select: {
         id: true,
@@ -16,8 +17,12 @@ const getAllTechnicians = async (req, res) => {
       where: {
         status: 'ACTIVE',
       },
+      orderBy: {
+        name: 'asc'
+      }
     });
-    console.log('Técnicos encontrados:', technicians);
+    
+    console.log(`👨‍🔧 [TECHNICIANS] Consulta completada. ${technicians.length} técnicos encontrados`);
     res.json(technicians);
   } catch (error) {
     console.error('Error al obtener técnicos:', error);
