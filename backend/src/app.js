@@ -192,7 +192,6 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-});
 
 // Rutas
 app.use('/api', mainRoutes);
