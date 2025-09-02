@@ -1,20 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Lista de localidades disponibles
-const AVAILABLE_LOCALITIES = [
-  // Ciudad Autónoma de Buenos Aires
-  'Agronomía', 'Almagro', 'Balvanera', 'Barracas', 'Belgrano', 'Boedo', 'Caballito', 'Chacarita', 'Coghlan', 'Colegiales', 'Constitución', 'Flores', 'Floresta', 'La Boca', 'La Paternal', 'Liniers', 'Mataderos', 'Monte Castro', 'Montserrat', 'Nueva Pompeya', 'Núñez', 'Palermo', 'Parque Avellaneda', 'Parque Chacabuco', 'Parque Chas', 'Parque Patricios', 'Puerto Madero', 'Recoleta', 'Retiro', 'Saavedra', 'San Cristóbal', 'San Nicolás', 'San Telmo', 'Versalles', 'Villa Crespo', 'Villa del Parque', 'Villa Devoto', 'Villa General Mitre', 'Villa Lugano', 'Villa Luro', 'Villa Ortúzar', 'Villa Pueyrredón', 'Villa Real', 'Villa Riachuelo', 'Villa Santa Rita', 'Villa Soldati', 'Villa Urquiza', 'Vélez Sarsfield',
-  // Conurbano Bonaerense
-  'Almirante Brown', 'Avellaneda', 'Berazategui', 'Berisso', 'Cañuelas', 'Ensenada', 'Esteban Echeverría', 'Ezeiza', 'Florencio Varela', 'La Plata', 'Lanús', 'Lomas de Zamora', 'Presidente Perón', 'Quilmes', 'San Vicente',
-  // Interior de Buenos Aires
-  '25 de Mayo', 'Adolfo Alsina', 'Ayacucho', 'Azul', 'Balcarce', 'Benito Juárez', 'Bolívar', 'Castelli', 'Chascomús', 'Coronel Dorrego', 'Coronel Pringles', 'Coronel Rosales', 'Daireaux', 'Dolores', 'General Alvarado', 'General Alvear', 'General Belgrano', 'General Guido', 'General Lamadrid', 'General Lavalle', 'General Madariaga', 'General Paz', 'General Pueyrredón', 'González Chávez', 'Guaminí', 'La Costa', 'Laprida', 'Las Flores', 'Lezama', 'Lobería', 'Maipú', 'Mar Chiquita', 'Monte', 'Necochea', 'Olavarría', 'Patagones', 'Pellegrini', 'Pila', 'Pinamar', 'Puán', 'Rauch', 'Roque Pérez', 'Saavedra', 'Saladillo', 'Salliqueló',
-  // Zona Norte
-  'Escobar', 'General Rodríguez', 'General San Martín', 'Hurlingham', 'Ituzaingó', 'José C. Paz', 'La Matanza', 'Luján', 'Malvinas Argentinas', 'Marcos Paz', 'Merlo', 'Moreno', 'Morón', 'Pilar', 'San Fernando', 'San Isidro', 'San Miguel', 'Tigre', 'Tres de Febrero', 'Vicente López',
-  // Zona Oeste
-  'Alberti', 'Arrecifes', 'Baradero', 'Bragado', 'Capitán Sarmiento', 'Carlos Casares', 'Carlos Tejedor', 'Carmen de Areco', 'Chacabuco', 'Chivilcoy', 'Colón', 'Florentino Ameghino', 'General Arenales', 'General Pinto', 'General Villegas', 'Hipólito Yrigoyen', 'Junín', 'Leandro N. Alem', 'Lincoln', 'Mercedes', 'Navarro', 'Nueve de Julio', 'Pehuajó', 'Pergamino', 'Ramallo', 'Rivadavia', 'Salto', 'San Andrés de Giles', 'San Antonio de Areco', 'San Nicolás', 'San Pedro', 'Suipacha', 'Trenque Lauquen', 'Zárate', 'San Cayetano', 'Tandil', 'Tapalqué', 'Tordillo', 'Tornquist', 'Tres Arroyos', 'Tres Lomas', 'Villa Gesell', 'Villarino'
-];
-
 // Obtener todas las zonas
 const getZones = async (req, res) => {
   try {
@@ -78,9 +64,19 @@ const createZone = async (req, res) => {
       return res.status(400).json({ message: 'Ya existe una zona con ese nombre' });
     }
 
-    // Validar que las localidades sean válidas
+    // Validar que las localidades sean válidas (existan en la tabla Locality)
     if (localities && localities.length > 0) {
-      const invalidLocalities = localities.filter(locality => !AVAILABLE_LOCALITIES.includes(locality));
+      const validLocalities = await prisma.locality.findMany({
+        where: {
+          name: { in: localities },
+          isActive: true
+        },
+        select: { name: true }
+      });
+
+      const validLocalityNames = validLocalities.map(l => l.name);
+      const invalidLocalities = localities.filter(locality => !validLocalityNames.includes(locality));
+      
       if (invalidLocalities.length > 0) {
         return res.status(400).json({ 
           message: 'Localidades inválidas', 
@@ -143,7 +139,17 @@ const updateZone = async (req, res) => {
 
     // Validar que las localidades sean válidas
     if (localities && localities.length > 0) {
-      const invalidLocalities = localities.filter(locality => !AVAILABLE_LOCALITIES.includes(locality));
+      const validLocalities = await prisma.locality.findMany({
+        where: {
+          name: { in: localities },
+          isActive: true
+        },
+        select: { name: true }
+      });
+
+      const validLocalityNames = validLocalities.map(l => l.name);
+      const invalidLocalities = localities.filter(locality => !validLocalityNames.includes(locality));
+      
       if (invalidLocalities.length > 0) {
         return res.status(400).json({ 
           message: 'Localidades inválidas', 
@@ -206,24 +212,245 @@ const deleteZone = async (req, res) => {
   }
 };
 
-// Obtener todas las localidades disponibles desde la base de datos
+// Obtener todas las localidades disponibles (para crear zonas)
 const getAvailableLocalities = async (req, res) => {
   try {
-    const localities = await prisma.zoneLocality.findMany({
+    // Si no hay zonas creadas, devolver todas las localidades activas
+    const zonesCount = await prisma.zone.count();
+    
+    if (zonesCount === 0) {
+      const allLocalities = await prisma.locality.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: { name: true }
+      });
+      return res.json(allLocalities.map(l => l.name));
+    }
+
+    // Si hay zonas, obtener las localidades que ya están en uso
+    const usedLocalities = await prisma.zoneLocality.findMany({
       select: {
         locality: true
+      }
+    });
+
+    // Obtener localidades únicas que ya están en uso
+    const usedLocalitiesSet = new Set(usedLocalities.map(l => l.locality));
+    
+    // Filtrar las localidades activas para mostrar solo las disponibles
+    const availableLocalities = await prisma.locality.findMany({
+      where: {
+        isActive: true,
+        name: { notIn: Array.from(usedLocalitiesSet) }
       },
+      orderBy: { name: 'asc' },
+      select: { name: true }
+    });
+    
+    // Si no hay localidades disponibles (todas están en uso), mostrar todas las activas
+    if (availableLocalities.length === 0) {
+      const allActiveLocalities = await prisma.locality.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: { name: true }
+      });
+      return res.json(allActiveLocalities.map(l => l.name));
+    }
+    
+    res.json(availableLocalities.map(l => l.name));
+  } catch (error) {
+    console.error('Error al obtener localidades disponibles:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Obtener todas las localidades predefinidas (útil para crear la primera zona)
+const getAllPredefinedLocalities = async (req, res) => {
+  try {
+    const localities = await prisma.locality.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: { name: true, category: true }
+    });
+    
+    res.json(localities);
+  } catch (error) {
+    console.error('Error al obtener localidades predefinidas:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Crear una localidad personalizada
+const createCustomLocality = async (req, res) => {
+  try {
+    const { locality, category = 'Personalizada' } = req.body;
+
+    if (!locality || locality.trim() === '') {
+      return res.status(400).json({ message: 'El nombre de la localidad es obligatorio' });
+    }
+
+    // Verificar que la localidad no esté ya en la tabla
+    const existingLocality = await prisma.locality.findUnique({
+      where: { name: locality.trim() }
+    });
+
+    if (existingLocality) {
+      return res.status(400).json({ message: 'Esta localidad ya existe' });
+    }
+
+    // Verificar que la localidad no esté ya creada en alguna zona
+    const existingZoneLocality = await prisma.zoneLocality.findFirst({
+      where: {
+        locality: locality.trim()
+      }
+    });
+
+    if (existingZoneLocality) {
+      return res.status(400).json({ message: 'Esta localidad ya existe en una zona' });
+    }
+
+    // Crear la localidad en la tabla Locality
+    const newLocality = await prisma.locality.create({
+      data: {
+        name: locality.trim(),
+        category: category,
+        isActive: true
+      }
+    });
+
+    res.status(201).json({ 
+      message: 'Localidad creada exitosamente',
+      locality: newLocality,
+      totalLocalities: await prisma.locality.count()
+    });
+  } catch (error) {
+    console.error('Error al crear localidad personalizada:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Agregar localidad a una zona
+const addLocalityToZone = async (req, res) => {
+  try {
+    const { zoneId } = req.params;
+    const { locality } = req.body;
+
+    // Verificar que la zona existe
+    const existingZone = await prisma.zone.findUnique({
+      where: { id: zoneId }
+    });
+
+    if (!existingZone) {
+      return res.status(404).json({ message: 'Zona no encontrada' });
+    }
+
+    // Validar que la localidad sea válida (exista en la tabla Locality)
+    const validLocality = await prisma.locality.findFirst({
+      where: {
+        name: locality,
+        isActive: true
+      }
+    });
+
+    if (!validLocality) {
+      return res.status(400).json({ 
+        message: 'Localidad inválida', 
+        invalidLocality: locality 
+      });
+    }
+
+    // Verificar que la localidad no esté ya en la zona
+    const existingLocality = await prisma.zoneLocality.findUnique({
+      where: {
+        zoneId_locality: {
+          zoneId,
+          locality
+        }
+      }
+    });
+
+    if (existingLocality) {
+      return res.status(400).json({ message: 'La localidad ya existe en esta zona' });
+    }
+
+    // Crear la localidad
+    const newLocality = await prisma.zoneLocality.create({
+      data: {
+        zoneId,
+        locality
+      }
+    });
+
+    res.status(201).json(newLocality);
+  } catch (error) {
+    console.error('Error al agregar localidad:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Eliminar localidad de una zona
+const removeLocalityFromZone = async (req, res) => {
+  try {
+    const { zoneId, localityId } = req.params;
+
+    // Verificar que la zona existe
+    const existingZone = await prisma.zone.findUnique({
+      where: { id: zoneId }
+    });
+
+    if (!existingZone) {
+      return res.status(404).json({ message: 'Zona no encontrada' });
+    }
+
+    // Verificar que la localidad existe y pertenece a la zona
+    const existingLocality = await prisma.zoneLocality.findFirst({
+      where: {
+        id: localityId,
+        zoneId
+      }
+    });
+
+    if (!existingLocality) {
+      return res.status(404).json({ message: 'Localidad no encontrada en esta zona' });
+    }
+
+    // Eliminar la localidad
+    await prisma.zoneLocality.delete({
+      where: { id: localityId }
+    });
+
+    res.json({ message: 'Localidad eliminada correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar localidad:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+// Obtener localidades de una zona específica
+const getZoneLocalities = async (req, res) => {
+  try {
+    const { zoneId } = req.params;
+
+    // Verificar que la zona existe
+    const existingZone = await prisma.zone.findUnique({
+      where: { id: zoneId }
+    });
+
+    if (!existingZone) {
+      return res.status(404).json({ message: 'Zona no encontrada' });
+    }
+
+    // Obtener las localidades de la zona
+    const localities = await prisma.zoneLocality.findMany({
+      where: { zoneId },
       orderBy: {
         locality: 'asc'
       }
     });
 
-    // Obtener localidades únicas
-    const uniqueLocalities = [...new Set(localities.map(l => l.locality))];
-    
-    res.json(uniqueLocalities);
+    res.json(localities);
   } catch (error) {
-    console.error('Error al obtener localidades disponibles:', error);
+    console.error('Error al obtener localidades de la zona:', error);
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
@@ -234,5 +461,10 @@ module.exports = {
   createZone,
   updateZone,
   deleteZone,
-  getAvailableLocalities
+  getAvailableLocalities,
+  getAllPredefinedLocalities,
+  createCustomLocality,
+  addLocalityToZone,
+  removeLocalityFromZone,
+  getZoneLocalities
 };

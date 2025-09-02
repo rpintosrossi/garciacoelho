@@ -10,13 +10,6 @@ import {
   DialogTitle,
   TextField,
   Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
   IconButton,
   Snackbar,
   Alert,
@@ -25,9 +18,9 @@ import {
   Container,
   Card,
   CardContent,
-  Grid,
+  Stack,
 } from "@mui/material";
-import { Add, Edit, Delete, LocationOn } from "@mui/icons-material";
+import { Add, Edit, Delete, LocationOn, AddLocation } from "@mui/icons-material";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 
@@ -52,11 +45,16 @@ const validationSchema = Yup.object({
   localities: Yup.array().of(Yup.string()).min(1, "Debe seleccionar al menos una localidad"),
 });
 
+const localityValidationSchema = Yup.object({
+  locality: Yup.string().required("La localidad es obligatoria"),
+});
+
 const ZonesPage = () => {
   const [zones, setZones] = useState<Zone[]>([]);
   const [availableLocalities, setAvailableLocalities] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Zone | null>(null);
+  const [createLocalityModalOpen, setCreateLocalityModalOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({ open: false, message: "", severity: "success" });
   const [loading, setLoading] = useState(true);
 
@@ -75,12 +73,33 @@ const ZonesPage = () => {
   const fetchAvailableLocalities = async () => {
     try {
       const token = localStorage.getItem("token");
+      // Primero intentar obtener localidades disponibles
       const res = await api.get("/zones/localities/available", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setAvailableLocalities(res.data);
+      
+      // Si no hay localidades disponibles, usar las predefinidas
+      if (res.data.length === 0) {
+        const predefinedRes = await api.get("/zones/localities/predefined", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setAvailableLocalities(predefinedRes.data);
+      } else {
+        setAvailableLocalities(res.data);
+      }
     } catch (error) {
-      setSnackbar({ open: true, message: "Error al cargar localidades disponibles", severity: "error" });
+      console.error('Error al cargar localidades disponibles:', error);
+      // En caso de error, intentar cargar las predefinidas
+      try {
+        const token = localStorage.getItem("token");
+        const predefinedRes = await api.get("/zones/localities/predefined", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setAvailableLocalities(predefinedRes.data);
+      } catch (fallbackError) {
+        console.error('Error al cargar localidades predefinidas:', fallbackError);
+        setSnackbar({ open: true, message: "Error al cargar localidades disponibles", severity: "error" });
+      }
     }
   };
 
@@ -102,6 +121,15 @@ const ZonesPage = () => {
     setEditing(null);
     setOpen(false);
     formik.resetForm();
+  };
+
+  const handleCreateLocalityModalOpen = () => {
+    setCreateLocalityModalOpen(true);
+  };
+
+  const handleCreateLocalityModalClose = () => {
+    setCreateLocalityModalOpen(false);
+    customLocalityFormik.resetForm();
   };
 
   const formik = useFormik({
@@ -134,6 +162,27 @@ const ZonesPage = () => {
     },
   });
 
+  const customLocalityFormik = useFormik({
+    initialValues: {
+      locality: "",
+    },
+    validationSchema: localityValidationSchema,
+    onSubmit: async (values) => {
+      try {
+        const token = localStorage.getItem("token");
+        const response = await api.post("/zones/localities", values, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        setSnackbar({ open: true, message: "Localidad personalizada creada", severity: "success" });
+        fetchAvailableLocalities(); // Recargar la lista de localidades
+        handleCreateLocalityModalClose();
+      } catch (error: any) {
+        setSnackbar({ open: true, message: error?.response?.data?.message || "Error al crear localidad", severity: "error" });
+      }
+    },
+  });
+
   const handleDelete = async (id: string) => {
     if (!window.confirm("¿Seguro que deseas eliminar esta zona?")) return;
     try {
@@ -161,75 +210,87 @@ const ZonesPage = () => {
   return (
     <Container>
       <Box p={3}>
-        <Typography variant="h4" mb={2}>Zonas</Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()} sx={{ mb: 3 }}>
-          Nueva Zona
-        </Button>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h4">Zonas</Typography>
+          <Box display="flex" gap={2}>
+            <Button 
+              variant="outlined" 
+              startIcon={<AddLocation />} 
+              onClick={handleCreateLocalityModalOpen}
+            >
+              Nueva Localidad
+            </Button>
+            <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()}>
+              Nueva Zona
+            </Button>
+          </Box>
+        </Box>
 
-        <Grid container spacing={3}>
+        <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
           {zones.map((zone) => (
-            <Grid item xs={12} md={6} lg={4} key={zone.id}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                    <Typography variant="h6" component="h2">
-                      {zone.name}
-                    </Typography>
-                    <Box>
-                      <IconButton 
-                        color="primary" 
-                        size="small" 
-                        onClick={() => handleOpen(zone)}
-                      >
-                        <Edit />
-                      </IconButton>
-                      <IconButton 
-                        color="error" 
-                        size="small" 
-                        onClick={() => handleDelete(zone.id)}
-                      >
-                        <Delete />
-                      </IconButton>
-                    </Box>
+            <Card key={zone.id} sx={{ minWidth: 300, flex: '1 1 300px' }}>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+                  <Typography variant="h6" component="h2">
+                    {zone.name}
+                  </Typography>
+                  <Box>
+                    <IconButton 
+                      color="primary" 
+                      size="small" 
+                      onClick={() => handleOpen(zone)}
+                      title="Editar zona"
+                    >
+                      <Edit />
+                    </IconButton>
+                    <IconButton 
+                      color="error" 
+                      size="small" 
+                      onClick={() => handleDelete(zone.id)}
+                      title="Eliminar zona"
+                    >
+                      <Delete />
+                    </IconButton>
                   </Box>
-                  
-                  {zone.description && (
-                    <Typography variant="body2" color="text.secondary" mb={2}>
-                      {zone.description}
-                    </Typography>
+                </Box>
+                
+                {zone.description && (
+                  <Typography variant="body2" color="text.secondary" mb={2}>
+                    {zone.description}
+                  </Typography>
+                )}
+                
+                <Box display="flex" alignItems="center" mb={1}>
+                  <LocationOn sx={{ fontSize: 16, mr: 0.5, color: 'text.secondary' }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {zone.localities.length} localidad{zone.localities.length !== 1 ? 'es' : ''}
+                  </Typography>
+                </Box>
+                
+                <Box display="flex" flexWrap="wrap" gap={0.5}>
+                  {zone.localities.slice(0, 3).map((locality) => (
+                    <Chip
+                      key={locality.id}
+                      label={locality.locality}
+                      size="small"
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem' }}
+                    />
+                  ))}
+                  {zone.localities.length > 3 && (
+                    <Chip
+                      label={`+${zone.localities.length - 3} más`}
+                      color="default"
+                      size="small"
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem' }}
+                    />
                   )}
-                  
-                  <Box display="flex" alignItems="center" mb={1}>
-                    <LocationOn sx={{ fontSize: 16, mr: 0.5, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {zone.localities.length} localidad{zone.localities.length !== 1 ? 'es' : ''}
-                    </Typography>
-                  </Box>
-                  
-                  <Box display="flex" flexWrap="wrap" gap={0.5}>
-                    {zone.localities.slice(0, 3).map((locality) => (
-                      <Chip
-                        key={locality.id}
-                        label={locality.locality}
-                        size="small"
-                        variant="outlined"
-                        sx={{ fontSize: '0.7rem' }}
-                      />
-                    ))}
-                    {zone.localities.length > 3 && (
-                      <Chip
-                        label={`+${zone.localities.length - 3} más`}
-                        size="small"
-                        variant="outlined"
-                        sx={{ fontSize: '0.7rem' }}
-                      />
-                    )}
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
+                </Box>
+              </CardContent>
+            </Card>
           ))}
-        </Grid>
+        </Stack>
 
         {zones.length === 0 && (
           <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
@@ -239,6 +300,7 @@ const ZonesPage = () => {
           </Box>
         )}
 
+        {/* Modal para crear/editar zona */}
         <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
           <DialogTitle>{editing ? "Editar Zona" : "Nueva Zona"}</DialogTitle>
           <form onSubmit={formik.handleSubmit}>
@@ -298,6 +360,37 @@ const ZonesPage = () => {
               <Button onClick={handleClose}>Cancelar</Button>
               <Button type="submit" variant="contained">
                 {editing ? "Actualizar" : "Crear"}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
+
+        {/* Modal para crear localidad personalizada */}
+        <Dialog open={createLocalityModalOpen} onClose={handleCreateLocalityModalClose} fullWidth maxWidth="sm">
+          <DialogTitle>Crear Nueva Localidad Personalizada</DialogTitle>
+          <form onSubmit={customLocalityFormik.handleSubmit}>
+            <DialogContent>
+              <Typography variant="body2" color="text.secondary" mb={2}>
+                Crea una localidad personalizada que no esté en la lista predefinida. 
+                Esta localidad estará disponible para usar en todas las zonas.
+              </Typography>
+              
+              <TextField
+                margin="dense"
+                label="Nombre de la localidad"
+                name="locality"
+                fullWidth
+                value={customLocalityFormik.values.locality}
+                onChange={customLocalityFormik.handleChange}
+                error={customLocalityFormik.touched.locality && Boolean(customLocalityFormik.errors.locality)}
+                helperText={customLocalityFormik.touched.locality && customLocalityFormik.errors.locality || "Ej: Villa Nueva, Barrio Sur, etc."}
+                placeholder="Ingresa el nombre de la localidad"
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={handleCreateLocalityModalClose}>Cancelar</Button>
+              <Button type="submit" variant="contained" startIcon={<AddLocation />}>
+                Crear Localidad
               </Button>
             </DialogActions>
           </form>

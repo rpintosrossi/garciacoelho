@@ -196,6 +196,18 @@ model Zone {
   localities  ZoneLocality[]
 }
 
+model Locality {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  category  String   // Ciudad Autónoma, Conurbano, Interior, Zona Norte, Zona Oeste
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([isActive])
+}
+
 model ZoneLocality {
   id        String   @id @default(uuid())
   zoneId    String
