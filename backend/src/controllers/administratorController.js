@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Obtener todos los administradores
 const getAdministrators = async (req, res) => {
@@ -442,8 +441,12 @@ const getPendingInvoicesForAdmin = async (req, res) => {
 // Registrar un pago masivo para varios edificios/documentos
 const createAdminMassivePayment = async (req, res) => {
   try {
+    console.log('💰 [MASSIVE PAYMENT] Iniciando pago masivo...');
+    console.log('💰 [MASSIVE PAYMENT] Body recibido:', req.body);
+    
     const { amount, date, paymentMethodId, docsToAssociate, originalAmount, discount, discountReason } = req.body;
     if (!amount || !date || !paymentMethodId || !docsToAssociate || docsToAssociate.length === 0) {
+      console.log('❌ [MASSIVE PAYMENT] Faltan datos obligatorios');
       return res.status(400).json({ message: 'Faltan datos obligatorios' });
     }
     
@@ -474,6 +477,7 @@ const createAdminMassivePayment = async (req, res) => {
       paymentDate = new Date(date + 'T00:00:00-03:00');
     }
     // Crear el pago principal
+    console.log('💰 [MASSIVE PAYMENT] Creando pago principal...');
     const pago = await prisma.payment.create({
       data: {
         amount: montoFinal,
@@ -486,8 +490,12 @@ const createAdminMassivePayment = async (req, res) => {
         method: '',
       }
     });
+    console.log('💰 [MASSIVE PAYMENT] Pago creado:', pago.id);
+    
     // Asociar documentos
+    console.log('💰 [MASSIVE PAYMENT] Asociando documentos...');
     for (const doc of docsToAssociate) {
+      console.log('💰 [MASSIVE PAYMENT] Asociando documento:', doc);
       await prisma.paymentDocument.create({
         data: {
           paymentId: pago.id,
@@ -497,6 +505,7 @@ const createAdminMassivePayment = async (req, res) => {
         }
       });
     }
+    console.log('✅ [MASSIVE PAYMENT] Pago masivo completado exitosamente');
     res.status(201).json(pago);
   } catch (error) {
     console.error('Error al registrar pago masivo:', error);

@@ -33,7 +33,8 @@ import {
   Delete as DeleteIcon,
   Inventory as InventoryIcon,
   Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
+  Remove as RemoveIcon
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
@@ -44,19 +45,26 @@ interface StockItem {
   id: string;
   name: string;
   description: string;
-  category: string;
+  categoryId: string;
+  category: {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+  };
   quantity: number;
   minQuantity: number;
   unit: string;
   price: number;
   supplier: string;
-  lastUpdated: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 const validationSchema = Yup.object({
   name: Yup.string().required("El nombre es obligatorio"),
   description: Yup.string().required("La descripción es obligatoria"),
-  category: Yup.string().required("La categoría es obligatoria"),
+  categoryId: Yup.string().required("La categoría es obligatoria"),
   quantity: Yup.number().min(0, "La cantidad no puede ser negativa").required("La cantidad es obligatoria"),
   minQuantity: Yup.number().min(0, "La cantidad mínima no puede ser negativa").required("La cantidad mínima es obligatoria"),
   unit: Yup.string().required("La unidad es obligatoria"),
@@ -86,10 +94,10 @@ export default function StockPage() {
     const fetchStockItems = async () => {
       try {
         setLoading(true);
-        // Por ahora usar datos mock, pero optimizados
-        const mockItems: StockItem[] = [];
-        setItems(mockItems);
+        const response = await cachedApi.get('/stock');
+        setItems(response.data);
       } catch (err) {
+        console.error('Error al cargar stock:', err);
         setError('Error al cargar el stock');
       } finally {
         setLoading(false);
@@ -103,7 +111,7 @@ export default function StockPage() {
     initialValues: {
       name: '',
       description: '',
-      category: '',
+      categoryId: '',
       quantity: 0,
       minQuantity: 0,
       unit: '',
@@ -111,24 +119,24 @@ export default function StockPage() {
       supplier: '',
     },
     validationSchema,
-    onSubmit: (values) => {
-      if (editing) {
-        // Actualizar item existente
-        setItems(items.map(item => 
-          item.id === editing.id 
-            ? { ...item, ...values, lastUpdated: new Date().toISOString().split('T')[0] }
-            : item
-        ));
-      } else {
-        // Agregar nuevo item
-        const newItem: StockItem = {
-          id: Date.now().toString(),
-          ...values,
-          lastUpdated: new Date().toISOString().split('T')[0]
-        };
-        setItems([...items, newItem]);
+    onSubmit: async (values) => {
+      try {
+        if (editing) {
+          // Actualizar item existente
+          const response = await cachedApi.put(`/stock/${editing.id}`, values);
+          setItems(items.map(item => 
+            item.id === editing.id ? response.data : item
+          ));
+        } else {
+          // Agregar nuevo item
+          const response = await cachedApi.post('/stock', values);
+          setItems([...items, response.data]);
+        }
+        handleClose();
+      } catch (err) {
+        console.error('Error al guardar item:', err);
+        setError('Error al guardar el item');
       }
-      handleClose();
     },
   });
 
@@ -149,8 +157,50 @@ export default function StockPage() {
     formik.resetForm();
   };
 
-  const handleDelete = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await cachedApi.delete(`/stock/${id}`);
+      setItems(items.filter(item => item.id !== id));
+    } catch (err) {
+      console.error('Error al eliminar item:', err);
+      setError('Error al eliminar el item');
+    }
+  };
+
+  const handleIncrementStock = async (id: string) => {
+    try {
+      const item = items.find(item => item.id === id);
+      if (item) {
+        const newQuantity = item.quantity + 1;
+        await cachedApi.patch(`/stock/${id}/quantity`, { quantity: newQuantity });
+        setItems(items.map(item => 
+          item.id === id 
+            ? { ...item, quantity: newQuantity, updatedAt: new Date().toISOString() }
+            : item
+        ));
+      }
+    } catch (err) {
+      console.error('Error al incrementar stock:', err);
+      setError('Error al actualizar el stock');
+    }
+  };
+
+  const handleDecrementStock = async (id: string) => {
+    try {
+      const item = items.find(item => item.id === id);
+      if (item) {
+        const newQuantity = Math.max(0, item.quantity - 1);
+        await cachedApi.patch(`/stock/${id}/quantity`, { quantity: newQuantity });
+        setItems(items.map(item => 
+          item.id === id 
+            ? { ...item, quantity: newQuantity, updatedAt: new Date().toISOString() }
+            : item
+        ));
+      }
+    } catch (err) {
+      console.error('Error al decrementar stock:', err);
+      setError('Error al actualizar el stock');
+    }
   };
 
   const getStockStatus = (quantity: number, minQuantity: number) => {
@@ -302,14 +352,33 @@ export default function StockPage() {
                       </Typography>
                     </Box>
                   </TableCell>
-                  <TableCell>{item.category}</TableCell>
+                  <TableCell>{item.category.name}</TableCell>
                   <TableCell>
-                    <Typography variant="body2">
-                      {item.quantity} {item.unit}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Mín: {item.minQuantity}
-                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <IconButton 
+                        size="small" 
+                        color="error" 
+                        onClick={() => handleDecrementStock(item.id)}
+                        disabled={item.quantity <= 0}
+                      >
+                        <RemoveIcon />
+                      </IconButton>
+                      <Box textAlign="center" minWidth="60px">
+                        <Typography variant="body2" fontWeight="bold">
+                          {item.quantity} {item.unit}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Mín: {item.minQuantity}
+                        </Typography>
+                      </Box>
+                      <IconButton 
+                        size="small" 
+                        color="primary" 
+                        onClick={() => handleIncrementStock(item.id)}
+                      >
+                        <AddIcon />
+                      </IconButton>
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Box display="flex" alignItems="center" gap={1}>
@@ -321,7 +390,7 @@ export default function StockPage() {
                   </TableCell>
                   <TableCell>${item.price.toLocaleString()}</TableCell>
                   <TableCell>{item.supplier}</TableCell>
-                  <TableCell>{new Date(item.lastUpdated).toLocaleDateString()}</TableCell>
+                  <TableCell>{new Date(item.updatedAt).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <IconButton color="primary" onClick={() => handleOpen(item)}>
                       <EditIcon />
@@ -368,14 +437,14 @@ export default function StockPage() {
                 <FormControl fullWidth>
                   <InputLabel>Categoría</InputLabel>
                   <Select
-                    name="category"
-                    value={formik.values.category}
+                    name="categoryId"
+                    value={formik.values.categoryId}
                     label="Categoría"
                     onChange={formik.handleChange}
-                    error={formik.touched.category && Boolean(formik.errors.category)}
+                    error={formik.touched.categoryId && Boolean(formik.errors.categoryId)}
                   >
                     {categories.map((category) => (
-                      <MenuItem key={category.name} value={category.name}>{category.name}</MenuItem>
+                      <MenuItem key={category.id} value={category.id}>{category.name}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>

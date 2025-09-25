@@ -132,12 +132,24 @@ export default function PackagePage() {
     const checkLocalStorageChanges = () => {
       const lastUpdate = localStorage.getItem('packagesLastUpdate');
       const updateType = localStorage.getItem('packagesUpdateType');
+      const servicesLastUpdate = localStorage.getItem('servicesLastUpdate');
+      const servicesUpdateType = localStorage.getItem('servicesUpdateType');
       
       if (lastUpdate && updateType === 'payment_registered') {
         console.log('🔄 [PACKAGES] Cambio de pago detectado en localStorage, actualizando...');
         // Limpiar el flag para evitar actualizaciones múltiples
         localStorage.removeItem('packagesLastUpdate');
         localStorage.removeItem('packagesUpdateType');
+        // Actualizar la lista
+        fetchPackages();
+      }
+      
+      // También escuchar cuando se factura un servicio
+      if (servicesLastUpdate && servicesUpdateType === 'service_invoiced') {
+        console.log('🔄 [PACKAGES] Cambio de facturación detectado en localStorage, actualizando...');
+        // Limpiar el flag para evitar actualizaciones múltiples
+        localStorage.removeItem('servicesLastUpdate');
+        localStorage.removeItem('servicesUpdateType');
         // Actualizar la lista
         fetchPackages();
       }
@@ -311,7 +323,7 @@ export default function PackagePage() {
                       variant="outlined" 
                     />
                     <Chip 
-                      label={`${pkg.totalPayments} remitos sin factura`} 
+                      label={`${pkg.totalPayments} Prov`} 
                       color="secondary" 
                       variant="outlined" 
                     />
@@ -358,7 +370,7 @@ export default function PackagePage() {
                                 )}
                                 {transaction.type === 'remito_sin_factura' && (
                                   <Chip 
-                                    label="Remito sin Factura" 
+                                    label="Prov" 
                                     size="small" 
                                     color="warning" 
                                     variant="outlined" 
@@ -407,7 +419,7 @@ export default function PackagePage() {
                       Total de Facturas: {pkg.totalInvoices}
                     </Typography>
                     <Typography variant="h6">
-                      Total de Remitos sin factura: {pkg.totalPayments}
+                      Total de Prov: {pkg.totalPayments}
                     </Typography>
                   </Box>
                   <Typography variant="h5" color="primary" fontWeight="bold">

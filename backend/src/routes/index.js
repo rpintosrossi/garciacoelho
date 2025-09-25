@@ -15,6 +15,8 @@ const reportRoutes = require('./reportRoutes');
 const zoneRoutes = require('./zoneRoutes');
 const packageRoutes = require('./packageRoutes');
 const invoiceRoutes = require('./invoiceRoutes');
+const stockRoutes = require('./stockRoutes');
+const categoryRoutes = require('./categoryRoutes');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -32,6 +34,8 @@ router.use('/reports', reportRoutes);
 router.use('/zones', zoneRoutes);
 router.use('/packages', packageRoutes);
 router.use('/invoices', invoiceRoutes);
+router.use('/stock', stockRoutes);
+router.use('/categories', categoryRoutes);
 router.post('/payments', paymentController.createPayment);
 router.get('/payments', paymentController.getPayments);
 router.post('/remitos', remitoController.createRemito);

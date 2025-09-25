@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { cachedApi } from '@/lib/axios';
 
 export interface Category {
   id: string;
@@ -36,78 +37,93 @@ interface CategoryProviderProps {
 
 export const CategoryProvider: React.FC<CategoryProviderProps> = ({ children }) => {
   const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Cargar categorías desde localStorage al inicializar
+  // Cargar categorías desde la API
   useEffect(() => {
-    const savedCategories = localStorage.getItem('stockCategories');
-    if (savedCategories) {
-      setCategories(JSON.parse(savedCategories));
-    } else {
-      // Categorías por defecto
-      const defaultCategories: Category[] = [
-        {
-          id: '1',
-          name: 'Herramientas',
-          description: 'Herramientas manuales y eléctricas',
-          color: '#ff9800',
-          productCount: 0,
-          createdAt: '2025-01-15'
-        },
-        {
-          id: '2',
-          name: 'Materiales',
-          description: 'Materiales de construcción y electricidad',
-          color: '#4caf50',
-          productCount: 0,
-          createdAt: '2025-01-10'
-        },
-        {
-          id: '3',
-          name: 'Equipos',
-          description: 'Equipos y maquinaria',
-          color: '#2196f3',
-          productCount: 0,
-          createdAt: '2025-01-05'
-        },
-        {
-          id: '4',
-          name: 'Consumibles',
-          description: 'Productos consumibles y repuestos',
-          color: '#9c27b0',
-          productCount: 0,
-          createdAt: '2025-01-01'
-        }
-      ];
-      setCategories(defaultCategories);
-      localStorage.setItem('stockCategories', JSON.stringify(defaultCategories));
-    }
+    const fetchCategories = async () => {
+      try {
+        setLoading(true);
+        const response = await cachedApi.get('/categories');
+        setCategories(response.data);
+      } catch (error) {
+        console.error('Error al cargar categorías:', error);
+        // En caso de error, usar categorías por defecto
+        const defaultCategories: Category[] = [
+          {
+            id: 'cat-1',
+            name: 'Herramientas',
+            description: 'Herramientas manuales y eléctricas',
+            color: '#ff9800',
+            productCount: 0,
+            createdAt: '2025-01-15'
+          },
+          {
+            id: 'cat-2',
+            name: 'Materiales',
+            description: 'Materiales de construcción y electricidad',
+            color: '#4caf50',
+            productCount: 0,
+            createdAt: '2025-01-10'
+          },
+          {
+            id: 'cat-3',
+            name: 'Equipos',
+            description: 'Equipos y maquinaria',
+            color: '#2196f3',
+            productCount: 0,
+            createdAt: '2025-01-05'
+          },
+          {
+            id: 'cat-4',
+            name: 'Consumibles',
+            description: 'Productos consumibles y repuestos',
+            color: '#9c27b0',
+            productCount: 0,
+            createdAt: '2025-01-01'
+          }
+        ];
+        setCategories(defaultCategories);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCategories();
   }, []);
 
-  // Guardar categorías en localStorage cuando cambien
-  useEffect(() => {
-    localStorage.setItem('stockCategories', JSON.stringify(categories));
-  }, [categories]);
-
-  const addCategory = (categoryData: Omit<Category, 'id' | 'productCount' | 'createdAt'>) => {
-    const newCategory: Category = {
-      id: Date.now().toString(),
-      ...categoryData,
-      productCount: 0,
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    setCategories(prev => [...prev, newCategory]);
+  const addCategory = async (categoryData: Omit<Category, 'id' | 'productCount' | 'createdAt'>) => {
+    try {
+      const response = await cachedApi.post('/categories', categoryData);
+      setCategories(prev => [...prev, response.data]);
+    } catch (error) {
+      console.error('Error al crear categoría:', error);
+      throw error;
+    }
   };
 
-  const updateCategory = (id: string, categoryData: Partial<Category>) => {
-    setCategories(prev => 
-      prev.map(cat => 
-        cat.id === id ? { ...cat, ...categoryData } : cat
-      )
-    );
+  const updateCategory = async (id: string, categoryData: Partial<Category>) => {
+    try {
+      const response = await cachedApi.put(`/categories/${id}`, categoryData);
+      setCategories(prev => 
+        prev.map(cat => 
+          cat.id === id ? response.data : cat
+        )
+      );
+    } catch (error) {
+      console.error('Error al actualizar categoría:', error);
+      throw error;
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories(prev => prev.filter(cat => cat.id !== id));
+  const deleteCategory = async (id: string) => {
+    try {
+      await cachedApi.delete(`/categories/${id}`);
+      setCategories(prev => prev.filter(cat => cat.id !== id));
+    } catch (error) {
+      console.error('Error al eliminar categoría:', error);
+      throw error;
+    }
   };
 
   const getCategoryById = (id: string) => {

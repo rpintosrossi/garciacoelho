@@ -112,6 +112,11 @@ export default function DashboardLayout({
       path: '/dashboard',
     },
     {
+      text: 'Administradores',
+      icon: <AssignmentIcon sx={{ color: '#9c27b0' }} />,
+      path: '/dashboard/administrators',
+    },
+    {
       text: 'Edificios',
       icon: <BuildingIcon sx={{ color: '#4caf50' }} />,
       path: '/dashboard/buildings',
@@ -125,11 +130,6 @@ export default function DashboardLayout({
       text: 'Usuarios',
       icon: <PeopleIcon sx={{ color: '#ff9800' }} />,
       path: '/dashboard/users',
-    },
-    {
-      text: 'Administradores',
-      icon: <AssignmentIcon sx={{ color: '#9c27b0' }} />,
-      path: '/dashboard/administrators',
     },
     {
       text: 'Stock',

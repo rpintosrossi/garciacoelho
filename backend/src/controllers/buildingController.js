@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Obtener todos los edificios
 const getBuildings = async (req, res) => {
@@ -845,8 +844,8 @@ const getBuildingAccountDetails = async (req, res) => {
 // Registrar pago para un edificio específico
 const createBuildingPayment = async (req, res) => {
   try {
+    const { id: buildingId } = req.params;
     const {
-      buildingId,
       invoiceId,
       remitoId,
       paymentMethodId,
@@ -858,48 +857,79 @@ const createBuildingPayment = async (req, res) => {
       documents
     } = req.body;
 
+    console.log('💰 [BUILDING PAYMENT] Iniciando pago para edificio:', buildingId);
+    console.log('💰 [BUILDING PAYMENT] Datos recibidos:', req.body);
+
     // Verificar que el edificio existe
     const building = await prisma.building.findUnique({
-      where: { id: buildingId }
+      where: { id: buildingId },
+      include: {
+        account: true
+      }
     });
 
     if (!building) {
+      console.log('❌ [BUILDING PAYMENT] Edificio no encontrado:', buildingId);
       return res.status(404).json({ message: 'Edificio no encontrado' });
     }
+
+    console.log('✅ [BUILDING PAYMENT] Edificio encontrado:', building.name);
+
+    // Verificar que el edificio tiene una cuenta
+    if (!building.account) {
+      console.log('❌ [BUILDING PAYMENT] El edificio no tiene cuenta asociada');
+      return res.status(400).json({ message: 'El edificio no tiene una cuenta asociada' });
+    }
+
+    console.log('✅ [BUILDING PAYMENT] Cuenta encontrada, saldo actual:', building.account.balance);
 
     // Verificar que la factura o el remito existe
     let invoiceOrRemito;
     if (invoiceId) {
+      console.log('💰 [BUILDING PAYMENT] Buscando factura:', invoiceId);
       invoiceOrRemito = await prisma.invoice.findUnique({
         where: { id: invoiceId }
       });
     } else if (remitoId) {
+      console.log('💰 [BUILDING PAYMENT] Buscando remito:', remitoId);
       invoiceOrRemito = await prisma.remito.findUnique({
         where: { id: remitoId }
       });
     } else {
+      console.log('❌ [BUILDING PAYMENT] No se especificó invoiceId ni remitoId');
       return res.status(400).json({ message: 'Debe especificar invoiceId o remitoId' });
     }
 
     if (!invoiceOrRemito) {
+      console.log('❌ [BUILDING PAYMENT] Factura o remito no encontrado');
       return res.status(404).json({ message: 'Factura o Remito no encontrado' });
     }
 
+    console.log('✅ [BUILDING PAYMENT] Documento encontrado:', invoiceOrRemito.id);
+
     // Verificar que el método de pago existe
+    console.log('💰 [BUILDING PAYMENT] Buscando método de pago:', paymentMethodId);
     const paymentMethod = await prisma.paymentMethod.findUnique({
       where: { id: paymentMethodId }
     });
 
     if (!paymentMethod) {
+      console.log('❌ [BUILDING PAYMENT] Método de pago no encontrado:', paymentMethodId);
       return res.status(404).json({ message: 'Método de pago no encontrado' });
     }
 
+    console.log('✅ [BUILDING PAYMENT] Método de pago encontrado:', paymentMethod.name);
+
     // Verificar que el monto es positivo
     if (amount <= 0) {
+      console.log('❌ [BUILDING PAYMENT] Monto inválido:', amount);
       return res.status(400).json({ message: 'El monto del pago debe ser positivo' });
     }
 
+    console.log('✅ [BUILDING PAYMENT] Monto válido:', amount);
+
     // Verificar que el monto no excede el saldo pendiente de la factura/remito
+    console.log('💰 [BUILDING PAYMENT] Verificando saldo pendiente...');
     const paymentDocuments = await prisma.paymentDocument.findMany({
       where: {
         invoiceId: invoiceId,
@@ -913,39 +943,71 @@ const createBuildingPayment = async (req, res) => {
     const totalPaid = paymentDocuments.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
     const remaining = invoiceOrRemito.amount - totalPaid;
 
+    console.log('💰 [BUILDING PAYMENT] Saldo calculado:', {
+      montoOriginal: invoiceOrRemito.amount,
+      totalPagado: totalPaid,
+      saldoPendiente: remaining,
+      montoPago: amount
+    });
+
     if (amount > remaining) {
+      console.log('❌ [BUILDING PAYMENT] Monto excede saldo pendiente');
       return res.status(400).json({ message: `El monto del pago (${formatCurrency(amount)}) excede el saldo pendiente (${formatCurrency(remaining)})` });
     }
 
+    console.log('✅ [BUILDING PAYMENT] Saldo válido, procediendo con el pago...');
+
+    // Crear el pago primero
+    console.log('💰 [BUILDING PAYMENT] Creando pago...');
+    
+    // Convertir la fecha a objeto Date si viene como string
+    const paymentDate = typeof date === 'string' ? new Date(date) : date;
+    
+    const payment = await prisma.payment.create({
+      data: {
+        paymentMethodId: paymentMethodId,
+        amount: amount,
+        date: paymentDate,
+        comprobante: comprobante,
+        discount: discount,
+        discountReason: discountReason,
+        method: '' // Campo requerido por el modelo Payment
+      }
+    });
+
+    console.log('✅ [BUILDING PAYMENT] Pago creado:', payment.id);
+
     // Crear el documento de pago
+    console.log('💰 [BUILDING PAYMENT] Creando documento de pago...');
     const paymentDocument = await prisma.paymentDocument.create({
       data: {
+        paymentId: payment.id,
         invoiceId: invoiceId,
         remitoId: remitoId,
-        payment: {
-          create: {
-            paymentMethodId: paymentMethodId,
-            amount: amount,
-            date: date,
-            comprobante: comprobante,
-            discount: discount,
-            discountReason: discountReason,
-            documents: documents || []
-          }
-        }
+        amount: amount
       },
       include: {
         payment: true
       }
     });
 
+    console.log('✅ [BUILDING PAYMENT] Documento de pago creado:', paymentDocument.id);
+
     // Actualizar el saldo de la cuenta del edificio
+    console.log('💰 [BUILDING PAYMENT] Actualizando saldo de la cuenta...');
     const newBalance = building.account.balance - amount;
     await prisma.account.update({
       where: { buildingId: buildingId },
       data: { balance: newBalance }
     });
 
+    console.log('✅ [BUILDING PAYMENT] Saldo actualizado:', {
+      saldoAnterior: building.account.balance,
+      montoPago: amount,
+      saldoNuevo: newBalance
+    });
+
+    console.log('✅ [BUILDING PAYMENT] Pago completado exitosamente');
     res.status(201).json(paymentDocument);
   } catch (error) {
     console.error('Error al registrar pago:', error);

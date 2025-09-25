@@ -18,7 +18,8 @@ import {
   Business as BuildingIcon,
   People as PeopleIcon,
   Assignment as ServiceIcon,
-  TrendingUp as TrendingUpIcon
+  TrendingUp as TrendingUpIcon,
+  Warning as WarningIcon
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -32,6 +33,7 @@ import {
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
+import StockAlerts from '@/components/StockAlerts';
 
 const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => (
   <Card sx={{
@@ -110,7 +112,7 @@ export default function DashboardPage() {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
-            title="Empresas"
+            title="Edificios"
             value={stats?.totalBuildings || 0}
             icon={BuildingIcon}
             color={theme.palette.primary.main}
@@ -145,11 +147,13 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
+      
+      {/* Gráfico de Servicios */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           Servicios creados por mes
         </Typography>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={400}>
           <BarChart data={trabajosPorMes} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="mes" />
@@ -159,6 +163,9 @@ export default function DashboardPage() {
           </BarChart>
         </ResponsiveContainer>
       </Paper>
+
+      {/* Alertas de Stock */}
+      <StockAlerts maxItems={5} showViewAll={true} />
     </Box>
   );
 } 

@@ -91,10 +91,90 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
     return original - discountAmount;
   };
 
+  // Calcular monto máximo que se puede pagar (después de descuentos)
+  const calculateMaxPaymentAmount = () => {
+    return calculateFinalAmount();
+  };
+
+  // Calcular saldo pendiente que quedará después del pago
+  const calculateRemainingBalance = () => {
+    const maxAmount = calculateMaxPaymentAmount();
+    const paymentAmountNum = parseFloat(paymentAmount) || 0;
+    return maxAmount - paymentAmountNum;
+  };
+
+  // Calcular distribución del pago entre documentos (para mostrar al usuario)
+  const calculatePaymentDistribution = () => {
+    if (selectedDocs.length === 0 || !paymentAmount) return [];
+
+    const sortedDocs = [...selectedDocs].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateA - dateB; // Ascendente: más antiguos primero
+    });
+
+    const distribution = [];
+    const paymentAmountNum = parseFloat(paymentAmount) || 0;
+    const originalAmount = calculateOriginalAmount();
+    const discountAmount = calculateDiscount();
+
+    // Si hay descuento, distribuir proporcionalmente
+    if (discountAmount > 0) {
+      const discountFactor = paymentAmountNum / originalAmount;
+      
+      for (const doc of sortedDocs) {
+        const originalDocAmount = parseFloat(doc.amount);
+        const adjustedAmount = originalDocAmount * discountFactor;
+        
+        distribution.push({
+          doc,
+          amountToPay: adjustedAmount,
+          remaining: 0, // Con descuento, no queda saldo pendiente
+          status: 'full' // Se considera completo porque se paga el monto acordado
+        });
+      }
+    } else {
+      // Sin descuento, usar lógica de prioridad por antigüedad
+      let remainingPayment = paymentAmountNum;
+
+      for (const doc of sortedDocs) {
+        const originalDocAmount = parseFloat(doc.amount);
+        
+        if (remainingPayment <= 0) {
+          distribution.push({
+            doc,
+            amountToPay: 0,
+            remaining: originalDocAmount,
+            status: 'pending'
+          });
+        } else if (remainingPayment >= originalDocAmount) {
+          distribution.push({
+            doc,
+            amountToPay: originalDocAmount,
+            remaining: 0,
+            status: 'full'
+          });
+          remainingPayment -= originalDocAmount;
+        } else {
+          distribution.push({
+            doc,
+            amountToPay: remainingPayment,
+            remaining: originalDocAmount - remainingPayment,
+            status: 'partial'
+          });
+          remainingPayment = 0;
+        }
+      }
+    }
+
+    return distribution;
+  };
+
   // Actualizar monto original cuando cambian los documentos seleccionados
   useEffect(() => {
     const original = calculateOriginalAmount();
     setOriginalAmount(original.toString());
+    // Siempre actualizar el monto por defecto al total de las facturas seleccionadas
     setPaymentAmount(calculateFinalAmount().toString());
   }, [selectedDocs, discount, discountPercentage, discountType]);
 
@@ -111,24 +191,74 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
     setSaving(true);
     setError(null);
     try {
-            const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token");
       const originalAmount = calculateOriginalAmount();
       const discountAmount = calculateDiscount();
-      const finalAmount = calculateFinalAmount();
+      const finalAmount = parseFloat(paymentAmount); // Usar el monto ingresado por el usuario
 
-      // Calcular el factor de descuento para aplicar proporcionalmente a cada documento
-      const discountFactor = discountAmount > 0 ? (finalAmount / originalAmount) : 1;
+      // Validar que el monto no sea mayor al máximo permitido
+      const maxAmount = calculateMaxPaymentAmount();
+      if (finalAmount > maxAmount) {
+        setError(`El monto no puede ser mayor a ${formatCurrency(maxAmount)}`);
+        setSaving(false);
+        return;
+      }
 
-      const docsToAssociate = selectedDocs.map((doc: any) => {
-        const originalDocAmount = parseFloat(doc.amount);
-        const adjustedAmount = originalDocAmount * discountFactor;
-        
-        return {
-          id: doc.id,
-          type: doc.type,
-          amount: adjustedAmount
-        };
+      // Ordenar documentos por fecha (más antiguos primero)
+      const sortedDocs = [...selectedDocs].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return dateA - dateB; // Ascendente: más antiguos primero
       });
+
+      // Distribuir el pago priorizando facturas más antiguas
+      const docsToAssociate = [];
+      let remainingPayment = finalAmount;
+
+      // Si hay descuento, distribuir proporcionalmente el monto final entre los documentos
+      if (discountAmount > 0) {
+        // Calcular el factor de descuento para aplicar proporcionalmente a cada documento
+        const discountFactor = finalAmount / originalAmount;
+        
+        for (const doc of sortedDocs) {
+          const originalDocAmount = parseFloat(doc.amount);
+          const adjustedAmount = originalDocAmount * discountFactor;
+          
+          docsToAssociate.push({
+            id: doc.id,
+            type: doc.type,
+            amount: adjustedAmount
+          });
+        }
+      } else {
+        // Sin descuento, usar la lógica de prioridad por antigüedad
+        for (const doc of sortedDocs) {
+          const originalDocAmount = parseFloat(doc.amount);
+          
+          if (remainingPayment <= 0) {
+            // Si ya no hay dinero para pagar, no asociar este documento
+            break;
+          }
+          
+          if (remainingPayment >= originalDocAmount) {
+            // Si hay suficiente dinero, pagar la factura completa
+            docsToAssociate.push({
+              id: doc.id,
+              type: doc.type,
+              amount: originalDocAmount
+            });
+            remainingPayment -= originalDocAmount;
+          } else {
+            // Si no hay suficiente dinero, pagar lo que se pueda de esta factura
+            docsToAssociate.push({
+              id: doc.id,
+              type: doc.type,
+              amount: remainingPayment
+            });
+            remainingPayment = 0;
+          }
+        }
+      }
 
       await api.post(`/administrators/${adminId}/massive-payment`, {
         amount: finalAmount,
@@ -146,8 +276,10 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       
       onSuccess();
       onClose();
-    } catch {
-      setError("Error al registrar el pago");
+    } catch (error: any) {
+      console.error('Error al registrar pago masivo:', error);
+      const errorMessage = error.response?.data?.message || error.message || "Error al registrar el pago";
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -286,6 +418,106 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                     Descuento {formatCurrency(calculateDiscount())} = 
                     <strong> Monto final {formatCurrency(calculateFinalAmount())}</strong>
                   </Typography>
+                </Box>
+              )}
+            </Box>
+
+            {/* Monto final */}
+            <Box mt={2}>
+              <TextField
+                label="Monto final a pagar"
+                type="number"
+                value={paymentAmount}
+                onChange={e => setPaymentAmount(e.target.value)}
+                fullWidth
+                helperText={`Monto máximo: ${formatCurrency(calculateMaxPaymentAmount())}. Puede pagar menos para dejar saldo pendiente.`}
+                inputProps={{ 
+                  min: 0, 
+                  max: calculateMaxPaymentAmount(),
+                  step: 0.01
+                }}
+                sx={{ 
+                  '& .MuiInputBase-input': { 
+                    fontWeight: 'bold',
+                    fontSize: '1.1rem'
+                  }
+                }}
+              />
+              
+              {/* Mostrar distribución del pago */}
+              {parseFloat(paymentAmount) > 0 && selectedDocs.length > 0 && (
+                <Box mt={2}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Distribución del pago (ordenadas por antigüedad):
+                  </Typography>
+                  <Box maxHeight={200} overflow="auto">
+                    {calculatePaymentDistribution().map((item, index) => (
+                      <Box key={index} p={1} mb={1} bgcolor="grey.50" borderRadius={1}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Box>
+                            <Typography variant="body2" fontWeight="bold">
+                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {new Date(item.doc.date).toLocaleDateString()}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.doc.buildingName} - {item.doc.description}
+                            </Typography>
+                          </Box>
+                          <Box textAlign="right">
+                            <Typography variant="body2">
+                              {formatCurrency(item.amountToPay)} / {formatCurrency(parseFloat(item.doc.amount))}
+                            </Typography>
+                            {item.status === 'full' && (
+                              <Box component="span" sx={{ 
+                                display: 'inline-block',
+                                px: 1,
+                                py: 0.5,
+                                bgcolor: 'success.light',
+                                color: 'success.contrastText',
+                                borderRadius: 1,
+                                fontSize: '0.75rem',
+                                fontWeight: 'bold'
+                              }}>
+                                Completo
+                              </Box>
+                            )}
+                            {item.status === 'partial' && (
+                              <Box component="span" sx={{ 
+                                display: 'inline-block',
+                                px: 1,
+                                py: 0.5,
+                                bgcolor: 'warning.light',
+                                color: 'warning.contrastText',
+                                borderRadius: 1,
+                                fontSize: '0.75rem',
+                                fontWeight: 'bold'
+                              }}>
+                                Parcial
+                              </Box>
+                            )}
+                            {item.status === 'pending' && (
+                              <Box component="span" sx={{ 
+                                display: 'inline-block',
+                                px: 1,
+                                py: 0.5,
+                                bgcolor: 'grey.300',
+                                color: 'grey.700',
+                                borderRadius: 1,
+                                fontSize: '0.75rem',
+                                fontWeight: 'bold'
+                              }}>
+                                Pendiente
+                              </Box>
+                            )}
+                          </Box>
+                        </Box>
+                        {item.remaining > 0 && (
+                          <Typography variant="caption" color="warning.main">
+                            Saldo pendiente: {formatCurrency(item.remaining)}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
                 </Box>
               )}
             </Box>

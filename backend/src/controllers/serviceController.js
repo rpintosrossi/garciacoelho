@@ -1,6 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
 const { getFileUrl, convertToAbsoluteUrls } = require('../utils/fileUtils');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Obtener todos los servicios
 const getAllServices = async (req, res) => {
@@ -448,18 +447,21 @@ const uploadReceipt = async (req, res) => {
       }
     }
 
-    // Verificar si ya existe un remito con ese número (solo si se proporcionó manualmente)
+    // Verificar si ya existe un remito con ese número para el mismo servicio
     if (remitoNumber?.trim()) {
       console.log('Verificando si existe remito con número:', finalRemitoNumber);
       try {
-        const existingRemito = await prisma.remito.findUnique({
-          where: { number: finalRemitoNumber }
+        const existingRemito = await prisma.remito.findFirst({
+          where: { 
+            number: finalRemitoNumber,
+            serviceId: id // Solo verificar para el mismo servicio
+          }
         });
 
         if (existingRemito) {
-          console.log('Remito ya existe:', existingRemito);
+          console.log('Remito ya existe para este servicio:', existingRemito);
           return res.status(400).json({ 
-            message: `Ya existe un remito con el número "${finalRemitoNumber}". Por favor, usa un número diferente.` 
+            message: `Ya existe un remito con el número "${finalRemitoNumber}" para este servicio. Por favor, usa un número diferente.` 
           });
         }
       } catch (dbError) {
