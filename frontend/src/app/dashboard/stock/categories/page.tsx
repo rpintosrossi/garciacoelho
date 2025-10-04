@@ -56,11 +56,11 @@ const defaultColors = [
 ];
 
 export default function CategoriesPage() {
-  const { categories, addCategory, updateCategory, deleteCategory } = useCategories();
-  const [loading, setLoading] = useState(false);
+  const { categories, loading: categoriesLoading, addCategory, updateCategory, deleteCategory } = useCategories();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const formik = useFormik({
     initialValues: {
@@ -69,15 +69,23 @@ export default function CategoriesPage() {
       color: '#2196f3',
     },
     validationSchema,
-    onSubmit: (values) => {
-      if (editing) {
-        // Actualizar categoría existente
-        updateCategory(editing.id, values);
-      } else {
-        // Agregar nueva categoría
-        addCategory(values);
+    onSubmit: async (values) => {
+      try {
+        setSubmitting(true);
+        setError(null);
+        if (editing) {
+          // Actualizar categoría existente
+          await updateCategory(editing.id, values);
+        } else {
+          // Agregar nueva categoría
+          await addCategory(values);
+        }
+        handleClose();
+      } catch (err: any) {
+        setError(err.response?.data?.message || 'Error al guardar la categoría');
+      } finally {
+        setSubmitting(false);
       }
-      handleClose();
     },
   });
 
@@ -98,21 +106,25 @@ export default function CategoriesPage() {
     formik.resetForm();
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     const category = categories.find(cat => cat.id === id);
     if (category && category.productCount > 0) {
       setError(`No se puede eliminar la categoría "${category.name}" porque tiene ${category.productCount} productos asociados.`);
       return;
     }
-    deleteCategory(id);
-    setError(null);
+    try {
+      await deleteCategory(id);
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Error al eliminar la categoría');
+    }
   };
 
   const getTotalProducts = () => {
     return categories.reduce((sum, cat) => sum + cat.productCount, 0);
   };
 
-  if (loading) {
+  if (categoriesLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -329,9 +341,9 @@ export default function CategoriesPage() {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleClose}>Cancelar</Button>
-            <Button type="submit" variant="contained">
-              {editing ? "Actualizar" : "Crear"}
+            <Button onClick={handleClose} disabled={submitting}>Cancelar</Button>
+            <Button type="submit" variant="contained" disabled={submitting}>
+              {submitting ? <CircularProgress size={24} /> : (editing ? "Actualizar" : "Crear")}
             </Button>
           </DialogActions>
         </form>

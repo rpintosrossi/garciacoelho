@@ -81,21 +81,22 @@ export default function StockPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<StockItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchStockItems = async () => {
+    try {
+      setLoading(true);
+      const response = await cachedApi.get('/stock');
+      setItems(response.data);
+    } catch (err) {
+      console.error('Error al cargar el stock:', err);
+      setError('Error al cargar el stock');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchStockItems = async () => {
-      try {
-        setLoading(true);
-        // Por ahora usar datos mock, pero optimizados
-        const mockItems: StockItem[] = [];
-        setItems(mockItems);
-      } catch (err) {
-        setError('Error al cargar el stock');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchStockItems();
   }, []);
 
@@ -111,24 +112,28 @@ export default function StockPage() {
       supplier: '',
     },
     validationSchema,
-    onSubmit: (values) => {
-      if (editing) {
-        // Actualizar item existente
-        setItems(items.map(item => 
-          item.id === editing.id 
-            ? { ...item, ...values, lastUpdated: new Date().toISOString().split('T')[0] }
-            : item
-        ));
-      } else {
-        // Agregar nuevo item
-        const newItem: StockItem = {
-          id: Date.now().toString(),
-          ...values,
-          lastUpdated: new Date().toISOString().split('T')[0]
-        };
-        setItems([...items, newItem]);
+    onSubmit: async (values) => {
+      try {
+        setSubmitting(true);
+        setError(null);
+        if (editing) {
+          // Actualizar item existente
+          const response = await cachedApi.put(`/stock/${editing.id}`, values);
+          setItems(items.map(item => 
+            item.id === editing.id ? response.data : item
+          ));
+        } else {
+          // Agregar nuevo item
+          const response = await cachedApi.post('/stock', values);
+          setItems([...items, response.data]);
+        }
+        handleClose();
+      } catch (err: any) {
+        console.error('Error al guardar producto:', err);
+        setError(err.response?.data?.message || 'Error al guardar el producto');
+      } finally {
+        setSubmitting(false);
       }
-      handleClose();
     },
   });
 
@@ -149,8 +154,14 @@ export default function StockPage() {
     formik.resetForm();
   };
 
-  const handleDelete = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await cachedApi.delete(`/stock/${id}`);
+      setItems(items.filter(item => item.id !== id));
+    } catch (err: any) {
+      console.error('Error al eliminar producto:', err);
+      setError(err.response?.data?.message || 'Error al eliminar el producto');
+    }
   };
 
   const getStockStatus = (quantity: number, minQuantity: number) => {
@@ -440,9 +451,9 @@ export default function StockPage() {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleClose}>Cancelar</Button>
-            <Button type="submit" variant="contained">
-              {editing ? "Actualizar" : "Crear"}
+            <Button onClick={handleClose} disabled={submitting}>Cancelar</Button>
+            <Button type="submit" variant="contained" disabled={submitting}>
+              {submitting ? <CircularProgress size={24} /> : (editing ? "Actualizar" : "Crear")}
             </Button>
           </DialogActions>
         </form>

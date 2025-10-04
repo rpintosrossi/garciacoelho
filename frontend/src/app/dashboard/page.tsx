@@ -12,13 +12,24 @@ import {
   useTheme,
   alpha,
   CircularProgress,
-  Alert
+  Alert,
+  Chip,
+  TableContainer,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  IconButton,
+  Tooltip
 } from "@mui/material";
 import {
   Business as BuildingIcon,
   People as PeopleIcon,
   Assignment as ServiceIcon,
-  TrendingUp as TrendingUpIcon
+  TrendingUp as TrendingUpIcon,
+  Warning as WarningIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -26,7 +37,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer
 } from 'recharts';
 import { useRouter } from 'next/navigation';
@@ -66,6 +77,7 @@ export default function DashboardPage() {
   const [trabajosPorMes, setTrabajosPorMes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overdueDebts, setOverdueDebts] = useState<any>(null);
   const theme = useTheme();
   const router = useRouter();
 
@@ -74,9 +86,10 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [quickStatsRes, serviceStatsRes] = await Promise.all([
+        const [quickStatsRes, serviceStatsRes, overdueDebtsRes] = await Promise.all([
           cachedApi.get('/dashboard/quick-stats'),
-          cachedApi.get('/services/stats')
+          cachedApi.get('/services/stats'),
+          cachedApi.get('/dashboard/overdue-debts')
         ]);
         setStats(quickStatsRes.data);
         // Formatear datos para el gráfico
@@ -86,6 +99,7 @@ export default function DashboardPage() {
           cantidad: trabajosMes[mes]
         }));
         setTrabajosPorMes(chartData);
+        setOverdueDebts(overdueDebtsRes.data);
       } catch (err: any) {
         setError(err.response?.data?.message || 'Error al cargar estadísticas');
       } finally {
@@ -154,11 +168,103 @@ export default function DashboardPage() {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="mes" />
             <YAxis allowDecimals={false} />
-            <Tooltip />
+            <RechartsTooltip />
             <Bar dataKey="cantidad" fill={theme.palette.primary.main} />
           </BarChart>
         </ResponsiveContainer>
       </Paper>
+
+      {/* Sección de deudas vencidas */}
+      {overdueDebts && overdueDebts.buildingsOverThreshold > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }} id="overdue-debts-section">
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <WarningIcon sx={{ color: 'error.main', mr: 1, fontSize: 28 }} />
+            <Typography variant="h6" color="error.main" sx={{ fontWeight: 'bold' }}>
+              Empresas con Deudas Vencidas ({overdueDebts.buildingsOverThreshold})
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Empresas que superan el umbral de tolerancia configurado en cada edificio
+          </Typography>
+          
+          <Box sx={{ overflowX: 'auto' }}>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><strong>Empresa</strong></TableCell>
+                    <TableCell><strong>CUIT</strong></TableCell>
+                    <TableCell><strong>Localidad</strong></TableCell>
+                    <TableCell><strong>Administrador</strong></TableCell>
+                    <TableCell><strong>Deuda Actual</strong></TableCell>
+                    <TableCell><strong>Días Vencidos</strong></TableCell>
+                    <TableCell><strong>Umbral</strong></TableCell>
+                    <TableCell><strong>Acciones</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {overdueDebts.buildings
+                    .filter(building => building.isOverThreshold)
+                    .map((building) => (
+                    <TableRow key={building.id} hover>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                          {building.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {building.address}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{building.cuit}</TableCell>
+                      <TableCell>{building.locality || 'N/A'}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {building.administrator?.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {building.administrator?.email}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'error.main' }}>
+                          {new Intl.NumberFormat('es-AR', {
+                            style: 'currency',
+                            currency: 'ARS'
+                          }).format(building.currentDebt)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={`${building.daysOverdue} días`}
+                          color={building.daysOverdue > building.debtThreshold ? 'error' : 'warning'}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {building.debtThreshold} días
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="Ver detalles del edificio">
+                          <IconButton
+                            size="small"
+                            onClick={() => router.push(`/dashboard/buildings/${building.id}`)}
+                            color="primary"
+                          >
+                            <VisibilityIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Paper>
+      )}
     </Box>
   );
 } 
