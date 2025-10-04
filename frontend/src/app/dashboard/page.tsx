@@ -43,6 +43,7 @@ import {
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
+import StockAlerts from '@/components/StockAlerts';
 
 const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => (
   <Card sx={{
@@ -265,6 +266,9 @@ export default function DashboardPage() {
           </Box>
         </Paper>
       )}
+
+      {/* Alertas de Stock */}
+      <StockAlerts maxItems={5} showViewAll={true} />
     </Box>
   );
 } 
