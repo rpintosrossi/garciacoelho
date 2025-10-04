@@ -179,6 +179,10 @@ export default function InvoicedServices() {
       console.log('🔍 [FRONTEND] Cobro sin factura creado exitosamente');
       setOpenRemito(false);
       
+      // Notificar cambio usando localStorage para actualizar otras páginas
+      localStorage.setItem('servicesLastUpdate', Date.now().toString());
+      localStorage.setItem('servicesUpdateType', 'service_invoiced');
+      
       // Recargar los servicios para mostrar los cambios
       await fetchServices();
     } catch (error) {
@@ -250,6 +254,10 @@ export default function InvoicedServices() {
       
       console.log('🔍 [FRONTEND] Factura importada exitosamente');
       setOpenImportInvoice(false);
+      
+      // Notificar cambio usando localStorage para actualizar otras páginas
+      localStorage.setItem('servicesLastUpdate', Date.now().toString());
+      localStorage.setItem('servicesUpdateType', 'service_invoiced');
       
       // Recargar los servicios para mostrar los cambios
       await fetchServices();

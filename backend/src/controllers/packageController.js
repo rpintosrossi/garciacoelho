@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +28,7 @@ const addPDFToDocument = (doc, pdfPath, yPosition, maxWidth = 500) => {
 
 
 
-const prisma = new PrismaClient();
+// Prisma client is now imported from centralized lib/prisma.js
 
 // Endpoint de prueba para verificar datos
 const testData = async (req, res) => {
@@ -76,7 +76,7 @@ const testData = async (req, res) => {
       }
     });
     
-    // Obtener pagos que son "cobros sin factura"
+    // Obtener pagos que son "Prov"
     // EXCLUIR pagos en efectivo ya que fueron abonados directamente
     const paymentsWithoutInvoice = await prisma.payment.findMany({
       where: {
@@ -211,60 +211,187 @@ const testInvoices = async (req, res) => {
   }
 };
 
-// Obtener todas las facturas y cobros sin factura agrupados por administrador
-// NOTA: Los pagos en efectivo de "cobros sin factura" NO se incluyen en los paquetes
+// Obtener todas las facturas y Prov agrupados por administrador
+// NOTA: Los pagos en efectivo de "Prov" NO se incluyen en los paquetes
 // porque ya fueron abonados directamente al cliente
 const getPackages = async (req, res) => {
   try {
-    console.log('🔍 [PACKAGES] Iniciando búsqueda de paquetes...');
+    console.log('🔍 [PACKAGES] Iniciando búsqueda optimizada de paquetes...');
+    const startTime = Date.now();
     
-    // Obtener facturas
-    const invoices = await prisma.invoice.findMany({
-      where: {
-        // Excluir facturas con método de pago en efectivo (ya fueron abonadas directamente)
-        OR: [
-          { paymentMethod: null },
-          { paymentMethod: { not: 'EFECTIVO' } }
-        ]
-      },
-      include: {
-        service: {
-          include: {
-            building: {
-              include: {
-                administrator: true
+    // OPTIMIZACIÓN: Usar consultas paralelas con select específico en lugar de include profundo
+    const [invoices, payments] = await Promise.all([
+      // Consulta optimizada para facturas
+      prisma.invoice.findMany({
+        where: {
+          OR: [
+            { paymentMethod: null },
+            { paymentMethod: { not: 'EFECTIVO' } }
+          ]
+        },
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          createdAt: true,
+          paymentMethod: true,
+          fileUrl: true,
+          service: {
+            select: {
+              id: true,
+              status: true,
+              building: {
+                select: {
+                  id: true,
+                  name: true,
+                  address: true,
+                  administrator: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true
+                    }
+                  }
+                }
+              },
+              technician: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              },
+              remitos: {
+                select: {
+                  id: true,
+                  number: true,
+                  amount: true,
+                  date: true
+                }
               }
-            },
-            technician: true,
-            remitos: true
+            }
+          },
+          paymentDocuments: {
+            select: {
+              amount: true,
+              payment: {
+                select: {
+                  discount: true
+                }
+              }
+            }
           }
         },
-        paymentDocuments: {
-          include: {
-            payment: true
-          }
+        orderBy: {
+          createdAt: 'desc'
         }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
+      }),
+      
+      // Consulta optimizada para pagos
+      prisma.payment.findMany({
+        where: {
+          documents: {
+            some: {
+              remitoId: { not: null },
+              invoiceId: null
+            }
+          },
+          method: { not: 'EFECTIVO' }
+        },
+        select: {
+          id: true,
+          amount: true,
+          createdAt: true,
+          comprobante: true,
+          originalAmount: true,
+          discount: true,
+          discountReason: true,
+          paymentMethod: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          documents: {
+            where: {
+              remitoId: { not: null },
+              invoiceId: null
+            },
+            select: {
+              remito: {
+                select: {
+                  id: true,
+                  number: true,
+                  service: {
+                    select: {
+                      id: true,
+                      building: {
+                        select: {
+                          id: true,
+                          name: true,
+                          address: true,
+                          administrator: {
+                            select: {
+                              id: true,
+                              name: true
+                            }
+                          }
+                        }
+                      },
+                      technician: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      })
+    ]);
 
-    console.log(`📄 [PACKAGES] Encontradas ${invoices.length} facturas (excluyendo pagos en efectivo)`);
+    console.log(`📄 [PACKAGES] Encontradas ${invoices.length} facturas y ${payments.length} pagos en ${Date.now() - startTime}ms`);
     
     // Filtrar facturas que realmente están pendientes (no tienen pagos asociados o pagos insuficientes)
     const pendingInvoices = [];
     
     for (const invoice of invoices) {
-      // Calcular el total pagado para esta factura
-      const totalPaid = invoice.paymentDocuments.reduce((sum, pd) => sum + pd.amount, 0);
-      const remainingAmount = invoice.amount - totalPaid;
+      // Calcular el total pagado y descuentos aplicados para esta factura
+      let totalPaid = 0;
+      let totalDiscounts = 0;
       
-      console.log(`📄 [PACKAGES] Factura ${invoice.id}: monto = ${invoice.amount}, pagado = ${totalPaid}, pendiente = ${remainingAmount}`);
+      for (const pd of invoice.paymentDocuments) {
+        totalPaid += pd.amount;
+        if (pd.payment && pd.payment.discount > 0) {
+          totalDiscounts += pd.payment.discount;
+        }
+      }
+      
+      // El monto acordado es el original menos todos los descuentos aplicados
+      const montoAcordado = invoice.amount - totalDiscounts;
+      
+      // El monto pendiente es: monto acordado a pagar - monto realmente pagado
+      const remainingAmount = montoAcordado - totalPaid;
+      
+      console.log(`📄 [PACKAGES] Factura ${invoice.id}: monto original = ${invoice.amount}, descuentos = ${totalDiscounts}, monto acordado = ${montoAcordado}, pagado = ${totalPaid}, pendiente = ${remainingAmount}`);
       
       // Solo incluir facturas que realmente están pendientes
       if (remainingAmount > 0) {
-        pendingInvoices.push(invoice);
+        // Agregar información del saldo pendiente a la factura
+        const invoiceWithBalance = {
+          ...invoice,
+          remainingAmount: remainingAmount,
+          totalPaid: totalPaid,
+          totalDiscounts: totalDiscounts,
+          montoAcordado: montoAcordado
+        };
+        pendingInvoices.push(invoiceWithBalance);
         console.log(`📄 [PACKAGES] Factura ${invoice.id}: método de pago = ${invoice.paymentMethod || 'null'}, status = ${invoice.status}, servicio status = ${invoice.service.status}, PENDIENTE`);
       } else {
         console.log(`📄 [PACKAGES] Factura ${invoice.id}: PAGADA COMPLETAMENTE, excluyendo del paquete`);
@@ -273,63 +400,16 @@ const getPackages = async (req, res) => {
     
     console.log(`📄 [PACKAGES] Facturas pendientes después del filtro: ${pendingInvoices.length}`);
     
-    // Obtener pagos que son "cobros sin factura" (tienen remitos pero no facturas)
-    // EXCLUIR pagos en efectivo ya que fueron abonados directamente
-    const payments = await prisma.payment.findMany({
-      where: {
-        documents: {
-          some: {
-            remitoId: {
-              not: null
-            },
-            invoiceId: null
-          }
-        },
-        // Excluir pagos en efectivo (ya fueron abonados directamente)
-        method: {
-          not: 'EFECTIVO'
-        }
-      },
-      include: {
-        paymentMethod: true,
-        documents: {
-          where: {
-            remitoId: {
-              not: null
-            },
-            invoiceId: null
-          },
-          include: {
-            remito: {
-              include: {
-                service: {
-                  include: {
-                    building: {
-                      include: {
-                        administrator: true
-                      }
-                    },
-                    technician: true
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
-
-    console.log(`💰 [PACKAGES] Encontrados ${payments.length} pagos (excluyendo pagos en efectivo)`);
-    
-    // Combinar facturas y cobros sin factura
+    // Combinar facturas y Prov
     const allTransactions = [
       ...pendingInvoices.map(invoice => ({
         type: (invoice.status === 'PENDIENTE' && invoice.service.status === 'FACTURADO') ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
         id: invoice.id,
-        amount: invoice.amount,
+        amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
+        originalAmount: invoice.amount, // Mantener el monto original para referencia
+        totalPaid: invoice.totalPaid,
+        totalDiscounts: invoice.totalDiscounts,
+        montoAcordado: invoice.montoAcordado,
         status: invoice.status,
         createdAt: invoice.createdAt,
         service: invoice.service,
@@ -350,7 +430,7 @@ const getPackages = async (req, res) => {
         console.log('🔍 [PACKAGES] Procesando pago:', payment.id, payment.comprobante);
         console.log('🔍 [PACKAGES] Documentos del pago:', payment.documents);
         
-        // Para cobros sin factura, usar el primer remito asociado
+        // Para Prov, usar el primer remito asociado
         const firstRemito = payment.documents.find(doc => doc.remito)?.remito;
         
         if (!firstRemito) {
@@ -458,19 +538,40 @@ const getPackages = async (req, res) => {
     const pendingInvoices = [];
     
     for (const invoice of invoices) {
-      // Calcular el total pagado para esta factura
-      const totalPaid = invoice.paymentDocuments.reduce((sum, pd) => sum + pd.amount, 0);
-      const remainingAmount = invoice.amount - totalPaid;
+      // Calcular el total pagado y descuentos aplicados para esta factura
+      let totalPaid = 0;
+      let totalDiscounts = 0;
+      
+      for (const pd of invoice.paymentDocuments) {
+        totalPaid += pd.amount;
+        if (pd.payment && pd.payment.discount > 0) {
+          totalDiscounts += pd.payment.discount;
+        }
+      }
+      
+      // El monto acordado es el original menos todos los descuentos aplicados
+      const montoAcordado = invoice.amount - totalDiscounts;
+      
+      // El monto pendiente es: monto acordado a pagar - monto realmente pagado
+      const remainingAmount = montoAcordado - totalPaid;
       
       // Solo incluir facturas que realmente están pendientes
       if (remainingAmount > 0) {
-        pendingInvoices.push(invoice);
+        // Agregar información del saldo pendiente a la factura
+        const invoiceWithBalance = {
+          ...invoice,
+          remainingAmount: remainingAmount,
+          totalPaid: totalPaid,
+          totalDiscounts: totalDiscounts,
+          montoAcordado: montoAcordado
+        };
+        pendingInvoices.push(invoiceWithBalance);
       }
     }
     
     console.log(`📄 [PACKAGES] Facturas pendientes para descarga: ${pendingInvoices.length} de ${invoices.length}`);
 
-    // Obtener cobros sin factura del administrador
+    // Obtener Prov del administrador
     // EXCLUIR pagos en efectivo ya que fueron abonados directamente
     const payments = await prisma.payment.findMany({
       where: {
@@ -581,7 +682,7 @@ const getPackages = async (req, res) => {
            }
          }
         
-                 // PDFs de remitos de cobros sin factura
+                 // PDFs de remitos de Prov
          for (const payment of payments) {
            console.log(`🔍 [PACKAGES] Procesando pago: ${payment.id}`);
            for (const paymentDoc of payment.documents) {
@@ -779,7 +880,7 @@ CUIT: 30-12345678-9`;
       const buildingInfo = `${building.name} (${building.address})`;
       const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('es-AR');
       const invoiceNumber = invoice.id.slice(0, 8);
-      const amount = invoice.amount;
+      const amount = invoice.remainingAmount; // Usar el saldo pendiente
 
       totalAmount += amount;
 
@@ -798,7 +899,7 @@ CUIT: 30-12345678-9`;
       yPosition += 15;
     }
 
-    // Datos de los cobros sin factura
+    // Datos de los Prov
     for (const payment of payments) {
       const firstRemito = payment.documents.find(doc => doc.remito)?.remito;
       if (firstRemito) {
@@ -837,7 +938,7 @@ CUIT: 30-12345678-9`;
          // Resumen
      doc.fontSize(12)
         .text(`Total de Facturas: ${totalInvoices}`, 50, yPosition)
-        .text(`Total de Remitos sin factura: ${totalPayments}`, 50, yPosition + 15)
+        .text(`Total de Prov: ${totalPayments}`, 50, yPosition + 15)
         .text(`Neto Total: $${totalAmount.toFixed(2)}`, 350, yPosition, { width: 200 });
 
     // Agregar remitos al final
@@ -890,7 +991,7 @@ CUIT: 30-12345678-9`;
       }
     }
 
-    // Remitos de cobros sin factura
+    // Remitos de Prov
     for (const payment of payments) {
       for (const paymentDoc of payment.documents) {
         if (paymentDoc.remito) {

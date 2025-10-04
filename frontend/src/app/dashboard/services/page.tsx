@@ -102,8 +102,8 @@ export default function ServicesPage() {
       const lastUpdate = localStorage.getItem('servicesLastUpdate');
       const updateType = localStorage.getItem('servicesUpdateType');
       
-      if (lastUpdate && updateType === 'receipt_uploaded') {
-        console.log('🔄 [SERVICES] Cambio de remito detectado en localStorage, actualizando...');
+      if (lastUpdate && (updateType === 'receipt_uploaded' || updateType === 'service_invoiced')) {
+        console.log('🔄 [SERVICES] Cambio detectado en localStorage, actualizando...');
         // Limpiar el flag para evitar actualizaciones múltiples
         localStorage.removeItem('servicesLastUpdate');
         localStorage.removeItem('servicesUpdateType');
@@ -113,8 +113,8 @@ export default function ServicesPage() {
       }
     };
 
-    // Verificar cambios cada 2 segundos
-    const interval = setInterval(checkLocalStorageChanges, 2000);
+    // Verificar cambios cada 10 segundos (reducido de 2s para mejorar rendimiento)
+    const interval = setInterval(checkLocalStorageChanges, 10000);
 
     // Suscribirse a cambios en servicios
     cachedApi.onServicesChanged(handleServicesChanged);

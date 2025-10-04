@@ -4,7 +4,7 @@ import { config } from './config';
 // Cache mejorado para evitar peticiones duplicadas
 const requestCache = new Map();
 const pendingRequests = new Map();
-const CACHE_DURATION = 120000; // 2 minutos (aumentado de 30 segundos)
+const CACHE_DURATION = 300000; // 5 minutos (aumentado para reducir peticiones)
 
 // Sistema de eventos para notificar cambios
 const eventEmitter = {
@@ -81,7 +81,8 @@ api.interceptors.response.use(
       status: error.response?.status,
       url: error.config?.url,
       message: error.message,
-      data: error.response?.data
+      data: error.response?.data,
+      fullError: error
     });
     return Promise.reject(error);
   }
@@ -137,6 +138,18 @@ export const cachedApi = {
   
   put: async (url: string, data?: any, config?: any) => {
     const response = await api.put(url, data, config);
+    
+    // Notificar cambios en servicios
+    if (url.includes('/services')) {
+      console.log('📢 [EVENTS] Notificando cambio en servicios');
+      eventEmitter.emit('servicesChanged', { url, data });
+    }
+    
+    return response;
+  },
+  
+  patch: async (url: string, data?: any, config?: any) => {
+    const response = await api.patch(url, data, config);
     
     // Notificar cambios en servicios
     if (url.includes('/services')) {

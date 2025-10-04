@@ -76,6 +76,7 @@ export default function ServicesWithReceipt() {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [remitoNumber, setRemitoNumber] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
 
   const fetchServices = async () => {
     try {
@@ -205,6 +206,40 @@ export default function ServicesWithReceipt() {
     setError('');
   };
 
+  const handleReassign = async (service: Service) => {
+    if (!confirm('¿Estás seguro de que quieres reasignar este servicio? Esto lo volverá al estado de asignación.')) {
+      return;
+    }
+
+    setReassigningId(service.id);
+    setError('');
+    
+    try {
+      await api.post(`/services/${service.id}/cancel`);
+      
+      // Actualizar la lista de servicios
+      await fetchServices();
+      
+      // Actualizar conteos
+      await refreshCounts();
+      
+      // Redirigir a la página de asignación
+      router.push('/dashboard/services/assigned');
+    } catch (err: any) {
+      let errorMessage = 'Error al reasignar el servicio';
+      
+      if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setReassigningId(null);
+    }
+  };
+
   const handleAdminChange = (_: any, newValue: any) => {
     setSelectedAdmin(newValue);
     setSelectedBuilding(null);
@@ -291,17 +326,27 @@ export default function ServicesWithReceipt() {
                 <TableCell>{service.technician?.name}</TableCell>
                 <TableCell>{new Date(service.createdAt).toLocaleDateString()}</TableCell>
                 <TableCell>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => handleUploadClick(service)}
-                    disabled={uploadingId === service.id}
-                  >
-                    Subir Remito
-                  </Button>
-                  {uploadingId === service.id && (
-                    <CircularProgress size={20} sx={{ ml: 2 }} />
-                  )}
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => handleUploadClick(service)}
+                      disabled={uploadingId === service.id || reassigningId === service.id}
+                    >
+                      Subir Remito
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      onClick={() => handleReassign(service)}
+                      disabled={uploadingId === service.id || reassigningId === service.id}
+                    >
+                      Reasignar
+                    </Button>
+                    {(uploadingId === service.id || reassigningId === service.id) && (
+                      <CircularProgress size={20} />
+                    )}
+                  </Box>
                 </TableCell>
               </TableRow>
             ))}

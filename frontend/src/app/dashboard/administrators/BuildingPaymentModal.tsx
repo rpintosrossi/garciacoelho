@@ -113,10 +113,90 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
     return original - discountAmount;
   };
 
+  // Calcular monto máximo que se puede pagar (después de descuentos)
+  const calculateMaxPaymentAmount = () => {
+    return calculateFinalAmount();
+  };
+
+  // Calcular saldo pendiente que quedará después del pago
+  const calculateRemainingBalance = () => {
+    const maxAmount = calculateMaxPaymentAmount();
+    const paymentAmountNum = parseFloat(paymentAmount) || 0;
+    return maxAmount - paymentAmountNum;
+  };
+
+  // Calcular distribución del pago entre documentos (para mostrar al usuario)
+  const calculatePaymentDistribution = () => {
+    if (selectedDocs.length === 0 || !paymentAmount) return [];
+
+    const sortedDocs = [...selectedDocs].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateA - dateB; // Ascendente: más antiguos primero
+    });
+
+    const distribution = [];
+    const paymentAmountNum = parseFloat(paymentAmount) || 0;
+    const originalAmount = calculateOriginalAmount();
+    const discountAmount = calculateDiscount();
+
+    // Si hay descuento, distribuir proporcionalmente
+    if (discountAmount > 0) {
+      const discountFactor = paymentAmountNum / originalAmount;
+      
+      for (const doc of sortedDocs) {
+        const originalDocAmount = parseFloat(doc.amount.toString());
+        const adjustedAmount = originalDocAmount * discountFactor;
+        
+        distribution.push({
+          doc,
+          amountToPay: adjustedAmount,
+          remaining: 0, // Con descuento, no queda saldo pendiente
+          status: 'full' // Se considera completo porque se paga el monto acordado
+        });
+      }
+    } else {
+      // Sin descuento, usar lógica de prioridad por antigüedad
+      let remainingPayment = paymentAmountNum;
+
+      for (const doc of sortedDocs) {
+        const originalDocAmount = parseFloat(doc.amount.toString());
+        
+        if (remainingPayment <= 0) {
+          distribution.push({
+            doc,
+            amountToPay: 0,
+            remaining: originalDocAmount,
+            status: 'pending'
+          });
+        } else if (remainingPayment >= originalDocAmount) {
+          distribution.push({
+            doc,
+            amountToPay: originalDocAmount,
+            remaining: 0,
+            status: 'full'
+          });
+          remainingPayment -= originalDocAmount;
+        } else {
+          distribution.push({
+            doc,
+            amountToPay: remainingPayment,
+            remaining: originalDocAmount - remainingPayment,
+            status: 'partial'
+          });
+          remainingPayment = 0;
+        }
+      }
+    }
+
+    return distribution;
+  };
+
   // Actualizar monto original cuando cambian los documentos seleccionados
   useEffect(() => {
     const original = calculateOriginalAmount();
     setOriginalAmount(original.toString());
+    // Siempre actualizar el monto por defecto al total de las facturas seleccionadas
     setPaymentAmount(calculateFinalAmount().toString());
   }, [selectedDocs, discount, discountPercentage, discountType]);
 
@@ -136,31 +216,103 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
       const token = localStorage.getItem("token");
       const originalAmount = calculateOriginalAmount();
       const discountAmount = calculateDiscount();
-      const finalAmount = calculateFinalAmount();
+      const finalAmount = parseFloat(paymentAmount); // Usar el monto ingresado por el usuario
 
-      // Calcular el factor de descuento para aplicar proporcionalmente a cada documento
-      const discountFactor = discountAmount > 0 ? (finalAmount / originalAmount) : 1;
+      // Validar que el monto no sea mayor al máximo permitido
+      const maxAmount = calculateMaxPaymentAmount();
+      if (finalAmount > maxAmount) {
+        setError(`El monto no puede ser mayor a ${formatCurrency(maxAmount)}`);
+        setSaving(false);
+        return;
+      }
 
-      const docsToAssociate = selectedDocs.map((doc: PendingDocument) => {
-        const originalDocAmount = parseFloat(doc.amount.toString());
-        const adjustedAmount = originalDocAmount * discountFactor;
-        
-        return {
-          id: doc.id,
-          type: doc.type,
-          amount: adjustedAmount
-        };
+      // Ordenar documentos por fecha (más antiguos primero)
+      const sortedDocs = [...selectedDocs].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return dateA - dateB; // Ascendente: más antiguos primero
       });
 
-      await api.post(`/buildings/${buildingId}/payment`, {
+      // Distribuir el pago priorizando facturas más antiguas
+      const docsToAssociate = [];
+      let remainingPayment = finalAmount;
+
+      // Si hay descuento, distribuir proporcionalmente el monto final entre los documentos
+      if (discountAmount > 0) {
+        // Calcular el factor de descuento para aplicar proporcionalmente a cada documento
+        const discountFactor = finalAmount / originalAmount;
+        
+        for (const doc of sortedDocs) {
+          const originalDocAmount = parseFloat(doc.amount.toString());
+          const adjustedAmount = originalDocAmount * discountFactor;
+          
+          docsToAssociate.push({
+            id: doc.id,
+            type: doc.type,
+            amount: adjustedAmount
+          });
+        }
+      } else {
+        // Sin descuento, usar la lógica de prioridad por antigüedad
+        for (const doc of sortedDocs) {
+          const originalDocAmount = parseFloat(doc.amount.toString());
+          
+          if (remainingPayment <= 0) {
+            // Si ya no hay dinero para pagar, no asociar este documento
+            break;
+          }
+          
+          if (remainingPayment >= originalDocAmount) {
+            // Si hay suficiente dinero, pagar la factura completa
+            docsToAssociate.push({
+              id: doc.id,
+              type: doc.type,
+              amount: originalDocAmount
+            });
+            remainingPayment -= originalDocAmount;
+          } else {
+            // Si no hay suficiente dinero, pagar lo que se pueda de esta factura
+            docsToAssociate.push({
+              id: doc.id,
+              type: doc.type,
+              amount: remainingPayment
+            });
+            remainingPayment = 0;
+          }
+        }
+      }
+
+      // Para el endpoint de edificios, necesitamos enviar invoiceId o remitoId directamente
+      const firstDoc = docsToAssociate[0];
+      if (!firstDoc) {
+        setError("No hay documentos seleccionados");
+        setSaving(false);
+        return;
+      }
+
+      const paymentData = {
         amount: finalAmount,
         originalAmount: originalAmount,
         discount: discountAmount,
         discountReason: discountReason || null,
         date: paymentDate,
         paymentMethodId: paymentMethod?.id,
-        docsToAssociate
-      }, { headers: { Authorization: `Bearer ${token}` } });
+        comprobante: `PAGO-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`,
+        documents: []
+      };
+
+      // Agregar invoiceId o remitoId según el tipo de documento
+      if (firstDoc.type === 'FACTURA') {
+        paymentData.invoiceId = firstDoc.id;
+      } else if (firstDoc.type === 'REMITO') {
+        paymentData.remitoId = firstDoc.id;
+      }
+
+      console.log('💰 [FRONTEND] Enviando datos de pago:', paymentData);
+
+      await api.post(`/buildings/${buildingId}/payment`, paymentData, { 
+        headers: { Authorization: `Bearer ${token}` } 
+      });
       
       // Notificar cambio usando localStorage para actualizar paquetes
       localStorage.setItem('packagesLastUpdate', Date.now().toString());
@@ -168,8 +320,10 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
       
       onSuccess();
       onClose();
-    } catch {
-      setError("Error al registrar el pago");
+    } catch (error: any) {
+      console.error('Error al registrar pago de edificio:', error);
+      const errorMessage = error.response?.data?.message || error.message || "Error al registrar el pago";
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -310,7 +464,12 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                 value={paymentAmount}
                 onChange={e => setPaymentAmount(e.target.value)}
                 fullWidth
-                InputProps={{ readOnly: true }}
+                helperText={`Monto máximo: ${formatCurrency(calculateMaxPaymentAmount())}. Puede pagar menos para dejar saldo pendiente.`}
+                inputProps={{ 
+                  min: 0, 
+                  max: calculateMaxPaymentAmount(),
+                  step: 0.01
+                }}
                 sx={{ 
                   '& .MuiInputBase-input': { 
                     fontWeight: 'bold',
@@ -318,6 +477,50 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                   }
                 }}
               />
+              
+              {/* Mostrar distribución del pago */}
+              {parseFloat(paymentAmount) > 0 && selectedDocs.length > 0 && (
+                <Box mt={2}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Distribución del pago (ordenadas por antigüedad):
+                  </Typography>
+                  <Box maxHeight={200} overflow="auto">
+                    {calculatePaymentDistribution().map((item, index) => (
+                      <Box key={index} p={1} mb={1} bgcolor="grey.50" borderRadius={1}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Box>
+                            <Typography variant="body2" fontWeight="bold">
+                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {new Date(item.doc.date).toLocaleDateString()}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.doc.description}
+                            </Typography>
+                          </Box>
+                          <Box textAlign="right">
+                            <Typography variant="body2">
+                              {formatCurrency(item.amountToPay)} / {formatCurrency(parseFloat(item.doc.amount.toString()))}
+                            </Typography>
+                            {item.status === 'full' && (
+                              <Chip label="Completo" size="small" color="success" />
+                            )}
+                            {item.status === 'partial' && (
+                              <Chip label="Parcial" size="small" color="warning" />
+                            )}
+                            {item.status === 'pending' && (
+                              <Chip label="Pendiente" size="small" color="default" />
+                            )}
+                          </Box>
+                        </Box>
+                        {item.remaining > 0 && (
+                          <Typography variant="caption" color="warning.main">
+                            Saldo pendiente: {formatCurrency(item.remaining)}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
             </Box>
           </>
         )}

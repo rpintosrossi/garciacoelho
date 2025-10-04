@@ -42,6 +42,14 @@ const createPayment = async (req, res) => {
           message: 'La suma de los montos aplicados a los documentos no puede superar el monto total del pago.' 
         });
       }
+      
+      // Permitir pagos parciales: el monto del pago puede ser menor al total de los documentos
+      // Esto permite que quede un saldo pendiente en las facturas
+      console.log('💰 [PAYMENT] Validación de pago parcial:', {
+        montoFinal,
+        sumaMontos,
+        esPagoParcial: montoFinal < sumaMontos
+      });
     }
 
     // Generar número de comprobante simple (timestamp + random)
