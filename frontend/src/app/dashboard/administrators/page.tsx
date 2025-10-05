@@ -28,8 +28,8 @@ import * as Yup from "yup";
 import MassivePaymentModal from "./MassivePaymentModal";
 import BuildingAccountModal from "./BuildingAccountModal";
 import { formatCurrency } from '@/utils/formatCurrency';
-import { useCommonData } from '@/contexts/CommonDataContext';
 import { cachedApi } from '@/lib/axios';
+import { Pagination } from "@mui/material";
 
 interface Administrator {
   id: string;
@@ -40,6 +40,7 @@ interface Administrator {
   phoneNames?: string[];
   emails?: string[];
   emailNames?: string[];
+  officeAddress?: string;
   createdAt: string;
   updatedAt: string;
   saldoTotal?: number;
@@ -53,10 +54,13 @@ const validationSchema = Yup.object({
   phoneNames: Yup.array().of(Yup.string()),
   emails: Yup.array().of(Yup.string().email("Email inválido")),
   emailNames: Yup.array().of(Yup.string()),
+  officeAddress: Yup.string(),
 });
 
 const AdministratorsPage = () => {
-  const { administrators, refreshData } = useCommonData();
+  const [administrators, setAdministrators] = useState<Administrator[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 0 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Administrator | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({ 
@@ -72,6 +76,30 @@ const AdministratorsPage = () => {
   const [openBuildingAccount, setOpenBuildingAccount] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<any>(null);
   const [adminFilter, setAdminFilter] = useState('');
+
+  useEffect(() => {
+    fetchAdministrators();
+  }, [pagination.page]);
+
+  const fetchAdministrators = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await api.get(`/administrators?page=${pagination.page}&limit=${pagination.limit}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setAdministrators(res.data.administrators);
+      setPagination(res.data.pagination);
+    } catch (error) {
+      setSnackbar({ 
+        open: true, 
+        message: "Error al cargar administradores", 
+        severity: "error" 
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (openAccount && selectedAdmin) {
@@ -112,6 +140,7 @@ const AdministratorsPage = () => {
       phoneNames: editing?.phoneNames || [],
       emails: editing?.emails || [],
       emailNames: editing?.emailNames || [],
+      officeAddress: editing?.officeAddress || "",
     },
     enableReinitialize: true,
     validationSchema,
@@ -137,9 +166,9 @@ const AdministratorsPage = () => {
             severity: "success" 
           });
         }
-        // Limpiar caché y refrescar datos del contexto
+        // Limpiar caché y refrescar datos
         cachedApi.clearCacheFor('/administrators');
-        await refreshData();
+        await fetchAdministrators();
         handleClose();
       } catch (error: any) {
         setSnackbar({ 
@@ -163,9 +192,9 @@ const AdministratorsPage = () => {
         message: "Administrador eliminado", 
         severity: "success" 
       });
-      // Limpiar caché y refrescar datos del contexto
+      // Limpiar caché y refrescar datos
       cachedApi.clearCacheFor('/administrators');
-      await refreshData();
+      await fetchAdministrators();
     } catch (error: any) {
       setSnackbar({ 
         open: true, 
@@ -212,30 +241,33 @@ const AdministratorsPage = () => {
   return (
     <Box p={3}>
       <Typography variant="h4" mb={2}>Administradores</Typography>
-      <Autocomplete
-        options={administrators.map(a => a.name)}
-        value={adminFilter}
-        onInputChange={(_, value) => setAdminFilter(value)}
-        renderInput={params => <TextField {...params} label="Buscar administrador" sx={{ mb: 2, maxWidth: 400 }} />}
-        freeSolo
-      />
-      <Button 
-        variant="contained" 
-        startIcon={<Add />} 
-        onClick={() => handleOpen()} 
-        sx={{ mb: 2 }}
-      >
-        Nuevo Administrador
-      </Button>
+      {loading ? (
+        <Box display="flex" justifyContent="center" p={3}>
+          <Typography>Cargando...</Typography>
+        </Box>
+      ) : (
+        <>
+          <Autocomplete
+            options={administrators.map(a => a.name)}
+            value={adminFilter}
+            onInputChange={(_, value) => setAdminFilter(value)}
+            renderInput={params => <TextField {...params} label="Buscar administrador" sx={{ mb: 2, maxWidth: 400 }} />}
+            freeSolo
+          />
+          <Button 
+            variant="contained" 
+            startIcon={<Add />} 
+            onClick={() => handleOpen()} 
+            sx={{ mb: 2 }}
+          >
+            Nuevo Administrador
+          </Button>
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow>
               <TableCell>Nombre</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Teléfono</TableCell>
-              <TableCell>Teléfonos Adicionales</TableCell>
-              <TableCell>Emails Adicionales</TableCell>
+              <TableCell>Dirección Oficina</TableCell>
               <TableCell>Saldo</TableCell>
               <TableCell>Acciones</TableCell>
             </TableRow>
@@ -244,40 +276,7 @@ const AdministratorsPage = () => {
             {filteredAdministrators.map((administrator) => (
               <TableRow key={administrator.id}>
                 <TableCell>{administrator.name}</TableCell>
-                <TableCell>{administrator.email}</TableCell>
-                <TableCell>{administrator.phone}</TableCell>
-                <TableCell>
-                  {administrator.phones && administrator.phones.length > 0 ? (
-                    <Box>
-                      {administrator.phones.slice(0, 2).map((phone, index) => (
-                        <Typography key={index} variant="body2" sx={{ fontSize: '0.75rem' }}>
-                          {phone} {administrator.phoneNames && administrator.phoneNames[index] ? `(${administrator.phoneNames[index]})` : ''}
-                        </Typography>
-                      ))}
-                      {administrator.phones.length > 2 && (
-                        <Typography variant="caption" color="text.secondary">
-                          +{administrator.phones.length - 2} más
-                        </Typography>
-                      )}
-                    </Box>
-                  ) : '-'}
-                </TableCell>
-                <TableCell>
-                  {administrator.emails && administrator.emails.length > 0 ? (
-                    <Box>
-                      {administrator.emails.slice(0, 2).map((email, index) => (
-                        <Typography key={index} variant="body2" sx={{ fontSize: '0.75rem' }}>
-                          {email} {administrator.emailNames && administrator.emailNames[index] ? `(${administrator.emailNames[index]})` : ''}
-                        </Typography>
-                      ))}
-                      {administrator.emails.length > 2 && (
-                        <Typography variant="caption" color="text.secondary">
-                          +{administrator.emails.length - 2} más
-                        </Typography>
-                      )}
-                    </Box>
-                  ) : '-'}
-                </TableCell>
+                <TableCell>{administrator.officeAddress || '-'}</TableCell>
                 <TableCell>{formatCurrency(administrator.saldoTotal)}</TableCell>
                 <TableCell>
                   <IconButton color="primary" onClick={() => handleOpen(administrator)}>
@@ -294,7 +293,7 @@ const AdministratorsPage = () => {
             ))}
             {/* Fila de total */}
             <TableRow sx={{ backgroundColor: 'grey.100', fontWeight: 'bold' }}>
-              <TableCell colSpan={5} align="right" sx={{ fontWeight: 'bold' }}>
+              <TableCell colSpan={2} align="right" sx={{ fontWeight: 'bold' }}>
                 <Typography variant="subtitle1" fontWeight="bold">
                   SALDO TOTAL:
                 </Typography>
@@ -313,6 +312,18 @@ const AdministratorsPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      
+      {/* Paginación */}
+      <Box display="flex" justifyContent="center" mt={3}>
+        <Pagination
+          count={pagination.totalPages}
+          page={pagination.page}
+          onChange={(_, page) => setPagination(prev => ({ ...prev, page }))}
+          color="primary"
+        />
+      </Box>
+        </>
+      )}
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
         <DialogTitle>
           {editing ? "Editar Administrador" : "Nuevo Administrador"}
@@ -349,6 +360,16 @@ const AdministratorsPage = () => {
               onChange={formik.handleChange}
               error={formik.touched.phone && Boolean(formik.errors.phone)}
               helperText={formik.touched.phone && formik.errors.phone}
+            />
+            <TextField
+              margin="dense"
+              label="Dirección Oficina"
+              name="officeAddress"
+              fullWidth
+              value={formik.values.officeAddress}
+              onChange={formik.handleChange}
+              error={formik.touched.officeAddress && Boolean(formik.errors.officeAddress)}
+              helperText={formik.touched.officeAddress && formik.errors.officeAddress}
             />
             
             {/* Teléfonos adicionales */}

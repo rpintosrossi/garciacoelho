@@ -1,0 +1,139 @@
+[1mdiff --git a/backend/src/controllers/dashboardController.js b/backend/src/controllers/dashboardController.js[m
+[1mindex a324b9f..45ae929 100644[m
+[1m--- a/backend/src/controllers/dashboardController.js[m
+[1m+++ b/backend/src/controllers/dashboardController.js[m
+[36m@@ -149,132 +149,6 @@[m [mconst getQuickStats = async (req, res) => {[m
+   }[m
+ };[m
+ [m
+[31m-// Obtener empresas con deudas que superen el umbral de tolerancia[m
+[31m-const getBuildingsWithOverdueDebts = async (req, res) => {[m
+[31m-  try {[m
+[31m-    // Obtener todos los edificios con su umbral de deuda configurado[m
+[31m-    const buildings = await prisma.building.findMany({[m
+[31m-      include: {[m
+[31m-        administrator: {[m
+[31m-          select: {[m
+[31m-            name: true,[m
+[31m-            email: true,[m
+[31m-            phone: true[m
+[31m-          }[m
+[31m-        },[m
+[31m-        account: true,[m
+[31m-        services: {[m
+[31m-          include: {[m
+[31m-            invoice: true,[m
+[31m-            remitos: true[m
+[31m-          }[m
+[31m-        }[m
+[31m-      }[m
+[31m-    });[m
+[31m-[m
+[31m-    const buildingsWithDebts = [];[m
+[31m-[m
+[31m-    for (const building of buildings) {[m
+[31m-      // Calcular el saldo actual del edificio[m
+[31m-      let saldo = 0;[m
+[31m-      [m
+[31m-      // Sumar todas las facturas[m
+[31m-      for (const service of building.services) {[m
+[31m-        if (service.invoice) {[m
+[31m-          saldo += service.invoice.amount;[m
+[31m-        }[m
+[31m-        for (const remito of service.remitos) {[m
+[31m-          saldo += remito.amount;[m
+[31m-        }[m
+[31m-      }[m
+[31m-[m
+[31m-      // Restar todos los pagos[m
+[31m-      const paymentDocuments = await prisma.paymentDocument.findMany({[m
+[31m-        where: {[m
+[31m-          OR: [[m
+[31m-            { [m
+[31m-              invoiceId: { [m
+[31m-                in: building.services[m
+[31m-                  .map(s => s.invoice?.id)[m
+[31m-                  .filter(Boolean) [m
+[31m-              } [m
+[31m-            },[m
+[31m-            { [m
+[31m-              remitoId: { [m
+[31m-                in: building.services[m
+[31m-                  .flatMap(s => s.remitos.map(r => r.id))[m
+[31m-              } [m
+[31m-            }[m
+[31m-          ][m
+[31m-        },[m
+[31m-        include: {[m
+[31m-          payment: true[m
+[31m-        }[m
+[31m-      });[m
+[31m-[m
+[31m-      for (const pd of paymentDocuments) {[m
+[31m-        saldo -= (pd.payment.originalAmount || pd.payment.amount);[m
+[31m-      }[m
+[31m-[m
+[31m-      // Verificar si la deuda supera el umbral configurado[m
+[31m-      const debtThreshold = building.debtThreshold || 30; // días por defecto[m
+[31m-      const hasOverdueDebt = saldo > 0;[m
+[31m-[m
+[31m-      if (hasOverdueDebt) {[m
+[31m-        // Calcular días de atraso (usando la fecha más antigua de factura/remito)[m
+[31m-        let oldestDate = null;[m
+[31m-        for (const service of building.services) {[m
+[31m-          if (service.invoice && service.invoice.date) {[m
+[31m-            if (!oldestDate || service.invoice.date < oldestDate) {[m
+[31m-              oldestDate = service.invoice.date;[m
+[31m-            }[m
+[31m-          }[m
+[31m-          for (const remito of service.remitos) {[m
+[31m-            if (!oldestDate || remito.date < oldestDate) {[m
+[31m-              oldestDate = remito.date;[m
+[31m-            }[m
+[31m-          }[m
+[31m-        }[m
+[31m-[m
+[31m-        let daysOverdue = 0;[m
+[31m-        if (oldestDate) {[m
+[31m-          const now = new Date();[m
+[31m-          const diffTime = Math.abs(now - oldestDate);[m
+[31m-          daysOverdue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));[m
+[31m-        }[m
+[31m-[m
+[31m-        buildingsWithDebts.push({[m
+[31m-          id: building.id,[m
+[31m-          name: building.name,[m
+[31m-          cuit: building.cuit,[m
+[31m-          address: building.address,[m
+[31m-          locality: building.locality,[m
+[31m-          debtThreshold,[m
+[31m-          currentDebt: saldo,[m
+[31m-          daysOverdue,[m
+[31m-          isOverThreshold: daysOverdue > debtThreshold,[m
+[31m-          administrator: building.administrator,[m
+[31m-          lastInvoiceDate: oldestDate[m
+[31m-        });[m
+[31m-      }[m
+[31m-    }[m
+[31m-[m
+[31m-    // Ordenar por días de atraso (mayor a menor)[m
+[31m-    buildingsWithDebts.sort((a, b) => b.daysOverdue - a.daysOverdue);[m
+[31m-[m
+[31m-    res.json({[m
+[31m-      totalBuildingsWithDebts: buildingsWithDebts.length,[m
+[31m-      buildingsOverThreshold: buildingsWithDebts.filter(b => b.isOverThreshold).length,[m
+[31m-      buildings: buildingsWithDebts[m
+[31m-    });[m
+[31m-[m
+[31m-  } catch (error) {[m
+[31m-    console.error('Error al obtener edificios con deudas:', error);[m
+[31m-    res.status(500).json({ message: 'Error al obtener información de deudas' });[m
+[31m-  }[m
+[31m-};[m
+[31m-[m
+ module.exports = {[m
+[31m-  getQuickStats,[m
+[31m-  getBuildingsWithOverdueDebts[m
+[32m+[m[32m  getQuickStats[m
+ }; [m
+\ No newline at end of file[m

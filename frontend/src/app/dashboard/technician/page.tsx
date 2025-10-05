@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Typography, Card, CardContent, CardActions, Button, Chip, Stack, CircularProgress, Alert, ToggleButtonGroup, ToggleButton, Avatar, Tabs, Tab
+  Box, Typography, Card, CardContent, CardActions, Button, Chip, Stack, CircularProgress, Alert, ToggleButtonGroup, ToggleButton, Avatar, Tabs, Tab, TextField
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import api from '@/lib/axios';
@@ -37,6 +37,7 @@ export default function TechnicianTasksPage() {
   const { user } = useAuth();
   const [anularId, setAnularId] = useState<string | null>(null);
   const [anulando, setAnulando] = useState(false);
+  const [motivoAnulacion, setMotivoAnulacion] = useState('');
   const router = useRouter();
 
   const fetchTrabajos = async () => {
@@ -92,17 +93,24 @@ export default function TechnicianTasksPage() {
 
   const handleAnular = async () => {
     if (!anularId) return;
+    
+    if (!motivoAnulacion.trim()) {
+      setError('Debes proporcionar un motivo de anulación');
+      return;
+    }
+    
     setAnulando(true);
     try {
       const token = localStorage.getItem('token');
-      await api.post(`/services/${anularId}/cancel`, {}, {
+      await api.post(`/services/${anularId}/cancel`, { cancellationReason: motivoAnulacion }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setSuccessMsg('Visita anulada correctamente');
       setAnularId(null);
+      setMotivoAnulacion('');
       fetchTrabajos();
-    } catch {
-      setError('Error al anular la visita');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Error al anular la visita');
     } finally {
       setAnulando(false);
     }
@@ -242,13 +250,24 @@ export default function TechnicianTasksPage() {
         )}
         {successMsg && <Alert severity="success" sx={{ mt: 2 }}>{successMsg}</Alert>}
         {/* Diálogo de confirmación para anular visita */}
-        <Dialog open={!!anularId} onClose={() => setAnularId(null)}>
+        <Dialog open={!!anularId} onClose={() => { setAnularId(null); setMotivoAnulacion(''); }}>
           <DialogTitle>Confirmar Anulación</DialogTitle>
           <DialogContent>
-            <Typography>¿Estás seguro que deseas anular esta visita? El servicio volverá al estado pendiente de asignación.</Typography>
+            <Typography sx={{ mb: 2 }}>¿Estás seguro que deseas anular esta visita? El servicio volverá al estado pendiente de asignación.</Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Motivo de la anulación"
+              value={motivoAnulacion}
+              onChange={(e) => setMotivoAnulacion(e.target.value)}
+              placeholder="Explica por qué necesitas anular esta visita..."
+              required
+              helperText="Este motivo será visible para los administradores"
+            />
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setAnularId(null)} disabled={anulando}>Cancelar</Button>
+            <Button onClick={() => { setAnularId(null); setMotivoAnulacion(''); }} disabled={anulando}>Cancelar</Button>
             <Button onClick={handleAnular} color="error" variant="contained" disabled={anulando}>
               {anulando ? 'Anulando...' : 'Confirmar Anulación'}
             </Button>

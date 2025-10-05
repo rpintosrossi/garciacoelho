@@ -32,8 +32,8 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { useCommonData } from '@/contexts/CommonDataContext';
 import BuildingAccountModal from '../administrators/BuildingAccountModal';
+import { Pagination } from "@mui/material";
 
 interface Administrator {
   id: string;
@@ -98,6 +98,8 @@ const BuildingsPage = () => {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [availableLocalities, setAvailableLocalities] = useState<string[]>([]);
   const [administrators, setAdministrators] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 0 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Building | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({ open: false, message: "", severity: "success" });
@@ -108,14 +110,18 @@ const BuildingsPage = () => {
   const [buildingFilter, setBuildingFilter] = useState('');
 
   const fetchBuildings = async () => {
+    setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await api.get("/buildings", {
+      const res = await api.get(`/buildings?page=${pagination.page}&limit=${pagination.limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setBuildings(res.data);
+      setBuildings(res.data.buildings);
+      setPagination(res.data.pagination);
     } catch (error) {
       setSnackbar({ open: true, message: "Error al cargar edificios", severity: "error" });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -147,6 +153,9 @@ const BuildingsPage = () => {
 
   useEffect(() => {
     fetchBuildings();
+  }, [pagination.page]);
+
+  useEffect(() => {
     fetchAdministrators();
     fetchAvailableLocalities();
   }, []);
@@ -294,27 +303,33 @@ const BuildingsPage = () => {
   return (
     <Box p={3}>
         <Typography variant="h4" mb={2}>Edificios</Typography>
-        <Autocomplete
-          options={Array.from(new Set([
-            ...buildings.map(b => b.administrator?.name).filter(Boolean),
-            ...buildings.map(b => b.cuit).filter(Boolean),
-            ...buildings.map(b => b.locality).filter(Boolean),
-            ...buildings.map(b => b.name).filter(Boolean)
-          ]))}
-          value={buildingFilter}
-          onInputChange={(_, value) => setBuildingFilter(value)}
-          renderInput={params => <TextField {...params} label="Buscar por nombre, administrador, CUIT o localidad" sx={{ mb: 2, maxWidth: 400 }} />}
-          freeSolo
-        />
-        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()} sx={{ mb: 2 }}>
-          Nuevo Edificio
-        </Button>
+        {loading ? (
+          <Box display="flex" justifyContent="center" p={3}>
+            <Typography>Cargando...</Typography>
+          </Box>
+        ) : (
+          <>
+            <Autocomplete
+              options={Array.from(new Set([
+                ...buildings.map(b => b.administrator?.name).filter(Boolean),
+                ...buildings.map(b => b.cuit).filter(Boolean),
+                ...buildings.map(b => b.locality).filter(Boolean),
+                ...buildings.map(b => b.name).filter(Boolean)
+              ]))}
+              value={buildingFilter}
+              onInputChange={(_, value) => setBuildingFilter(value)}
+              renderInput={params => <TextField {...params} label="Buscar por nombre, administrador, CUIT o localidad" sx={{ mb: 2, maxWidth: 400 }} />}
+              freeSolo
+            />
+            <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()} sx={{ mb: 2 }}>
+              Nuevo Edificio
+            </Button>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell onClick={() => handleSort('name')} style={{ cursor: 'pointer' }}>
-                  Nombre {orderBy === 'name' && (orderDirection === 'asc' ? '↑' : '↓')}
+                  Num/Nombre {orderBy === 'name' && (orderDirection === 'asc' ? '↑' : '↓')}
                 </TableCell>
                 <TableCell onClick={() => handleSort('address')} style={{ cursor: 'pointer' }}>
                   Dirección {orderBy === 'address' && (orderDirection === 'asc' ? '↑' : '↓')}
@@ -404,13 +419,25 @@ const BuildingsPage = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        
+        {/* Paginación */}
+        <Box display="flex" justifyContent="center" mt={3}>
+          <Pagination
+            count={pagination.totalPages}
+            page={pagination.page}
+            onChange={(_, page) => setPagination(prev => ({ ...prev, page }))}
+            color="primary"
+          />
+        </Box>
+          </>
+        )}
         <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
           <DialogTitle>{editing ? "Editar Edificio" : "Nuevo Edificio"}</DialogTitle>
           <form onSubmit={formik.handleSubmit}>
             <DialogContent>
               <TextField
                 margin="dense"
-                label="Nombre"
+                label="Num/Nombre"
                 name="name"
                 fullWidth
                 value={formik.values.name}

@@ -19,17 +19,18 @@ model User {
 }
 
 model Administrator {
-  id         String     @id @default(uuid())
-  name       String
-  email      String     @unique
-  phone      String
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  emailNames String[]
-  emails     String[]
-  phoneNames String[]
-  phones     String[]
-  buildings  Building[]
+  id              String     @id @default(uuid())
+  name            String
+  email           String     @unique
+  phone           String
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  emailNames      String[]
+  emails          String[]
+  phoneNames      String[]
+  phones          String[]
+  officeAddress   String?
+  buildings       Building[]
 
   @@index([email])
   @@index([name])
@@ -67,20 +68,21 @@ model Building {
 }
 
 model Service {
-  id            String        @id @default(uuid())
-  description   String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  buildingId    String
-  name          String
-  technicianId  String?
-  visitDate     DateTime?
-  status        ServiceStatus @default(PENDIENTE)
-  receiptImages String[]
-  invoice       Invoice?
-  remitos       Remito[]
-  building      Building      @relation(fields: [buildingId], references: [id])
-  technician    Technician?   @relation(fields: [technicianId], references: [id])
+  id                   String        @id @default(uuid())
+  description          String
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  buildingId           String
+  name                 String
+  technicianId         String?
+  visitDate            DateTime?
+  status               ServiceStatus @default(PENDIENTE)
+  receiptImages        String[]
+  cancellationReason   String?
+  invoice              Invoice?
+  remitos              Remito[]
+  building             Building      @relation(fields: [buildingId], references: [id])
+  technician           Technician?   @relation(fields: [technicianId], references: [id])
 
   @@index([buildingId])
   @@index([buildingId, status])

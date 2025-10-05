@@ -170,6 +170,44 @@ const updateUser = async (req, res) => {
       }
     });
 
+    // Sincronizar con la tabla Technician
+    const oldRole = existingUser.role;
+    const newRole = role || existingUser.role;
+
+    // Si cambió de no-técnico a técnico, crear registro en Technician
+    if (oldRole !== 'TECNICO' && newRole === 'TECNICO') {
+      const existingTechnician = await prisma.technician.findUnique({
+        where: { email: user.email }
+      });
+      
+      if (!existingTechnician) {
+        await prisma.technician.create({
+          data: {
+            name: user.name,
+            email: user.email,
+          }
+        });
+      }
+    }
+
+    // Si cambió de técnico a no-técnico, eliminar registro en Technician
+    if (oldRole === 'TECNICO' && newRole !== 'TECNICO') {
+      await prisma.technician.deleteMany({
+        where: { email: user.email }
+      });
+    }
+
+    // Si sigue siendo técnico pero cambió el nombre o email, actualizar Technician
+    if (oldRole === 'TECNICO' && newRole === 'TECNICO') {
+      await prisma.technician.updateMany({
+        where: { email: existingUser.email },
+        data: {
+          name: user.name,
+          email: user.email,
+        }
+      });
+    }
+
     res.json(user);
   } catch (error) {
     console.error('Error al actualizar usuario:', error);
@@ -209,6 +247,13 @@ const deleteUser = async (req, res) => {
       if (adminCount <= 1) {
         return res.status(400).json({ message: 'No se puede eliminar el último administrador' });
       }
+    }
+
+    // Si es técnico, eliminar también de la tabla Technician
+    if (existingUser.role === 'TECNICO') {
+      await prisma.technician.deleteMany({
+        where: { email: existingUser.email }
+      });
     }
 
     await prisma.user.delete({

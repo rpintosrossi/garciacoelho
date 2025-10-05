@@ -473,8 +473,18 @@ const uploadReceipt = async (req, res) => {
       }
     }
 
-    // Guardar las URLs de los archivos con la URL base del backend
-    const fileUrls = files.map(file => getFileUrl(file.filename));
+    // Guardar las URLs de los archivos
+    // Si usamos S3, file.location ya tiene la URL completa
+    // Si usamos almacenamiento local, file.filename contiene el nombre del archivo
+    const fileUrls = files.map(file => {
+      if (file.location) {
+        // S3: usar la URL completa que proporciona multer-s3
+        return file.location;
+      } else {
+        // Local: construir la URL usando el filename
+        return getFileUrl(file.filename);
+      }
+    });
     console.log('URLs de archivos a guardar:', fileUrls);
     
     // Crear el remito en la base de datos
@@ -942,6 +952,7 @@ const cancelService = async (req, res) => {
     }
     
     const { id } = req.params;
+    const { cancellationReason } = req.body;
 
     const service = await prisma.service.findUnique({
       where: { id },
@@ -962,6 +973,13 @@ const cancelService = async (req, res) => {
       });
     }
 
+    // Validar que se proporcione un motivo de anulación
+    if (!cancellationReason || cancellationReason.trim() === '') {
+      return res.status(400).json({ 
+        message: 'Debe proporcionar un motivo de anulación' 
+      });
+    }
+
     // Actualizar el estado del servicio
     const updatedService = await prisma.service.update({
       where: { id },
@@ -969,7 +987,8 @@ const cancelService = async (req, res) => {
         status: 'PENDIENTE',
         technicianId: null,
         visitDate: null,
-        receiptImages: []
+        receiptImages: [],
+        cancellationReason: cancellationReason.trim()
       },
       include: {
         technician: true
@@ -1039,7 +1058,9 @@ const importInvoice = async (req, res) => {
     }
 
     // Guardar la URL del archivo
-    const fileUrl = getFileUrl(file.filename);
+    // Si usamos S3, file.location ya tiene la URL completa
+    // Si usamos almacenamiento local, file.filename contiene el nombre del archivo
+    const fileUrl = file.location ? file.location : getFileUrl(file.filename);
     console.log('URL del archivo de factura:', fileUrl);
     
     // Crear la factura y actualizar el servicio en una transacción

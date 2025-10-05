@@ -33,6 +33,7 @@ interface Service {
   name: string;
   description: string;
   status: string;
+  cancellationReason?: string;
   building: {
     name: string;
   };
@@ -235,6 +236,7 @@ export default function ServicesPage() {
               <TableCell>Estado</TableCell>
               <TableCell>Técnico</TableCell>
               <TableCell>Fecha de Visita</TableCell>
+              <TableCell>Motivo Anulación</TableCell>
               <TableCell>Acciones</TableCell>
             </TableRow>
           </TableHead>
@@ -249,6 +251,13 @@ export default function ServicesPage() {
                   {service.visitDate
                     ? new Date(service.visitDate).toLocaleDateString()
                     : '-'}
+                </TableCell>
+                <TableCell>
+                  {service.cancellationReason ? (
+                    <Typography variant="body2" color="error" sx={{ fontSize: '0.875rem' }}>
+                      {service.cancellationReason}
+                    </Typography>
+                  ) : '-'}
                 </TableCell>
                 <TableCell>
                   <IconButton

@@ -19,6 +19,24 @@ const getBackendUrl = () => {
  * Genera la URL completa para un archivo
  */
 const getFileUrl = (filename) => {
+  // Si no hay filename, retornar null
+  if (!filename) {
+    return null;
+  }
+
+  // Si ya es una URL completa (http o https), devolverla tal cual
+  if (filename.startsWith('http://') || filename.startsWith('https://')) {
+    return filename;
+  }
+
+  // Si usamos S3, construir la URL de S3
+  if (process.env.USE_S3 === 'true') {
+    const bucket = process.env.AWS_S3_BUCKET;
+    const region = process.env.AWS_REGION || 'us-east-1';
+    return `https://${bucket}.s3.${region}.amazonaws.com/${filename}`;
+  }
+  
+  // Almacenamiento local
   const baseUrl = getBackendUrl();
   return `${baseUrl}/uploads/${filename}`;
 };

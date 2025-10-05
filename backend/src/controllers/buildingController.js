@@ -3,11 +3,24 @@ const prisma = require('../lib/prisma');
 // Obtener todos los edificios
 const getBuildings = async (req, res) => {
   try {
-    // Obtener edificios con administrador y cuenta en una sola consulta
+    // Paginación
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Contar total de edificios
+    const total = await prisma.building.count();
+
+    // Obtener edificios con paginación, administrador y cuenta en una sola consulta
     const buildings = await prisma.building.findMany({
       include: {
         administrator: true,
         account: true
+      },
+      skip,
+      take: limit,
+      orderBy: {
+        name: 'asc'
       }
     });
 
@@ -117,7 +130,15 @@ const getBuildings = async (req, res) => {
       };
     }));
 
-    res.json(buildingsWithBalance);
+    res.json({
+      buildings: buildingsWithBalance,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
     console.error('Error al obtener edificios:', error);
     res.status(500).json({ message: 'Error al obtener edificios' });

@@ -253,14 +253,22 @@ export default function InvoicedServices() {
       });
       
       console.log('🔍 [FRONTEND] Factura importada exitosamente');
-      setOpenImportInvoice(false);
+      
+      // Cerrar el modal primero
+      handleCloseImportInvoice();
       
       // Notificar cambio usando localStorage para actualizar otras páginas
       localStorage.setItem('servicesLastUpdate', Date.now().toString());
       localStorage.setItem('servicesUpdateType', 'service_invoiced');
       
-      // Recargar los servicios para mostrar los cambios
+      // Limpiar caché de axios
+      axios.clearCacheFor?.('/services');
+      
+      // Recargar los servicios para mostrar los cambios inmediatamente
       await fetchServices();
+      
+      // Disparar evento personalizado para que otras páginas también se actualicen
+      window.dispatchEvent(new Event('servicesChanged'));
     } catch (error) {
       console.error('🔍 [FRONTEND] Error al importar factura:', error);
       alert('Error al importar la factura');
