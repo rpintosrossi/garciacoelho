@@ -65,14 +65,15 @@ export function CommonDataProvider({ children }: { children: ReactNode }) {
       setError(null);
       
       const [adminsRes, buildingsRes, techniciansRes, methodsRes] = await Promise.all([
-        cachedApi.get('/administrators'),
+        cachedApi.get('/administrators?basic=true'),
         cachedApi.get('/buildings'),
         cachedApi.get('/technicians'),
         cachedApi.get('/payment-methods')
       ]);
 
-      setAdministrators(adminsRes.data);
-      setBuildings(buildingsRes.data);
+      // Los endpoints de administrators y buildings devuelven objetos con arrays dentro
+      setAdministrators(adminsRes.data.administrators || adminsRes.data);
+      setBuildings(buildingsRes.data.buildings || buildingsRes.data);
       setTechnicians(techniciansRes.data);
       setPaymentMethods(methodsRes.data);
     } catch (err) {
