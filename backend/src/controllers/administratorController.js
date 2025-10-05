@@ -65,15 +65,20 @@ const getAdministrators = async (req, res) => {
     });
 
     // Obtener todos los payment documents en una sola consulta
-    const allPaymentDocs = await prisma.paymentDocument.findMany({
-      where: {
-        OR: [
-          { invoiceId: { in: allServices.map(s => s.invoice?.id).filter(Boolean) } },
-          { remitoId: { in: allServices.flatMap(s => s.remitos.map(r => r.id)) } }
-        ]
-      },
-      include: { payment: true }
-    });
+    const invoiceIds = allServices.map(s => s.invoice?.id).filter(Boolean);
+    const remitoIds = allServices.flatMap(s => s.remitos.map(r => r.id));
+    
+    const allPaymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
+      ? await prisma.paymentDocument.findMany({
+          where: {
+            OR: [
+              ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+              ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
+            ]
+          },
+          include: { payment: true }
+        })
+      : [];
 
     // Crear mapas para acceso rápido
     const servicesByBuilding = allServices.reduce((acc, service) => {
@@ -312,15 +317,17 @@ const getBuildingsBalances = async (req, res) => {
       const remitos = services.flatMap(s => s.remitos);
       const remitoIds = remitos.map(r => r.id);
       // Buscar PaymentDocuments asociados a facturas y remitos de este edificio
-      const paymentDocs = await prisma.paymentDocument.findMany({
-        where: {
-          OR: [
-            { invoiceId: { in: invoiceIds } },
-            { remitoId: { in: remitoIds } }
-          ]
-        },
-        include: { payment: true }
-      });
+      const paymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
+        ? await prisma.paymentDocument.findMany({
+            where: {
+              OR: [
+                ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+                ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
+              ]
+            },
+            include: { payment: true }
+          })
+        : [];
       // Calcular saldo usando la misma lógica que la cuenta corriente
       let saldo = 0;
       

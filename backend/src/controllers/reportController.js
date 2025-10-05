@@ -38,15 +38,17 @@ const getAdminDebtReport = async (req, res) => {
         const remitoIds = remitos.map(r => r.id);
 
         // Buscar PaymentDocuments asociados
-        const paymentDocs = await prisma.paymentDocument.findMany({
-          where: {
-            OR: [
-              { invoiceId: { in: invoiceIds } },
-              { remitoId: { in: remitoIds } }
-            ]
-          },
-          include: { payment: true }
-        });
+        const paymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
+          ? await prisma.paymentDocument.findMany({
+              where: {
+                OR: [
+                  ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+                  ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
+                ]
+              },
+              include: { payment: true }
+            })
+          : [];
 
         // Calcular deuda del edificio
         let buildingDebt = 0;
@@ -165,15 +167,17 @@ const getBuildingDebtReport = async (req, res) => {
       const remitoIds = remitos.map(r => r.id);
 
       // Buscar PaymentDocuments asociados
-      const paymentDocs = await prisma.paymentDocument.findMany({
-        where: {
-          OR: [
-            { invoiceId: { in: invoiceIds } },
-            { remitoId: { in: remitoIds } }
-          ]
-        },
-        include: { payment: true }
-      });
+      const paymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
+        ? await prisma.paymentDocument.findMany({
+            where: {
+              OR: [
+                ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+                ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
+              ]
+            },
+            include: { payment: true }
+          })
+        : [];
 
       // Calcular deuda del edificio
       let totalDebt = 0;

@@ -73,15 +73,20 @@ const getQuickStats = async (req, res) => {
     });
 
     // Obtener todos los payment documents en una sola consulta
-    const allPaymentDocs = await prisma.paymentDocument.findMany({
-      where: {
-        OR: [
-          { invoiceId: { in: allServices.map(s => s.invoice?.id).filter(Boolean) } },
-          { remitoId: { in: allServices.flatMap(s => s.remitos.map(r => r.id)) } }
-        ]
-      },
-      include: { payment: true }
-    });
+    const invoiceIds = allServices.map(s => s.invoice?.id).filter(Boolean);
+    const remitoIds = allServices.flatMap(s => s.remitos.map(r => r.id));
+    
+    const allPaymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
+      ? await prisma.paymentDocument.findMany({
+          where: {
+            OR: [
+              ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+              ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
+            ]
+          },
+          include: { payment: true }
+        })
+      : [];
 
     // Crear mapas para acceso rápido
     const servicesByBuilding = allServices.reduce((acc, service) => {
@@ -189,28 +194,25 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
       }
 
       // Restar todos los pagos
-      const paymentDocuments = await prisma.paymentDocument.findMany({
-        where: {
-          OR: [
-            { 
-              invoiceId: { 
-                in: building.services
-                  .map(s => s.invoice?.id)
-                  .filter(Boolean) 
-              } 
+      const buildingInvoiceIds = building.services
+        .map(s => s.invoice?.id)
+        .filter(Boolean);
+      const buildingRemitoIds = building.services
+        .flatMap(s => s.remitos.map(r => r.id));
+      
+      const paymentDocuments = (buildingInvoiceIds.length > 0 || buildingRemitoIds.length > 0)
+        ? await prisma.paymentDocument.findMany({
+            where: {
+              OR: [
+                ...(buildingInvoiceIds.length > 0 ? [{ invoiceId: { in: buildingInvoiceIds } }] : []),
+                ...(buildingRemitoIds.length > 0 ? [{ remitoId: { in: buildingRemitoIds } }] : [])
+              ]
             },
-            { 
-              remitoId: { 
-                in: building.services
-                  .flatMap(s => s.remitos.map(r => r.id))
-              } 
+            include: {
+              payment: true
             }
-          ]
-        },
-        include: {
-          payment: true
-        }
-      });
+          })
+        : [];
 
       for (const pd of paymentDocuments) {
         saldo -= (pd.payment.originalAmount || pd.payment.amount);
