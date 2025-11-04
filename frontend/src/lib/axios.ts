@@ -77,13 +77,23 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    console.error('[AXIOS] Error en la respuesta:', {
-      status: error.response?.status,
-      url: error.config?.url,
-      message: error.message,
-      data: error.response?.data,
-      fullError: error
-    });
+    // Mejorar el logging del error
+    const errorInfo = {
+      status: error.response?.status || 'Sin respuesta',
+      url: error.config?.url || 'URL desconocida',
+      message: error.message || 'Sin mensaje',
+      data: error.response?.data || 'Sin datos',
+      code: error.code || 'Sin código',
+      isNetworkError: !error.response,
+    };
+    
+    console.error('[AXIOS] Error en la respuesta:', errorInfo);
+    
+    // Si es un error de red (no hay respuesta del servidor)
+    if (!error.response) {
+      console.error('[AXIOS] ⚠️ Error de red - El servidor backend puede no estar corriendo');
+    }
+    
     return Promise.reject(error);
   }
 );

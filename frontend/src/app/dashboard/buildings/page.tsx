@@ -218,13 +218,13 @@ const BuildingsPage = () => {
   });
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("¿Seguro que deseas eliminar este edificio?")) return;
+    if (!window.confirm("⚠️ ¿Seguro que deseas eliminar este edificio?\n\nEsto eliminará PERMANENTEMENTE:\n- El edificio\n- Todos los servicios asociados\n- Todas las facturas\n- Todos los remitos\n- Todos los pagos relacionados\n\nEsta acción NO se puede deshacer.")) return;
     try {
       const token = localStorage.getItem("token");
       await api.delete(`/buildings/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setSnackbar({ open: true, message: "Edificio eliminado", severity: "success" });
+      setSnackbar({ open: true, message: "Edificio eliminado correctamente junto con todos sus datos asociados", severity: "success" });
       fetchBuildings();
     } catch (error: any) {
       setSnackbar({ open: true, message: error?.response?.data?.message || "Error al eliminar", severity: "error" });
@@ -252,7 +252,18 @@ const BuildingsPage = () => {
     }
   };
 
-  const sortedBuildings = [...buildings].sort((a, b) => {
+  // Primero filtrar
+  const filteredBuildings = buildingFilter
+    ? buildings.filter(b =>
+        (b.administrator?.name && b.administrator.name.toLowerCase().includes(buildingFilter.toLowerCase())) ||
+        (b.cuit && b.cuit.toLowerCase().includes(buildingFilter.toLowerCase())) ||
+        (b.locality && b.locality.toLowerCase().includes(buildingFilter.toLowerCase())) ||
+        (b.name && b.name.toLowerCase().includes(buildingFilter.toLowerCase()))
+      )
+    : buildings;
+
+  // Luego ordenar los filtrados
+  const sortedAndFilteredBuildings = [...filteredBuildings].sort((a, b) => {
     let comparison = 0;
     switch (orderBy) {
       case 'name':
@@ -290,15 +301,6 @@ const BuildingsPage = () => {
     }
     return orderDirection === 'asc' ? comparison : -comparison;
   });
-
-  const filteredBuildings = buildingFilter
-    ? buildings.filter(b =>
-        (b.administrator?.name && b.administrator.name.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.cuit && b.cuit.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.locality && b.locality.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.name && b.name.toLowerCase().includes(buildingFilter.toLowerCase()))
-      )
-    : buildings;
 
   return (
     <Box p={3}>
@@ -363,7 +365,7 @@ const BuildingsPage = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredBuildings.map((building) => (
+              {sortedAndFilteredBuildings.map((building) => (
                 <TableRow key={building.id}>
                   <TableCell>{building.name}</TableCell>
                   <TableCell>{building.address}</TableCell>
@@ -409,9 +411,9 @@ const BuildingsPage = () => {
                   <Typography 
                     variant="subtitle1" 
                     fontWeight="bold"
-                    color={filteredBuildings.reduce((sum, building) => sum + (building.account?.balance || 0), 0) < 0 ? 'error' : 'success'}
+                    color={sortedAndFilteredBuildings.reduce((sum, building) => sum + (building.account?.balance || 0), 0) < 0 ? 'error' : 'success'}
                   >
-                    {formatCurrency(filteredBuildings.reduce((sum, building) => sum + (building.account?.balance || 0), 0))}
+                    {formatCurrency(sortedAndFilteredBuildings.reduce((sum, building) => sum + (building.account?.balance || 0), 0))}
                   </Typography>
                 </TableCell>
                 <TableCell></TableCell>

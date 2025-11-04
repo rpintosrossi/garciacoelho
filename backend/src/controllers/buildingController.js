@@ -88,12 +88,18 @@ const getBuildings = async (req, res) => {
         saldo += inv.amount;
       }
       
-      // Restar todos los pagos (como en la cuenta corriente)
+      // Restar todos los pagos aplicados (usando el monto específico de cada documento)
+      let totalDescuentos = 0;
       for (const inv of invoices) {
         const paymentDocs = paymentDocsByInvoice[inv.id] || [];
         for (const pd of paymentDocs) {
-          const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
-          saldo -= montoOriginalPago;
+          // Usar pd.amount que es el monto aplicado a esta factura específica
+          saldo -= pd.amount;
+          // Restar también los descuentos
+          if (pd.payment?.discount) {
+            totalDescuentos += pd.payment.discount;
+            saldo -= pd.payment.discount;
+          }
         }
       }
 
@@ -111,11 +117,13 @@ const getBuildings = async (req, res) => {
         }
         const paymentDocs = paymentDocsByInvoice[inv.id] || [];
         for (const pd of paymentDocs) {
-          totalPagos += (pd.payment.originalAmount || pd.payment.amount);
+          // Usar pd.amount que es el monto aplicado a esta factura
+          totalPagos += pd.amount;
         }
       }
       console.log(`  - Facturas en efectivo: ${facturasEfectivo}`);
-      console.log(`  - Pagos totales (incluyendo efectivo): ${totalPagos}`);
+      console.log(`  - Pagos totales aplicados: ${totalPagos}`);
+      console.log(`  - Descuentos totales: ${totalDescuentos}`);
       console.log(`  - Saldo calculado: ${saldo}`);
 
       // Actualizar el saldo en la cuenta solo si es diferente
@@ -340,25 +348,137 @@ const deleteBuilding = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar si el edificio tiene servicios asociados
+    console.log(`🗑️ [BUILDINGS] Iniciando eliminación de edificio: ${id}`);
+
+    // Obtener todos los servicios del edificio
     const services = await prisma.service.findMany({
-      where: { buildingId: id }
+      where: { buildingId: id },
+      include: {
+        invoice: {
+          include: {
+            paymentDocuments: true
+          }
+        },
+        remitos: {
+          include: {
+            paymentDocuments: true
+          }
+        }
+      }
     });
 
-    if (services.length > 0) {
-      return res.status(400).json({ 
-        message: 'No se puede eliminar el edificio porque tiene servicios asociados' 
+    console.log(`🗑️ [BUILDINGS] Edificio tiene ${services.length} servicios asociados`);
+
+    // Eliminar en orden correcto (de dependencias a principales)
+    for (const service of services) {
+      console.log(`🗑️ [BUILDINGS] Procesando servicio: ${service.id}`);
+
+      // 1. Eliminar PaymentDocuments de la factura
+      if (service.invoice) {
+        const invoicePaymentDocs = service.invoice.paymentDocuments || [];
+        if (invoicePaymentDocs.length > 0) {
+          console.log(`🗑️ [BUILDINGS] Eliminando ${invoicePaymentDocs.length} documentos de pago de factura`);
+          await prisma.paymentDocument.deleteMany({
+            where: {
+              invoiceId: service.invoice.id
+            }
+          });
+        }
+
+        // 2. Eliminar la factura
+        console.log(`🗑️ [BUILDINGS] Eliminando factura: ${service.invoice.id}`);
+        await prisma.invoice.delete({
+          where: { id: service.invoice.id }
+        });
+      }
+
+      // 3. Eliminar PaymentDocuments de remitos
+      for (const remito of service.remitos) {
+        const remitoPaymentDocs = remito.paymentDocuments || [];
+        if (remitoPaymentDocs.length > 0) {
+          console.log(`🗑️ [BUILDINGS] Eliminando ${remitoPaymentDocs.length} documentos de pago de remito`);
+          await prisma.paymentDocument.deleteMany({
+            where: {
+              remitoId: remito.id
+            }
+          });
+        }
+
+        // 4. Eliminar el remito
+        console.log(`🗑️ [BUILDINGS] Eliminando remito: ${remito.id}`);
+        await prisma.remito.delete({
+          where: { id: remito.id }
+        });
+      }
+
+      // 5. Eliminar el servicio
+      console.log(`🗑️ [BUILDINGS] Eliminando servicio: ${service.id}`);
+      await prisma.service.delete({
+        where: { id: service.id }
       });
     }
 
+    // 6. Eliminar pagos asociados al edificio (si los hay)
+    const payments = await prisma.payment.findMany({
+      where: {
+        documents: {
+          some: {
+            OR: [
+              {
+                invoice: {
+                  service: {
+                    buildingId: id
+                  }
+                }
+              },
+              {
+                remito: {
+                  service: {
+                    buildingId: id
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    if (payments.length > 0) {
+      console.log(`🗑️ [BUILDINGS] Eliminando ${payments.length} pagos asociados`);
+      for (const payment of payments) {
+        await prisma.payment.delete({
+          where: { id: payment.id }
+        });
+      }
+    }
+
+    // 7. Eliminar la cuenta corriente del edificio (Account)
+    const account = await prisma.account.findUnique({
+      where: { buildingId: id }
+    });
+
+    if (account) {
+      console.log(`🗑️ [BUILDINGS] Eliminando cuenta corriente: ${account.id}`);
+      await prisma.account.delete({
+        where: { id: account.id }
+      });
+    }
+
+    // 8. Finalmente eliminar el edificio
+    console.log(`🗑️ [BUILDINGS] Eliminando edificio: ${id}`);
     await prisma.building.delete({
       where: { id }
     });
 
-    res.json({ message: 'Edificio eliminado correctamente' });
+    console.log(`✅ [BUILDINGS] Edificio eliminado correctamente con todos sus datos asociados`);
+    res.json({ message: 'Edificio eliminado correctamente junto con todos sus datos asociados' });
   } catch (error) {
-    console.error('Error al eliminar edificio:', error);
-    res.status(500).json({ message: 'Error al eliminar edificio' });
+    console.error('❌ [BUILDINGS] Error al eliminar edificio:', error);
+    res.status(500).json({ 
+      message: 'Error al eliminar edificio',
+      error: error.message 
+    });
   }
 };
 
@@ -512,21 +632,26 @@ const getBuildingAccountMovements = async (req, res) => {
       
       const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
       const montoAplicado = pd.amount;
-      let descripcion = `Pago de ${formatCurrency(montoOriginalPago)}`;
+      let descripcion = `Pago de ${formatCurrency(montoAplicado)}`;
+      
+      // Si el monto aplicado es diferente al monto total del pago, mostrar ambos
+      if (Math.abs(montoAplicado - montoOriginalPago) > 0.01) {
+        descripcion += ` (de un total de ${formatCurrency(montoOriginalPago)})`;
+      }
       
       // Agregar información de descuento si existe
       if (pd.payment.discount > 0) {
         const descuentoPorcentaje = pd.payment.originalAmount ? 
           ((pd.payment.discount / pd.payment.originalAmount) * 100).toFixed(1) : 0;
-        descripcion += ` (con descuento de ${formatCurrency(pd.payment.discount)} - ${descuentoPorcentaje}%)`;
+        descripcion += ` - Descuento: ${formatCurrency(pd.payment.discount)} (${descuentoPorcentaje}%)`;
         if (pd.payment.discountReason) {
           descripcion += ` - ${pd.payment.discountReason}`;
         }
       }
       
-      // Si el pago involucró más de un documento, mostrar el total para información
+      // Si el pago involucró más de un documento, mostrar información
       if (pd.payment.documents && pd.payment.documents.length > 1) {
-        descripcion += ` (total pagado: ${formatCurrency(montoOriginalPago)})`;
+        descripcion += ` - Pago distribuido entre ${pd.payment.documents.length} documentos`;
       }
       
       // Documentos asociados
@@ -557,7 +682,7 @@ const getBuildingAccountMovements = async (req, res) => {
         fecha: pd.payment.date,
         tipo: 'PAGO',
         comprobante: pd.payment.comprobante,
-        monto: -Math.abs(montoOriginalPago),
+        monto: -Math.abs(montoAplicado), // Usar el monto aplicado específicamente a este edificio
         descripcion,
         extra,
       });
@@ -756,14 +881,26 @@ const getBuildingAccountDetails = async (req, res) => {
 
     // Crear un mapa de facturas con sus pagos asociados
     const invoicesWithPayments = invoices.map(invoice => {
-      const associatedPayments = paymentDocs
-        .filter(pd => pd.invoiceId === invoice.id)
-        .map(pd => pd.payment);
+      const associatedPaymentDocs = paymentDocs.filter(pd => pd.invoiceId === invoice.id);
       
       // Para facturas con método de pago EFECTIVO, considerar que ya están pagadas
       const isEfectivo = invoice.paymentMethod === 'EFECTIVO';
-      const totalPaid = isEfectivo ? invoice.amount : associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
-      const remaining = isEfectivo ? 0 : invoice.amount - associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
+      
+      // Calcular el total pagado usando pd.amount (monto aplicado a esta factura específica)
+      const totalPaid = isEfectivo 
+        ? invoice.amount 
+        : associatedPaymentDocs.reduce((sum, pd) => sum + pd.amount, 0);
+      
+      // Calcular total de descuentos aplicados a esta factura
+      const totalDiscounts = associatedPaymentDocs.reduce((sum, pd) => {
+        return sum + (pd.payment?.discount || 0);
+      }, 0);
+      
+      // El monto a pagar es el monto original menos los descuentos
+      const amountToPay = invoice.amount - totalDiscounts;
+      
+      // El monto pendiente es el monto a pagar menos lo ya pagado
+      const remaining = isEfectivo ? 0 : amountToPay - totalPaid;
       
       const result = {
         id: invoice.id,
@@ -773,7 +910,10 @@ const getBuildingAccountDetails = async (req, res) => {
         paymentMethod: invoice.paymentMethod,
         createdAt: invoice.createdAt,
         service: services.find(s => s.invoice?.id === invoice.id),
-        payments: associatedPayments,
+        payments: associatedPaymentDocs.map(pd => ({
+          ...pd.payment,
+          amountApplied: pd.amount // Monto específico aplicado a esta factura
+        })),
         totalPaid: totalPaid,
         remaining: remaining,
         isEfectivo: isEfectivo
@@ -815,7 +955,8 @@ const getBuildingAccountDetails = async (req, res) => {
           allTransactions.push({
             id: payment.id,
             type: 'payment',
-            amount: payment.originalAmount || payment.amount,
+            amount: payment.amountApplied, // Usar el monto aplicado específicamente a esta factura
+            totalAmount: payment.originalAmount || payment.amount, // Monto total del pago (para referencia)
             status: 'PAGADO',
             createdAt: payment.createdAt,
             comprobante: payment.comprobante,
@@ -834,13 +975,18 @@ const getBuildingAccountDetails = async (req, res) => {
 
     // Calcular saldo actual
     const totalInvoices = invoices.reduce((sum, inv) => sum + inv.amount, 0);
-    const totalPayments = paymentDocs.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
-    const currentBalance = totalInvoices - totalPayments;
+    // Usar pd.amount que es el monto aplicado específicamente a este edificio
+    const totalPayments = paymentDocs.reduce((sum, pd) => sum + pd.amount, 0);
+    // Calcular total de descuentos
+    const totalDiscounts = paymentDocs.reduce((sum, pd) => sum + (pd.payment?.discount || 0), 0);
+    // Saldo = Total Facturas - Total Pagos - Total Descuentos
+    const currentBalance = totalInvoices - totalPayments - totalDiscounts;
 
     // DEBUG: Agregar logs para comparar con los listados
     console.log(`🔍 [DEBUG] Cuenta corriente edificio ${building.name} (${id}):`);
     console.log(`  - Facturas: ${invoices.length}, Total: ${totalInvoices}`);
     console.log(`  - Pagos totales: ${totalPayments}`);
+    console.log(`  - Descuentos totales: ${totalDiscounts}`);
     console.log(`  - Saldo calculado: ${currentBalance}`);
 
     console.log('🔍 [BACKEND] Enviando respuesta final:', {
@@ -858,6 +1004,7 @@ const getBuildingAccountDetails = async (req, res) => {
       summary: {
         totalInvoices,
         totalPayments,
+        totalDiscounts,
         currentBalance,
         totalTransactions: allTransactions.length
       }
@@ -968,7 +1115,8 @@ const createBuildingPayment = async (req, res) => {
       }
     });
 
-    const totalPaid = paymentDocuments.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
+    // Usar pd.amount que es el monto aplicado a esta factura/remito específico
+    const totalPaid = paymentDocuments.reduce((sum, pd) => sum + pd.amount, 0);
     const remaining = invoiceOrRemito.amount - totalPaid;
 
     console.log('💰 [BUILDING PAYMENT] Saldo calculado:', {

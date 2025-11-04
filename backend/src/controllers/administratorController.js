@@ -121,12 +121,12 @@ const getAdministrators = async (req, res) => {
           saldo += inv.amount;
         }
         
-        // Restar todos los pagos (como en la cuenta corriente)
+        // Restar todos los pagos (solo el monto aplicado a cada factura específica)
         for (const inv of invoices) {
           const paymentDocs = paymentDocsByInvoice[inv.id] || [];
           for (const pd of paymentDocs) {
-            const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
-            saldo -= montoOriginalPago;
+            // Usar pd.amount que es el monto específico aplicado a esta factura
+            saldo -= pd.amount;
           }
         }
 
@@ -336,12 +336,12 @@ const getBuildingsBalances = async (req, res) => {
         if (inv) saldo += inv.amount;
       }
       
-      // Restar todos los pagos (como en la cuenta corriente)
+      // Restar todos los pagos (solo el monto aplicado a cada factura específica)
       for (const pd of paymentDocs) {
         // Solo procesar pagos de facturas (no remitos)
         if (pd.invoiceId) {
-          const montoOriginalPago = pd.payment.originalAmount || pd.payment.amount;
-          saldo -= montoOriginalPago;
+          // Usar pd.amount que es el monto específico aplicado a esta factura
+          saldo -= pd.amount;
         }
       }
       // Actualizar el saldo en la cuenta

@@ -86,8 +86,11 @@ export default function NewService() {
           api.get('/buildings'),
           api.get('/technicians'),
         ]);
+        console.log('Respuesta de edificios:', buildingsRes.data);
         console.log('Respuesta de técnicos:', techniciansRes.data);
-        setBuildings(buildingsRes.data);
+        
+        // Manejar la respuesta que puede ser un objeto con array o directamente un array
+        setBuildings(buildingsRes.data.buildings || buildingsRes.data);
         setTechnicians(techniciansRes.data);
       } catch (error) {
         console.error('Error al cargar datos:', error);

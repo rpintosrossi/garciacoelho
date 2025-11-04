@@ -55,8 +55,9 @@ export default function InvoicePage() {
         ]);
         console.log('🔍 [FRONTEND] Datos del servicio recibidos:', serviceRes.data);
         setService(serviceRes.data);
-        setBuildings(buildingsRes.data);
-        setAdministrators(adminsRes.data);
+        // Manejar la respuesta que puede ser un objeto con array o directamente un array
+        setBuildings(buildingsRes.data.buildings || buildingsRes.data);
+        setAdministrators(adminsRes.data.administrators || adminsRes.data);
       } catch (err) {
         setError('Error al cargar los datos');
       } finally {

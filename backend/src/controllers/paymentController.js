@@ -84,17 +84,40 @@ const createPayment = async (req, res) => {
 
     // Asociar documentos con sus montos específicos
     if (docsToAssociate && docsToAssociate.length > 0) {
-      console.log('💰 [PAYMENT] Asociando documentos:', docsToAssociate);
+      console.log('💰 [PAYMENT] Asociando documentos al pago:', {
+        pagoId: pago.id,
+        montoPago: montoFinal,
+        cantidadDocumentos: docsToAssociate.length,
+        documentos: docsToAssociate.map(d => ({
+          type: d.type,
+          id: d.id,
+          montoAplicado: d.amount
+        }))
+      });
+      
       for (const doc of docsToAssociate) {
+        const montoAplicado = parseFloat(doc.amount) || 0;
+        console.log(`💰 [PAYMENT] Creando PaymentDocument:`, {
+          paymentId: pago.id,
+          type: doc.type,
+          documentId: doc.id,
+          amount: montoAplicado
+        });
+        
         const paymentDoc = await prisma.paymentDocument.create({
           data: {
             paymentId: pago.id,
             invoiceId: doc.type === 'FACTURA' ? doc.id : null,
             remitoId: doc.type === 'REMITO' ? doc.id : null,
-            amount: parseFloat(doc.amount) || 0
+            amount: montoAplicado
           }
         });
-        console.log('💰 [PAYMENT] Documento asociado:', paymentDoc.id);
+        console.log('✅ [PAYMENT] PaymentDocument creado:', {
+          id: paymentDoc.id,
+          amount: paymentDoc.amount,
+          invoiceId: paymentDoc.invoiceId,
+          remitoId: paymentDoc.remitoId
+        });
       }
     } else {
       console.log('💰 [PAYMENT] No hay documentos para asociar');

@@ -267,6 +267,7 @@ const AdministratorsPage = () => {
           <TableHead>
             <TableRow>
               <TableCell>Nombre</TableCell>
+              <TableCell>Email</TableCell>
               <TableCell>Dirección Oficina</TableCell>
               <TableCell>Saldo</TableCell>
               <TableCell>Acciones</TableCell>
@@ -276,6 +277,7 @@ const AdministratorsPage = () => {
             {filteredAdministrators.map((administrator) => (
               <TableRow key={administrator.id}>
                 <TableCell>{administrator.name}</TableCell>
+                <TableCell>{administrator.email}</TableCell>
                 <TableCell>{administrator.officeAddress || '-'}</TableCell>
                 <TableCell>{formatCurrency(administrator.saldoTotal)}</TableCell>
                 <TableCell>
@@ -293,7 +295,7 @@ const AdministratorsPage = () => {
             ))}
             {/* Fila de total */}
             <TableRow sx={{ backgroundColor: 'grey.100', fontWeight: 'bold' }}>
-              <TableCell colSpan={2} align="right" sx={{ fontWeight: 'bold' }}>
+              <TableCell colSpan={3} align="right" sx={{ fontWeight: 'bold' }}>
                 <Typography variant="subtitle1" fontWeight="bold">
                   SALDO TOTAL:
                 </Typography>

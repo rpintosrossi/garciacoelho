@@ -401,8 +401,8 @@ const uploadReceipt = async (req, res) => {
         const randomNum = Math.floor(1000 + Math.random() * 9000);
         generatedNumber = `REM-${year}-${randomNum}`;
         
-        // Verificar si ya existe
-        const exists = await prisma.remito.findUnique({
+        // Verificar si ya existe (usar findFirst porque number no es único por sí solo)
+        const exists = await prisma.remito.findFirst({
           where: { number: generatedNumber }
         });
         if (!exists) unique = true;

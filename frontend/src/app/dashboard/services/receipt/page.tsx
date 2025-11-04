@@ -77,6 +77,11 @@ export default function ServicesWithReceipt() {
   const [remitoNumber, setRemitoNumber] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  
+  // Estados para el diálogo de reasignación
+  const [reassignDialogOpen, setReassignDialogOpen] = useState(false);
+  const [serviceToReassign, setServiceToReassign] = useState<Service | null>(null);
+  const [reassignReason, setReassignReason] = useState('');
 
   const fetchServices = async () => {
     try {
@@ -206,16 +211,32 @@ export default function ServicesWithReceipt() {
     setError('');
   };
 
-  const handleReassign = async (service: Service) => {
-    if (!confirm('¿Estás seguro de que quieres reasignar este servicio? Esto lo volverá al estado de asignación.')) {
+  const handleReassign = (service: Service) => {
+    setServiceToReassign(service);
+    setReassignDialogOpen(true);
+    setReassignReason('');
+  };
+
+  const handleConfirmReassign = async () => {
+    if (!serviceToReassign) return;
+    
+    if (!reassignReason.trim()) {
+      setError('Debes proporcionar un motivo de reasignación');
       return;
     }
 
-    setReassigningId(service.id);
+    setReassigningId(serviceToReassign.id);
     setError('');
     
     try {
-      await api.post(`/services/${service.id}/cancel`);
+      await api.post(`/services/${serviceToReassign.id}/cancel`, {
+        cancellationReason: reassignReason.trim()
+      });
+      
+      // Cerrar el diálogo
+      setReassignDialogOpen(false);
+      setServiceToReassign(null);
+      setReassignReason('');
       
       // Actualizar la lista de servicios
       await fetchServices();
@@ -238,6 +259,12 @@ export default function ServicesWithReceipt() {
     } finally {
       setReassigningId(null);
     }
+  };
+
+  const handleCloseReassignDialog = () => {
+    setReassignDialogOpen(false);
+    setServiceToReassign(null);
+    setReassignReason('');
   };
 
   const handleAdminChange = (_: any, newValue: any) => {
@@ -419,6 +446,49 @@ export default function ServicesWithReceipt() {
             disabled={!selectedFile || uploadingId === selectedService?.id}
           >
             {uploadingId === selectedService?.id ? 'Subiendo...' : 'Subir Remito'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para reasignar servicio */}
+      <Dialog open={reassignDialogOpen} onClose={handleCloseReassignDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Reasignar Servicio - {serviceToReassign?.building?.name}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              <b>Descripción:</b> {serviceToReassign?.description}
+            </Typography>
+            
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              Este servicio volverá al estado de asignación y deberá ser reasignado a un técnico.
+            </Alert>
+            
+            <TextField
+              label="Motivo de reasignación"
+              value={reassignReason}
+              onChange={(e) => setReassignReason(e.target.value)}
+              fullWidth
+              multiline
+              rows={3}
+              placeholder="Ej: Técnico no puede completar el trabajo, error en la asignación, etc."
+              required
+              helperText="Debes proporcionar un motivo para reasignar el servicio"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseReassignDialog} disabled={reassigningId !== null}>
+            Cancelar
+          </Button>
+          <Button 
+            onClick={handleConfirmReassign} 
+            variant="contained"
+            color="warning"
+            disabled={!reassignReason.trim() || reassigningId !== null}
+          >
+            {reassigningId !== null ? 'Reasignando...' : 'Confirmar Reasignación'}
           </Button>
         </DialogActions>
       </Dialog>

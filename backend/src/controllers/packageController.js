@@ -4,6 +4,132 @@ const fs = require('fs');
 const path = require('path');
 const { getFileUrl } = require('../utils/fileUtils');
 const { PDFDocument: PDFLib } = require('pdf-lib');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const s3Client = require('../config/s3');
+const https = require('https');
+const http = require('http');
+
+// Función para descargar archivo desde S3 o URL
+const downloadFile = async (fileUrl) => {
+  try {
+    // Si es una URL de S3, intentar múltiples métodos
+    if (fileUrl.includes('s3.') && fileUrl.includes('amazonaws.com')) {
+      const urlParts = new URL(fileUrl);
+      const key = urlParts.pathname.substring(1); // Remover el primer /
+      const bucket = process.env.AWS_S3_BUCKET || 'garciacoelho';
+      
+      console.log(`📥 [S3] Intentando descargar: ${key}`);
+      
+      // Método 1: Intentar descargar directamente (por si el archivo es público)
+      try {
+        console.log(`🔓 [S3] Método 1: Intentando acceso directo (público)...`);
+        const directBuffer = await new Promise((resolve, reject) => {
+          https.get(fileUrl, (response) => {
+            if (response.statusCode === 200) {
+              const chunks = [];
+              response.on('data', (chunk) => chunks.push(chunk));
+              response.on('end', () => resolve(Buffer.concat(chunks)));
+              response.on('error', reject);
+            } else {
+              reject(new Error(`Direct access failed: ${response.statusCode}`));
+            }
+          }).on('error', reject);
+        });
+        console.log(`✅ [S3] Archivo descargado directamente (público)`);
+        return directBuffer;
+      } catch (directError) {
+        console.log(`⚠️ [S3] Acceso directo falló: ${directError.message}`);
+      }
+      
+      // Método 2: Intentar con URL pre-firmada
+      try {
+        console.log(`🔑 [S3] Método 2: Generando URL pre-firmada...`);
+        const command = new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        });
+        
+        const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        console.log(`✅ [S3] URL pre-firmada generada`);
+        console.log(`🔍 [S3] URL: ${signedUrl.substring(0, 100)}...`);
+        
+        const signedBuffer = await new Promise((resolve, reject) => {
+          https.get(signedUrl, (response) => {
+            if (response.statusCode === 200) {
+              const chunks = [];
+              response.on('data', (chunk) => chunks.push(chunk));
+              response.on('end', () => resolve(Buffer.concat(chunks)));
+              response.on('error', reject);
+            } else {
+              reject(new Error(`Signed URL failed: ${response.statusCode}`));
+            }
+          }).on('error', reject);
+        });
+        console.log(`✅ [S3] Archivo descargado con URL pre-firmada`);
+        return signedBuffer;
+      } catch (signedError) {
+        console.log(`⚠️ [S3] URL pre-firmada falló: ${signedError.message}`);
+      }
+      
+      // Método 3: Intentar con GetObject directamente
+      try {
+        console.log(`📦 [S3] Método 3: Intentando GetObject directo...`);
+        const command = new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        });
+        
+        const response = await s3Client.send(command);
+        const chunks = [];
+        
+        for await (const chunk of response.Body) {
+          chunks.push(chunk);
+        }
+        
+        console.log(`✅ [S3] Archivo descargado con GetObject`);
+        return Buffer.concat(chunks);
+      } catch (getObjectError) {
+        console.error(`❌ [S3] GetObject falló: ${getObjectError.message}`);
+        throw new Error(`No se pudo descargar el archivo de S3: ${key}`);
+      }
+    } else {
+      // Si es una URL HTTP/HTTPS regular
+      console.log(`📥 [HTTP] Descargando archivo desde URL: ${fileUrl}`);
+      
+      return new Promise((resolve, reject) => {
+        const client = fileUrl.startsWith('https') ? https : http;
+        
+        // Opciones para ignorar errores de certificado SSL (solo para desarrollo/testing)
+        const options = fileUrl.startsWith('https') ? {
+          rejectUnauthorized: false // Ignorar errores de certificado SSL
+        } : {};
+        
+        const request = client.get(fileUrl, options, (response) => {
+          // Seguir redirecciones
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            const redirectUrl = response.headers.location;
+            console.log(`↪️ [HTTP] Redirigiendo a: ${redirectUrl}`);
+            return downloadFile(redirectUrl).then(resolve).catch(reject);
+          }
+          
+          if (response.statusCode !== 200) {
+            reject(new Error(`Failed to download file: ${response.statusCode}`));
+            return;
+          }
+          
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => resolve(Buffer.concat(chunks)));
+          response.on('error', reject);
+        }).on('error', reject);
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Error descargando archivo ${fileUrl}:`, error.message);
+    throw error;
+  }
+};
 
 // Función para verificar si un archivo es PDF
 const isPDF = (filename) => {
@@ -626,7 +752,7 @@ const getPackages = async (req, res) => {
       try {
         const packagePdfBuffer = Buffer.concat(chunks);
         
-                 // Recolectar todos los PDFs de remitos y facturas
+         // Recolectar todos los PDFs de remitos y facturas
          const remitoPDFs = [];
          const invoicePDFs = [];
          
@@ -641,16 +767,13 @@ const getPackages = async (req, res) => {
            
            // Verificar si la factura tiene un PDF asociado
            if (invoice.fileUrl && isPDF(invoice.fileUrl)) {
-             // Extraer el nombre del archivo de la URL completa
-             const filename = invoice.fileUrl.split('/').pop(); // Obtiene el último segmento de la URL
-             const filePath = path.join(__dirname, '../../uploads', filename);
-             console.log(`🔍 [PACKAGES] URL de factura: ${invoice.fileUrl}`);
-             console.log(`🔍 [PACKAGES] Nombre del archivo de factura: ${filename}`);
-             console.log(`🔍 [PACKAGES] Ruta del archivo de factura: ${filePath}`);
-             console.log(`🔍 [PACKAGES] ¿Existe el archivo de factura?: ${fs.existsSync(filePath)}`);
-             if (fs.existsSync(filePath)) {
-               invoicePDFs.push(filePath);
-               console.log(`✅ [PACKAGES] PDF de factura agregado: ${filePath}`);
+             try {
+               console.log(`� [PACKAGES] Descargando PDF de factura desde: ${invoice.fileUrl}`);
+               const pdfBuffer = await downloadFile(invoice.fileUrl);
+               invoicePDFs.push({ buffer: pdfBuffer, name: `factura_${invoice.number}` });
+               console.log(`✅ [PACKAGES] PDF de factura descargado: ${invoice.number}`);
+             } catch (error) {
+               console.error(`❌ [PACKAGES] Error al descargar PDF de factura ${invoice.fileUrl}:`, error.message);
              }
            }
            
@@ -664,16 +787,13 @@ const getPackages = async (req, res) => {
                  for (const fileUrl of remito.receiptImages) {
                    console.log(`🔍 [PACKAGES] Archivo: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
                    if (isPDF(fileUrl)) {
-                     // Extraer el nombre del archivo de la URL completa
-                     const filename = fileUrl.split('/').pop(); // Obtiene el último segmento de la URL
-                     const filePath = path.join(__dirname, '../../uploads', filename);
-                     console.log(`🔍 [PACKAGES] URL original: ${fileUrl}`);
-                     console.log(`🔍 [PACKAGES] Nombre del archivo extraído: ${filename}`);
-                     console.log(`🔍 [PACKAGES] Ruta del archivo: ${filePath}`);
-                     console.log(`🔍 [PACKAGES] ¿Existe el archivo?: ${fs.existsSync(filePath)}`);
-                     if (fs.existsSync(filePath)) {
-                       remitoPDFs.push(filePath);
-                       console.log(`✅ [PACKAGES] PDF agregado: ${filePath}`);
+                     try {
+                       console.log(`📥 [PACKAGES] Descargando PDF de remito desde: ${fileUrl}`);
+                       const pdfBuffer = await downloadFile(fileUrl);
+                       remitoPDFs.push({ buffer: pdfBuffer, name: `remito_${remito.number}` });
+                       console.log(`✅ [PACKAGES] PDF de remito descargado: ${remito.number}`);
+                     } catch (error) {
+                       console.error(`❌ [PACKAGES] Error al descargar PDF de remito ${fileUrl}:`, error.message);
                      }
                    }
                  }
@@ -682,7 +802,7 @@ const getPackages = async (req, res) => {
            }
          }
         
-                 // PDFs de remitos de Prov
+         // PDFs de remitos de Prov
          for (const payment of payments) {
            console.log(`🔍 [PACKAGES] Procesando pago: ${payment.id}`);
            for (const paymentDoc of payment.documents) {
@@ -694,16 +814,13 @@ const getPackages = async (req, res) => {
                  for (const fileUrl of remito.receiptImages) {
                    console.log(`🔍 [PACKAGES] Archivo de pago: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
                    if (isPDF(fileUrl)) {
-                     // Extraer el nombre del archivo de la URL completa
-                     const filename = fileUrl.split('/').pop(); // Obtiene el último segmento de la URL
-                     const filePath = path.join(__dirname, '../../uploads', filename);
-                     console.log(`🔍 [PACKAGES] URL original de pago: ${fileUrl}`);
-                     console.log(`🔍 [PACKAGES] Nombre del archivo de pago extraído: ${filename}`);
-                     console.log(`🔍 [PACKAGES] Ruta del archivo de pago: ${filePath}`);
-                     console.log(`🔍 [PACKAGES] ¿Existe el archivo de pago?: ${fs.existsSync(filePath)}`);
-                     if (fs.existsSync(filePath)) {
-                       remitoPDFs.push(filePath);
-                       console.log(`✅ [PACKAGES] PDF de pago agregado: ${filePath}`);
+                     try {
+                       console.log(`� [PACKAGES] Descargando PDF de remito de pago desde: ${fileUrl}`);
+                       const pdfBuffer = await downloadFile(fileUrl);
+                       remitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
+                       console.log(`✅ [PACKAGES] PDF de remito de pago descargado: ${remito.number}`);
+                     } catch (error) {
+                       console.error(`❌ [PACKAGES] Error al descargar PDF de remito de pago ${fileUrl}:`, error.message);
                      }
                    }
                  }
@@ -712,18 +829,8 @@ const getPackages = async (req, res) => {
            }
          }
         
-                 console.log(`📄 [PACKAGES] Encontrados ${remitoPDFs.length} PDFs de remitos para incluir`);
-                 console.log(`📄 [PACKAGES] Encontrados ${invoicePDFs.length} PDFs de facturas para incluir`);
-         
-         // Verificar qué archivos hay en la carpeta uploads
-         const uploadsPath = path.join(__dirname, '../../uploads');
-         console.log(`🔍 [PACKAGES] Verificando carpeta uploads: ${uploadsPath}`);
-         if (fs.existsSync(uploadsPath)) {
-           const files = fs.readdirSync(uploadsPath);
-           console.log(`🔍 [PACKAGES] Archivos en uploads:`, files);
-         } else {
-           console.log(`❌ [PACKAGES] La carpeta uploads no existe`);
-         }
+         console.log(`📄 [PACKAGES] Encontrados ${remitoPDFs.length} PDFs de remitos para incluir`);
+         console.log(`📄 [PACKAGES] Encontrados ${invoicePDFs.length} PDFs de facturas para incluir`);
         
         // Combinar el PDF del paquete con los PDFs de remitos y facturas
         const mergedPdf = await PDFLib.create();
@@ -734,28 +841,26 @@ const getPackages = async (req, res) => {
         packagePages.forEach((page) => mergedPdf.addPage(page));
         
         // Agregar los PDFs de facturas primero (para que aparezcan antes que los remitos)
-        for (const pdfPath of invoicePDFs) {
+        for (const pdfData of invoicePDFs) {
           try {
-            const pdfBytes = fs.readFileSync(pdfPath);
-            const pdfDoc = await PDFLib.load(pdfBytes);
+            const pdfDoc = await PDFLib.load(pdfData.buffer);
             const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
             pages.forEach((page) => mergedPdf.addPage(page));
-            console.log(`📄 [PACKAGES] Agregado PDF de factura: ${path.basename(pdfPath)}`);
+            console.log(`📄 [PACKAGES] Agregado PDF de factura: ${pdfData.name}`);
           } catch (error) {
-            console.error(`❌ [PACKAGES] Error al agregar PDF de factura ${pdfPath}:`, error);
+            console.error(`❌ [PACKAGES] Error al agregar PDF de factura ${pdfData.name}:`, error);
           }
         }
         
         // Agregar los PDFs de remitos
-        for (const pdfPath of remitoPDFs) {
+        for (const pdfData of remitoPDFs) {
           try {
-            const pdfBytes = fs.readFileSync(pdfPath);
-            const pdfDoc = await PDFLib.load(pdfBytes);
+            const pdfDoc = await PDFLib.load(pdfData.buffer);
             const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
             pages.forEach((page) => mergedPdf.addPage(page));
-            console.log(`📄 [PACKAGES] Agregado PDF de remito: ${path.basename(pdfPath)}`);
+            console.log(`📄 [PACKAGES] Agregado PDF de remito: ${pdfData.name}`);
           } catch (error) {
-            console.error(`❌ [PACKAGES] Error al agregar PDF de remito ${pdfPath}:`, error);
+            console.error(`❌ [PACKAGES] Error al agregar PDF de remito ${pdfData.name}:`, error);
           }
         }
         

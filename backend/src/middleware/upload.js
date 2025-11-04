@@ -13,7 +13,7 @@ if (USE_S3) {
   storage = multerS3({
     s3: s3Client,
     bucket: process.env.AWS_S3_BUCKET,
-    // No usar ACL - los permisos se manejan con la política del bucket
+    // No usar ACL - el bucket no los permite
     contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: function (req, file, cb) {
       cb(null, { fieldName: file.fieldname });
