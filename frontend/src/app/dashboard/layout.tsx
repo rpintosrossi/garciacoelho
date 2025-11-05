@@ -31,7 +31,8 @@ import {
   Settings as SettingsIcon,
   Assessment as AssessmentIcon,
   Inventory as InventoryIcon,
-  LocationOn as LocationOnIcon
+  LocationOn as LocationOnIcon,
+  Payment as PaymentIcon
 } from '@mui/icons-material';
 import { useRouter, usePathname } from 'next/navigation';
 import ServicesSidebar from '@/components/ServicesSidebar';
@@ -120,6 +121,11 @@ export default function DashboardLayout({
       text: 'Edificios',
       icon: <BuildingIcon sx={{ color: '#4caf50' }} />,
       path: '/dashboard/buildings',
+    },
+    {
+      text: 'Pagos',
+      icon: <PaymentIcon sx={{ color: '#10b981' }} />,
+      path: '/dashboard/payments',
     },
     {
       text: 'Zonas',

@@ -5,10 +5,23 @@ const getAdministrators = async (req, res) => {
   try {
     // Verificar si se solicita solo datos básicos para el formulario
     const basicOnly = req.query.basic === 'true';
+    const search = req.query.search;
     
     if (basicOnly) {
+      // Construir filtro de búsqueda para datos básicos
+      let whereClause = {};
+      if (search) {
+        whereClause = {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } }
+          ]
+        };
+      }
+
       // Para el formulario de edificios, solo necesitamos datos básicos
       const administrators = await prisma.administrator.findMany({
+        where: whereClause,
         select: {
           id: true,
           name: true,
@@ -32,11 +45,23 @@ const getAdministrators = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    // Construir filtro de búsqueda
+    let whereClause = {};
+    if (search) {
+      whereClause = {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      };
+    }
+
     // Contar total de administradores
-    const total = await prisma.administrator.count();
+    const total = await prisma.administrator.count({ where: whereClause });
     
     // Obtener administradores con paginación
     const administrators = await prisma.administrator.findMany({
+      where: whereClause,
       include: {
         buildings: {
           include: { account: true, administrator: true }

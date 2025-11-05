@@ -29,7 +29,8 @@ import {
   Assignment as ServiceIcon,
   TrendingUp as TrendingUpIcon,
   Warning as WarningIcon,
-  Visibility as VisibilityIcon
+  Visibility as VisibilityIcon,
+  Payment as PaymentIcon
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -157,6 +158,15 @@ export default function DashboardPage() {
             icon={TrendingUpIcon}
             color={theme.palette.warning.main}
             onClick={() => router.push('/dashboard/services/invoiced')}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <QuickAccessCard
+            title="Pagos este mes"
+            value={stats?.totalPagosMes ? `$${stats.totalPagosMes.toLocaleString()}` : "$0"}
+            icon={PaymentIcon}
+            color="#10b981"
+            onClick={() => router.push('/dashboard/payments')}
           />
         </Grid>
       </Grid>

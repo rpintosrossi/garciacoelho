@@ -7,9 +7,22 @@ const getBuildings = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    const search = req.query.search;
+
+    // Construir filtro de búsqueda
+    let whereClause = {};
+    if (search) {
+      whereClause = {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { cuit: { contains: search, mode: 'insensitive' } },
+          { address: { contains: search, mode: 'insensitive' } }
+        ]
+      };
+    }
 
     // Contar total de edificios
-    const total = await prisma.building.count();
+    const total = await prisma.building.count({ where: whereClause });
 
     // Obtener edificios con paginación, administrador y cuenta en una sola consulta
     const buildings = await prisma.building.findMany({

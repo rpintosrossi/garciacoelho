@@ -192,4 +192,364 @@ const getPayments = async (req, res) => {
   }
 };
 
-module.exports = { createPayment, getPayments }; 
+// Obtener pagos por edificio con búsqueda por CUIT o nombre
+const getBuildingPayments = async (req, res) => {
+  try {
+    const { search, page = 1, limit = 10 } = req.query;
+    
+    console.log('💰 [BUILDING PAYMENTS] Obteniendo pagos por edificio...');
+    console.log('💰 [BUILDING PAYMENTS] Parámetros:', { search, page, limit });
+
+    // Primero buscar edificios que coincidan con el filtro
+    let buildingIds = [];
+    if (search) {
+      const buildings = await prisma.building.findMany({
+        where: {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { cuit: { contains: search, mode: 'insensitive' } }
+          ]
+        },
+        select: { id: true }
+      });
+      buildingIds = buildings.map(b => b.id);
+    }
+
+    // Construir el where para los pagos
+    let whereClause = {};
+    
+    if (search && buildingIds.length > 0) {
+      // Si hay búsqueda, filtrar por edificios encontrados
+      whereClause = {
+        documents: {
+          some: {
+            OR: [
+              {
+                invoice: {
+                  service: {
+                    buildingId: { in: buildingIds }
+                  }
+                }
+              },
+              {
+                remito: {
+                  service: {
+                    buildingId: { in: buildingIds }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      };
+    } else if (search && buildingIds.length === 0) {
+      // Si hay búsqueda pero no se encontraron edificios, retornar vacío
+      return res.json({
+        payments: [],
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: 0,
+          totalPages: 0
+        }
+      });
+    }
+
+    // Contar total
+    const total = await prisma.payment.count({ where: whereClause });
+    const totalPages = Math.ceil(total / parseInt(limit));
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Obtener pagos con paginación
+    const payments = await prisma.payment.findMany({
+      where: whereClause,
+      include: {
+        paymentMethod: true,
+        documents: {
+          include: {
+            invoice: {
+              include: {
+                service: {
+                  include: {
+                    building: {
+                      include: {
+                        administrator: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            remito: {
+              include: {
+                service: {
+                  include: {
+                    building: {
+                      include: {
+                        administrator: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        date: 'desc'
+      },
+      skip,
+      take: parseInt(limit)
+    });
+
+    // Formatear respuesta agrupando por edificio
+    const formattedPayments = payments.map(payment => {
+      // Obtener el edificio del primer documento
+      const firstDoc = payment.documents[0];
+      const building = firstDoc?.invoice?.service?.building || firstDoc?.remito?.service?.building;
+      
+      return {
+        id: payment.id,
+        amount: payment.amount,
+        originalAmount: payment.originalAmount,
+        discount: payment.discount,
+        discountReason: payment.discountReason,
+        date: payment.date,
+        comprobante: payment.comprobante,
+        paymentMethod: payment.paymentMethod,
+        building: building ? {
+          id: building.id,
+          name: building.name,
+          cuit: building.cuit,
+          address: building.address,
+          administrator: building.administrator
+        } : null,
+        documents: payment.documents.map(doc => ({
+          id: doc.id,
+          amount: doc.amount,
+          type: doc.invoiceId ? 'FACTURA' : 'REMITO',
+          invoiceId: doc.invoiceId,
+          remitoId: doc.remitoId,
+          invoiceNumber: doc.invoice?.number,
+          remitoNumber: doc.remito?.number
+        })),
+        hasDiscount: payment.discount > 0
+      };
+    });
+
+    console.log('✅ [BUILDING PAYMENTS] Pagos encontrados:', formattedPayments.length);
+
+    res.json({
+      payments: formattedPayments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener pagos por edificio:', error);
+    res.status(500).json({ message: 'Error al obtener pagos por edificio' });
+  }
+};
+
+// Obtener pagos masivos por administrador
+const getAdministratorPayments = async (req, res) => {
+  try {
+    const { search, page = 1, limit = 10 } = req.query;
+    
+    console.log('💰 [ADMIN PAYMENTS] Obteniendo pagos por administrador...');
+    console.log('💰 [ADMIN PAYMENTS] Parámetros:', { search, page, limit });
+
+    // Primero buscar administradores que coincidan con el filtro
+    let adminIds = [];
+    if (search) {
+      const administrators = await prisma.administrator.findMany({
+        where: {
+          name: { contains: search, mode: 'insensitive' }
+        },
+        select: { id: true }
+      });
+      adminIds = administrators.map(a => a.id);
+    }
+
+    // Construir el where para los pagos
+    let whereClause = {};
+    
+    if (search && adminIds.length > 0) {
+      // Si hay búsqueda, filtrar por administradores encontrados
+      whereClause = {
+        documents: {
+          some: {
+            OR: [
+              {
+                invoice: {
+                  service: {
+                    building: {
+                      administratorId: { in: adminIds }
+                    }
+                  }
+                }
+              },
+              {
+                remito: {
+                  service: {
+                    building: {
+                      administratorId: { in: adminIds }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      };
+    } else if (search && adminIds.length === 0) {
+      // Si hay búsqueda pero no se encontraron administradores, retornar vacío
+      return res.json({
+        payments: [],
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: 0,
+          totalPages: 0
+        }
+      });
+    }
+
+    // Filtrar solo pagos masivos (que tienen documentos de múltiples edificios)
+    const allPayments = await prisma.payment.findMany({
+      where: whereClause,
+      include: {
+        paymentMethod: true,
+        documents: {
+          include: {
+            invoice: {
+              include: {
+                service: {
+                  include: {
+                    building: {
+                      include: {
+                        administrator: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            remito: {
+              include: {
+                service: {
+                  include: {
+                    building: {
+                      include: {
+                        administrator: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        date: 'desc'
+      }
+    });
+
+    // Filtrar solo pagos masivos (múltiples edificios)
+    const massivePayments = allPayments.filter(payment => {
+      const buildingIds = new Set();
+      payment.documents.forEach(doc => {
+        const buildingId = doc.invoice?.service?.buildingId || doc.remito?.service?.buildingId;
+        if (buildingId) buildingIds.add(buildingId);
+      });
+      return buildingIds.size > 1; // Solo pagos que impactan más de un edificio
+    });
+
+    // Paginación manual
+    const total = massivePayments.length;
+    const totalPages = Math.ceil(total / parseInt(limit));
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedPayments = massivePayments.slice(skip, skip + parseInt(limit));
+
+    // Formatear respuesta
+    const formattedPayments = paginatedPayments.map(payment => {
+      // Agrupar documentos por edificio
+      const buildingMap = new Map();
+      payment.documents.forEach(doc => {
+        const building = doc.invoice?.service?.building || doc.remito?.service?.building;
+        if (building) {
+          if (!buildingMap.has(building.id)) {
+            buildingMap.set(building.id, {
+              building: {
+                id: building.id,
+                name: building.name,
+                cuit: building.cuit,
+                address: building.address
+              },
+              documents: []
+            });
+          }
+          buildingMap.get(building.id).documents.push({
+            id: doc.id,
+            amount: doc.amount,
+            type: doc.invoiceId ? 'FACTURA' : 'REMITO',
+            invoiceId: doc.invoiceId,
+            remitoId: doc.remitoId,
+            invoiceNumber: doc.invoice?.number,
+            remitoNumber: doc.remito?.number
+          });
+        }
+      });
+
+      // Obtener administrador del primer edificio
+      const firstBuilding = payment.documents[0]?.invoice?.service?.building || 
+                           payment.documents[0]?.remito?.service?.building;
+      
+      return {
+        id: payment.id,
+        amount: payment.amount,
+        originalAmount: payment.originalAmount,
+        discount: payment.discount,
+        discountReason: payment.discountReason,
+        date: payment.date,
+        comprobante: payment.comprobante,
+        paymentMethod: payment.paymentMethod,
+        administrator: firstBuilding?.administrator ? {
+          id: firstBuilding.administrator.id,
+          name: firstBuilding.administrator.name,
+          email: firstBuilding.administrator.email
+        } : null,
+        buildings: Array.from(buildingMap.values()),
+        buildingCount: buildingMap.size,
+        hasDiscount: payment.discount > 0
+      };
+    });
+
+    console.log('✅ [ADMIN PAYMENTS] Pagos masivos encontrados:', formattedPayments.length);
+
+    res.json({
+      payments: formattedPayments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener pagos por administrador:', error);
+    res.status(500).json({ message: 'Error al obtener pagos por administrador' });
+  }
+};
+
+module.exports = { 
+  createPayment, 
+  getPayments,
+  getBuildingPayments,
+  getAdministratorPayments
+}; 
