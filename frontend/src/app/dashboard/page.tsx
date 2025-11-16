@@ -126,7 +126,7 @@ export default function DashboardPage() {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
-            title="Empresas"
+            title="Edificios"
             value={stats?.totalBuildings || 0}
             icon={BuildingIcon}
             color={theme.palette.primary.main}

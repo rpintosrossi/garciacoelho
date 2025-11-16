@@ -757,7 +757,7 @@ const getAssignedServicesForTechnician = async (req, res) => {
   }
 };
 
-// Crear factura en negro (cobro sin factura)
+// Crear factura en negro (cobro sin factura) - INDIVIDUAL
 const createInformalInvoice = async (req, res) => {
   try {
     console.log('--- [FACTURA INFORMAL] Intentando crear cobro sin factura ---');
@@ -803,74 +803,188 @@ const createInformalInvoice = async (req, res) => {
       });
     }
 
-                 // Crear la factura informal usando SQL directo para evitar problemas con el cliente de Prisma
-             const [invoiceResult, updatedService] = await prisma.$transaction([
-               prisma.$queryRaw`INSERT INTO "Invoice" (id, "serviceId", amount, status, "paymentMethod", "createdAt", "updatedAt") VALUES (gen_random_uuid(), ${id}, ${parseFloat(amount)}, 'PENDIENTE', ${paymentMethod}, NOW(), NOW()) RETURNING *`,
-                     prisma.service.update({
-                 where: { id },
-                 data: {
-                   status: 'FACTURADO'
-                 },
-        include: {
-          technician: true,
-          building: {
-            include: {
-              administrator: true
-            }
-          },
-          invoice: true
+    // Crear la factura y actualizar el servicio
+    const invoice = await prisma.invoice.create({
+      data: {
+        amount: parseFloat(amount),
+        status: 'PENDIENTE',
+        paymentMethod: paymentMethod,
+        services: {
+          connect: { id: id }
         }
-      })
-    ]);
+      }
+    });
 
-             // Si el método de pago es EFECTIVO, crear el pago inmediatamente
-             if (paymentMethod === 'EFECTIVO') {
-               console.log('--- [FACTURA INFORMAL] Creando pago en efectivo inmediato ---');
-               
-               // Obtener el primer remito del servicio
-               const firstRemito = await prisma.remito.findFirst({
-                 where: { serviceId: id }
-               });
+    const updatedService = await prisma.service.update({
+      where: { id },
+      data: {
+        status: 'FACTURADO'
+      },
+      include: {
+        technician: true,
+        building: {
+          include: {
+            administrator: true
+          }
+        },
+        invoice: true
+      }
+    });
 
-               if (firstRemito) {
-                 // Crear el pago asociado tanto al remito como a la factura
-                 const payment = await prisma.payment.create({
-                   data: {
-                     amount: parseFloat(amount),
-                     date: new Date(),
-                     method: 'EFECTIVO',
-                     comprobante: `COBRO-EFECTIVO-${Date.now()}`,
-                     documents: {
-                       create: [
-                         {
-                           remitoId: firstRemito.id,
-                           amount: parseFloat(amount)
-                         },
-                         {
-                           invoiceId: invoiceResult[0].id, // Asociar también a la factura
-                           amount: parseFloat(amount)
-                         }
-                       ]
-                     }
-                   }
-                 });
+    // Si el método de pago es EFECTIVO, crear el pago inmediatamente
+    if (paymentMethod === 'EFECTIVO') {
+      console.log('--- [FACTURA INFORMAL] Creando pago en efectivo inmediato ---');
+      
+      // Obtener el primer remito del servicio
+      const firstRemito = await prisma.remito.findFirst({
+        where: { serviceId: id }
+      });
 
-                 console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a remito y factura:', payment);
-               }
-             }
+      if (firstRemito) {
+        // Crear el pago asociado tanto al remito como a la factura
+        const payment = await prisma.payment.create({
+          data: {
+            amount: parseFloat(amount),
+            date: new Date(),
+            method: 'EFECTIVO',
+            comprobante: `COBRO-EFECTIVO-${Date.now()}`,
+            documents: {
+              create: [
+                {
+                  remitoId: firstRemito.id,
+                  amount: parseFloat(amount)
+                },
+                {
+                  invoiceId: invoice.id,
+                  amount: parseFloat(amount)
+                }
+              ]
+            }
+          }
+        });
 
-                 console.log('--- [FACTURA INFORMAL] Cobro sin factura creado exitosamente ---');
-             console.log('Factura creada:', invoiceResult);
-             console.log('Servicio actualizado:', updatedService);
+        console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a remito y factura:', payment);
+      }
+    }
 
-             res.json({ 
-               message: 'Cobro sin factura creado exitosamente', 
-               service: updatedService,
-               invoice: invoiceResult[0] // El resultado es un array
-             });
+    console.log('--- [FACTURA INFORMAL] Cobro sin factura creado exitosamente ---');
+    console.log('Factura creada:', invoice);
+    console.log('Servicio actualizado:', updatedService);
+
+    res.json({ 
+      message: 'Cobro sin factura creado exitosamente', 
+      service: updatedService,
+      invoice: invoice
+    });
   } catch (error) {
     console.error('Error al crear cobro sin factura:', error);
     res.status(500).json({ message: 'Error al crear cobro sin factura' });
+  }
+};
+
+// Crear factura en negro (cobro sin factura) - MÚLTIPLES SERVICIOS
+const createInformalInvoiceMultiple = async (req, res) => {
+  try {
+    console.log('--- [FACTURA INFORMAL MÚLTIPLE] Intentando crear cobro sin factura para múltiples servicios ---');
+    console.log('Usuario autenticado:', req.user);
+    console.log('Datos recibidos:', req.body);
+    
+    const { serviceIds, amount, paymentMethod = 'CUENTA_CORRIENTE' } = req.body;
+    
+    if (!serviceIds || !Array.isArray(serviceIds) || serviceIds.length === 0) {
+      return res.status(400).json({ message: 'Debe proporcionar al menos un servicio' });
+    }
+
+    if (!amount) {
+      return res.status(400).json({ message: 'El importe es obligatorio' });
+    }
+
+    // Verificar permisos
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({ 
+        message: 'Solo un administrador o un operador pueden crear cobros sin factura' 
+      });
+    }
+
+    // Obtener todos los servicios
+    const services = await prisma.service.findMany({
+      where: { id: { in: serviceIds } },
+      include: { 
+        building: true,
+        technician: true
+      }
+    });
+
+    if (services.length !== serviceIds.length) {
+      return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
+    }
+
+    // Validar que todos los servicios tienen remito
+    const invalidServices = services.filter(s => s.status !== 'CON_REMITO');
+    if (invalidServices.length > 0) {
+      return res.status(400).json({ 
+        message: 'Todos los servicios deben tener remito antes de crear el cobro',
+        invalidServices: invalidServices.map(s => s.id)
+      });
+    }
+
+    // Validar que todos los servicios son del mismo edificio
+    const buildingIds = [...new Set(services.map(s => s.buildingId))];
+    if (buildingIds.length > 1) {
+      return res.status(400).json({ 
+        message: 'Todos los servicios deben pertenecer al mismo edificio',
+        buildings: buildingIds
+      });
+    }
+
+    // Crear la factura y actualizar todos los servicios en una transacción
+    const result = await prisma.$transaction(async (tx) => {
+      // Crear la factura
+      const invoice = await tx.invoice.create({
+        data: {
+          amount: parseFloat(amount),
+          status: 'PENDIENTE',
+          paymentMethod: paymentMethod
+        }
+      });
+
+      // Actualizar todos los servicios
+      const updatedServices = await Promise.all(
+        serviceIds.map(serviceId => 
+          tx.service.update({
+            where: { id: serviceId },
+            data: {
+              status: 'FACTURADO',
+              invoiceId: invoice.id
+            },
+            include: {
+              technician: true,
+              building: {
+                include: {
+                  administrator: true
+                }
+              }
+            }
+          })
+        )
+      );
+
+      return { invoice, services: updatedServices };
+    });
+
+    console.log('--- [FACTURA INFORMAL MÚLTIPLE] Cobro sin factura creado exitosamente ---');
+    console.log('Factura creada:', result.invoice);
+    console.log('Servicios actualizados:', result.services.length);
+
+    res.json({ 
+      message: `Cobro sin factura creado exitosamente para ${result.services.length} servicios`, 
+      services: result.services,
+      invoice: result.invoice
+    });
+  } catch (error) {
+    console.error('Error al crear cobro sin factura múltiple:', error);
+    res.status(500).json({ message: 'Error al crear cobro sin factura múltiple' });
   }
 };
 
@@ -1005,7 +1119,7 @@ const cancelService = async (req, res) => {
   }
 };
 
-// Importar factura manualmente
+// Importar factura manualmente - INDIVIDUAL
 const importInvoice = async (req, res) => {
   try {
     console.log('--- [IMPORTAR FACTURA] Intentando importar factura ---');
@@ -1058,35 +1172,34 @@ const importInvoice = async (req, res) => {
     }
 
     // Guardar la URL del archivo
-    // Si usamos S3, file.location ya tiene la URL completa
-    // Si usamos almacenamiento local, file.filename contiene el nombre del archivo
     const fileUrl = file.location ? file.location : getFileUrl(file.filename);
     console.log('URL del archivo de factura:', fileUrl);
     
-    // Crear la factura y actualizar el servicio en una transacción
-    const [invoice, updatedService] = await prisma.$transaction([
-      prisma.invoice.create({
-        data: {
-          serviceId: id,
-          number: number.trim(),
-          amount: parseFloat(amount),
-          date: date ? new Date(date) : new Date(),
-          fileUrl: fileUrl,
-          status: 'EMITIDA',
-          paymentMethod: paymentMethod || 'CUENTA_CORRIENTE'
+    // Crear la factura y actualizar el servicio
+    const invoice = await prisma.invoice.create({
+      data: {
+        number: number.trim(),
+        amount: parseFloat(amount),
+        date: date ? new Date(date) : new Date(),
+        fileUrl: fileUrl,
+        status: 'EMITIDA',
+        paymentMethod: paymentMethod || 'CUENTA_CORRIENTE',
+        services: {
+          connect: { id: id }
         }
-      }),
-      prisma.service.update({
-        where: { id },
-        data: {
-          status: 'FACTURADO'
-        },
-        include: {
-          technician: true,
-          invoice: true
-        }
-      })
-    ]);
+      }
+    });
+
+    const updatedService = await prisma.service.update({
+      where: { id },
+      data: {
+        status: 'FACTURADO'
+      },
+      include: {
+        technician: true,
+        invoice: true
+      }
+    });
     
     console.log('Factura importada exitosamente:', invoice);
     console.log('Servicio actualizado:', updatedService);
@@ -1103,6 +1216,135 @@ const importInvoice = async (req, res) => {
   }
 };
 
+// Importar factura manualmente - MÚLTIPLES SERVICIOS
+const importInvoiceMultiple = async (req, res) => {
+  try {
+    console.log('--- [IMPORTAR FACTURA MÚLTIPLE] Intentando importar factura para múltiples servicios ---');
+    console.log('Usuario autenticado:', req.user);
+    console.log('Archivo recibido:', req.file);
+    console.log('Datos del formulario:', req.body);
+    
+    const { serviceIds, number, amount, date, paymentMethod } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No se ha subido el archivo de factura' });
+    }
+
+    if (!serviceIds) {
+      return res.status(400).json({ message: 'Debe proporcionar los IDs de los servicios' });
+    }
+
+    // Parse serviceIds si viene como string JSON
+    const parsedServiceIds = typeof serviceIds === 'string' ? JSON.parse(serviceIds) : serviceIds;
+
+    if (!Array.isArray(parsedServiceIds) || parsedServiceIds.length === 0) {
+      return res.status(400).json({ message: 'Debe proporcionar al menos un servicio' });
+    }
+
+    if (!number || !amount) {
+      return res.status(400).json({ message: 'Faltan datos obligatorios: número y monto de factura' });
+    }
+
+    // Verificar permisos
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({ 
+        message: 'Solo administradores y operadores pueden importar facturas' 
+      });
+    }
+
+    // Validar tipo de archivo (solo PDF)
+    if (file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ 
+        message: 'Solo se permiten archivos PDF' 
+      });
+    }
+    
+    // Validar tamaño (máximo 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return res.status(400).json({ 
+        message: 'El archivo es demasiado grande. Máximo 10MB' 
+      });
+    }
+
+    // Obtener todos los servicios
+    const services = await prisma.service.findMany({
+      where: { id: { in: parsedServiceIds } },
+      include: { building: true }
+    });
+
+    if (services.length !== parsedServiceIds.length) {
+      return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
+    }
+
+    // Validar que todos los servicios son del mismo edificio
+    const buildingIds = [...new Set(services.map(s => s.buildingId))];
+    if (buildingIds.length > 1) {
+      return res.status(400).json({ 
+        message: 'Todos los servicios deben pertenecer al mismo edificio',
+        buildings: buildingIds
+      });
+    }
+
+    // Guardar la URL del archivo
+    const fileUrl = file.location ? file.location : getFileUrl(file.filename);
+    console.log('URL del archivo de factura:', fileUrl);
+    
+    // Crear la factura y actualizar los servicios en una transacción
+    const result = await prisma.$transaction(async (tx) => {
+      // Crear la factura
+      const invoice = await tx.invoice.create({
+        data: {
+          number: number.trim(),
+          amount: parseFloat(amount),
+          date: date ? new Date(date) : new Date(),
+          fileUrl: fileUrl,
+          status: 'EMITIDA',
+          paymentMethod: paymentMethod || 'CUENTA_CORRIENTE'
+        }
+      });
+
+      // Actualizar todos los servicios
+      const updatedServices = await Promise.all(
+        parsedServiceIds.map(serviceId => 
+          tx.service.update({
+            where: { id: serviceId },
+            data: {
+              status: 'FACTURADO',
+              invoiceId: invoice.id
+            },
+            include: {
+              technician: true,
+              building: {
+                include: {
+                  administrator: true
+                }
+              }
+            }
+          })
+        )
+      );
+
+      return { invoice, services: updatedServices };
+    });
+    
+    console.log('Factura importada exitosamente:', result.invoice);
+    console.log('Servicios actualizados:', result.services.length);
+
+    res.status(200).json({ 
+      message: `Factura importada exitosamente para ${result.services.length} servicios`, 
+      services: result.services,
+      invoice: result.invoice
+    });
+  } catch (error) {
+    console.error('Error al importar factura múltiple:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ message: 'Error al importar factura múltiple', error: error.message });
+  }
+};
+
 module.exports = {
   getAllServices,
   getServiceById,
@@ -1114,7 +1356,9 @@ module.exports = {
   uploadReceipt,
   createInvoice,
   createInformalInvoice,
+  createInformalInvoiceMultiple,
   importInvoice,
+  importInvoiceMultiple,
   getTechnicians,
   getServiceCounts,
   getServiceStats,

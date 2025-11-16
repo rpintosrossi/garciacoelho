@@ -79,10 +79,11 @@ model Service {
   status               ServiceStatus @default(PENDIENTE)
   receiptImages        String[]
   cancellationReason   String?
-  invoice              Invoice?
+  invoiceId            String?
   remitos              Remito[]
   building             Building      @relation(fields: [buildingId], references: [id])
   technician           Technician?   @relation(fields: [technicianId], references: [id])
+  invoice              Invoice?      @relation(fields: [invoiceId], references: [id])
 
   @@index([buildingId])
   @@index([buildingId, status])
@@ -90,11 +91,11 @@ model Service {
   @@index([createdAt])
   @@index([status])
   @@index([technicianId])
+  @@index([invoiceId])
 }
 
 model Invoice {
   id               String            @id @default(uuid())
-  serviceId        String            @unique
   amount           Float
   status           InvoiceStatus     @default(PENDIENTE)
   createdAt        DateTime          @default(now())
@@ -103,13 +104,12 @@ model Invoice {
   fileUrl          String?
   number           String?
   paymentMethod    String?
-  service          Service           @relation(fields: [serviceId], references: [id])
+  services         Service[]
   paymentDocuments PaymentDocument[]
 
   @@index([createdAt])
   @@index([paymentMethod])
   @@index([paymentMethod, status], map: "Invoice_payment_status_idx")
-  @@index([serviceId, status])
   @@index([status])
 }
 

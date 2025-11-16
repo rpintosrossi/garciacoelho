@@ -26,7 +26,9 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Checkbox,
+  Chip
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import axios from '@/lib/axios';
@@ -95,6 +97,12 @@ export default function InvoicedServices() {
   const [invoiceDate, setInvoiceDate] = useState<Date | null>(new Date());
   const [savingInvoice, setSavingInvoice] = useState(false);
 
+  // Estados para selección múltiple
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [openBulkRemito, setOpenBulkRemito] = useState(false);
+  const [openBulkImportInvoice, setOpenBulkImportInvoice] = useState(false);
+
   const fetchServices = async () => {
     try {
       const queryParams = new URLSearchParams({
@@ -145,6 +153,43 @@ export default function InvoicedServices() {
 
   const handlePageChange = (_: any, value: number) => {
     setPagination(prev => ({ ...prev, page: value }));
+  };
+
+  // Handlers para selección múltiple
+  const handleSelectService = (serviceId: string) => {
+    setSelectedServices(prev => {
+      if (prev.includes(serviceId)) {
+        return prev.filter(id => id !== serviceId);
+      } else {
+        return [...prev, serviceId];
+      }
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedServices.length === services.length) {
+      setSelectedServices([]);
+    } else {
+      setSelectedServices(services.map(s => s.id));
+    }
+  };
+
+  const toggleBulkMode = () => {
+    setBulkMode(!bulkMode);
+    setSelectedServices([]);
+  };
+
+  const validateSameBuilding = (): boolean => {
+    if (selectedServices.length === 0) return false;
+    const selectedServicesData = services.filter(s => selectedServices.includes(s.id));
+    const buildingIds = [...new Set(selectedServicesData.map(s => s.buildingId))];
+    return buildingIds.length === 1;
+  };
+
+  const getSelectedBuildingName = (): string => {
+    if (selectedServices.length === 0) return '';
+    const selectedService = services.find(s => selectedServices.includes(s.id));
+    return selectedService?.building?.name || '';
   };
 
   const handleOpenRemito = (service: Service) => {
@@ -209,6 +254,115 @@ export default function InvoicedServices() {
     setInvoiceNumber('');
     setInvoiceAmount('');
     setInvoiceDate(new Date());
+  };
+
+  const handleOpenBulkRemito = () => {
+    if (selectedServices.length === 0) {
+      alert('Debes seleccionar al menos un servicio');
+      return;
+    }
+    if (!validateSameBuilding()) {
+      alert('Todos los servicios deben pertenecer al mismo edificio');
+      return;
+    }
+    setRemitoAmount('');
+    setRemitoDate(new Date());
+    setRemitoPaymentMethod('CUENTA_CORRIENTE');
+    setOpenBulkRemito(true);
+  };
+
+  const handleCloseBulkRemito = () => {
+    setOpenBulkRemito(false);
+  };
+
+  const handleSaveBulkRemito = async () => {
+    if (!remitoAmount) {
+      alert('El monto es obligatorio');
+      return;
+    }
+    setSavingRemito(true);
+    try {
+      await axios.post('/services/bulk/informal-invoice', {
+        serviceIds: selectedServices,
+        amount: parseFloat(remitoAmount),
+        paymentMethod: remitoPaymentMethod
+      });
+      
+      setOpenBulkRemito(false);
+      setSelectedServices([]);
+      setBulkMode(false);
+      
+      localStorage.setItem('servicesLastUpdate', Date.now().toString());
+      localStorage.setItem('servicesUpdateType', 'service_invoiced');
+      
+      await fetchServices();
+    } catch (error) {
+      console.error('Error al crear cobro sin factura múltiple:', error);
+      alert('Error al crear el cobro sin factura');
+    } finally {
+      setSavingRemito(false);
+    }
+  };
+
+  const handleOpenBulkImportInvoice = () => {
+    if (selectedServices.length === 0) {
+      alert('Debes seleccionar al menos un servicio');
+      return;
+    }
+    if (!validateSameBuilding()) {
+      alert('Todos los servicios deben pertenecer al mismo edificio');
+      return;
+    }
+    setInvoiceFile(null);
+    setInvoiceNumber('');
+    setInvoiceAmount('');
+    setInvoiceDate(new Date());
+    setOpenBulkImportInvoice(true);
+  };
+
+  const handleCloseBulkImportInvoice = () => {
+    setOpenBulkImportInvoice(false);
+  };
+
+  const handleSaveBulkImportInvoice = async () => {
+    if (!invoiceFile || !invoiceNumber || !invoiceAmount) {
+      alert('Debes completar todos los campos obligatorios');
+      return;
+    }
+    setSavingInvoice(true);
+    try {
+      const formData = new FormData();
+      formData.append('invoice', invoiceFile);
+      formData.append('serviceIds', JSON.stringify(selectedServices));
+      formData.append('number', invoiceNumber);
+      formData.append('amount', invoiceAmount);
+      formData.append('date', invoiceDate?.toISOString() || new Date().toISOString());
+      formData.append('paymentMethod', 'CUENTA_CORRIENTE');
+      
+      await axios.post('/services/bulk/import-invoice', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      handleCloseBulkImportInvoice();
+      setSelectedServices([]);
+      setBulkMode(false);
+      
+      localStorage.setItem('servicesLastUpdate', Date.now().toString());
+      localStorage.setItem('servicesUpdateType', 'service_invoiced');
+      
+      axios.clearCacheFor?.('/services');
+      
+      await fetchServices();
+      
+      window.dispatchEvent(new Event('servicesChanged'));
+    } catch (error) {
+      console.error('Error al importar factura múltiple:', error);
+      alert('Error al importar la factura');
+    } finally {
+      setSavingInvoice(false);
+    }
   };
 
   const handleInvoiceFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -330,10 +484,64 @@ export default function InvoicedServices() {
         />
         <Button onClick={handleClearFilters} variant="outlined">Limpiar filtros</Button>
       </Stack>
+      
+      {/* Botones de selección múltiple */}
+      <Box mb={2} display="flex" gap={2} alignItems="center">
+        <Button 
+          variant={bulkMode ? "contained" : "outlined"} 
+          color="primary"
+          onClick={toggleBulkMode}
+        >
+          {bulkMode ? 'Cancelar selección múltiple' : 'Seleccionar varios servicios'}
+        </Button>
+        {bulkMode && (
+          <>
+            <Chip 
+              label={`${selectedServices.length} servicio(s) seleccionado(s)`} 
+              color="primary" 
+              variant="outlined"
+            />
+            {selectedServices.length > 0 && (
+              <>
+                <Button 
+                  variant="outlined" 
+                  color="secondary"
+                  onClick={handleOpenBulkRemito}
+                  disabled={!validateSameBuilding()}
+                >
+                  Cobro sin Factura
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  color="primary"
+                  onClick={handleOpenBulkImportInvoice}
+                  disabled={!validateSameBuilding()}
+                >
+                  Importar Factura
+                </Button>
+                {!validateSameBuilding() && selectedServices.length > 0 && (
+                  <Typography variant="caption" color="error">
+                    Los servicios deben ser del mismo edificio
+                  </Typography>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </Box>
       <TableContainer component={Paper}>
         <Table size="small">
           <TableHead>
             <TableRow>
+              {bulkMode && (
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    checked={services.length > 0 && selectedServices.length === services.length}
+                    indeterminate={selectedServices.length > 0 && selectedServices.length < services.length}
+                    onChange={handleSelectAll}
+                  />
+                </TableCell>
+              )}
               <TableCell>Edificio</TableCell>
               <TableCell>Administrador</TableCell>
               <TableCell>Descripción</TableCell>
@@ -345,6 +553,14 @@ export default function InvoicedServices() {
           <TableBody>
             {services.map((service) => (
               <TableRow key={service.id}>
+                {bulkMode && (
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={selectedServices.includes(service.id)}
+                      onChange={() => handleSelectService(service.id)}
+                    />
+                  </TableCell>
+                )}
                 <TableCell>{service.building?.name}</TableCell>
                 <TableCell>{buildings.find((b: any) => b.id === service.buildingId)?.administrator?.name || '-'}</TableCell>
                 <TableCell>{service.description}</TableCell>
@@ -501,6 +717,113 @@ export default function InvoicedServices() {
           <Button onClick={handleCloseImportInvoice}>Cancelar</Button>
           <Button 
             onClick={handleSaveInvoice} 
+            variant="contained" 
+            disabled={savingInvoice || !invoiceFile || !invoiceNumber || !invoiceAmount}
+          >
+            {savingInvoice ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Modal para cobro sin factura múltiple */}
+      <Dialog open={openBulkRemito} onClose={handleCloseBulkRemito} fullWidth maxWidth="sm">
+        <DialogTitle>Cobro sin Factura - Múltiples Servicios</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={1}>
+            <Alert severity="info">
+              Se facturarán {selectedServices.length} servicios del edificio: {getSelectedBuildingName()}
+            </Alert>
+            <TextField 
+              label="Monto Total" 
+              type="number" 
+              value={remitoAmount} 
+              onChange={e => setRemitoAmount(e.target.value)} 
+              fullWidth 
+              required
+            />
+            <DatePicker 
+              label="Fecha" 
+              value={remitoDate} 
+              onChange={setRemitoDate} 
+              slotProps={{ textField: { fullWidth: true } }} 
+            />
+            <FormControl fullWidth>
+              <InputLabel>Método de Pago</InputLabel>
+              <Select
+                value={remitoPaymentMethod}
+                onChange={(e) => setRemitoPaymentMethod(e.target.value)}
+                label="Método de Pago"
+              >
+                <MenuItem value="CUENTA_CORRIENTE">Cuenta Corriente</MenuItem>
+                <MenuItem value="EFECTIVO">Efectivo</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseBulkRemito}>Cancelar</Button>
+          <Button 
+            onClick={handleSaveBulkRemito} 
+            variant="contained" 
+            disabled={savingRemito || !remitoAmount}
+          >
+            {savingRemito ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Modal para importar factura múltiple */}
+      <Dialog open={openBulkImportInvoice} onClose={handleCloseBulkImportInvoice} fullWidth maxWidth="sm">
+        <DialogTitle>Importar Factura - Múltiples Servicios</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={1}>
+            <Alert severity="info">
+              Se facturarán {selectedServices.length} servicios del edificio: {getSelectedBuildingName()}
+            </Alert>
+            <TextField 
+              label="Número de Factura" 
+              value={invoiceNumber} 
+              onChange={e => setInvoiceNumber(e.target.value)} 
+              fullWidth 
+              required
+            />
+            <TextField 
+              label="Monto Total" 
+              type="number" 
+              value={invoiceAmount} 
+              onChange={e => setInvoiceAmount(e.target.value)} 
+              fullWidth 
+              required
+            />
+            <DatePicker 
+              label="Fecha de Factura" 
+              value={invoiceDate} 
+              onChange={setInvoiceDate} 
+              slotProps={{ textField: { fullWidth: true } }} 
+            />
+            <Box>
+              <input
+                accept=".pdf"
+                style={{ display: 'none' }}
+                id="bulk-invoice-file-input"
+                type="file"
+                onChange={handleInvoiceFileSelect}
+              />
+              <label htmlFor="bulk-invoice-file-input">
+                <Button variant="outlined" component="span" fullWidth>
+                  {invoiceFile ? `Archivo seleccionado: ${invoiceFile.name}` : 'Seleccionar PDF de Factura'}
+                </Button>
+              </label>
+            </Box>
+            <Alert severity="info">
+              La factura se registrará con método de pago "Cuenta Corriente" y quedará pendiente de pago.
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseBulkImportInvoice}>Cancelar</Button>
+          <Button 
+            onClick={handleSaveBulkImportInvoice} 
             variant="contained" 
             disabled={savingInvoice || !invoiceFile || !invoiceNumber || !invoiceAmount}
           >
