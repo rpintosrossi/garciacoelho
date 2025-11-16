@@ -233,13 +233,27 @@ const deleteService = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar si el servicio tiene una factura asociada
+    // Verificar si el servicio existe
     const service = await prisma.service.findUnique({
       where: { id },
       include: { invoice: true }
     });
 
-    if (service?.invoice) {
+    if (!service) {
+      return res.status(404).json({ 
+        message: 'Servicio no encontrado' 
+      });
+    }
+
+    // Solo permitir eliminación si el servicio está en estado PENDIENTE
+    if (service.status !== 'PENDIENTE') {
+      return res.status(400).json({ 
+        message: 'Solo se pueden eliminar servicios en estado de Asignación (pendientes de técnico)' 
+      });
+    }
+
+    // Verificar si el servicio tiene una factura asociada
+    if (service.invoice) {
       return res.status(400).json({ 
         message: 'No se puede eliminar el servicio porque tiene una factura asociada' 
       });

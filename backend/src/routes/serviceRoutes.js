@@ -49,6 +49,29 @@ router.get('/technicians', roleMiddleware(['ADMIN', 'OPERADOR']), getTechnicians
 // Ruta para guardar borradores
 router.post('/draft', saveDraft);
 
+// ============================================
+// RUTAS BULK (deben ir ANTES de las rutas con :id)
+// ============================================
+
+// Ruta para crear cobro sin factura múltiple (solo ADMIN u OPERADOR)
+router.post('/bulk/informal-invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInformalInvoiceMultiple);
+
+// Ruta para importar factura múltiple (solo ADMIN u OPERADOR)
+router.post('/bulk/import-invoice', (req, res, next) => {
+  console.log('[ROUTE] POST /bulk/import-invoice llamada');
+  next();
+}, roleMiddleware(['ADMIN', 'OPERADOR']), (req, res, next) => {
+  console.log('[ROUTE] Pasando por roleMiddleware, req.user:', req.user);
+  next();
+}, upload.single('invoice'), (req, res, next) => {
+  console.log('[ROUTE] Archivo recibido:', req.file);
+  next();
+}, importInvoiceMultiple);
+
+// ============================================
+// RUTAS INDIVIDUALES (con parámetro :id)
+// ============================================
+
 // Ruta para asignar técnico (solo ADMIN u OPERADOR)
 router.post('/:id/assign', roleMiddleware(['ADMIN', 'OPERADOR']), assignTechnician);
 
@@ -73,9 +96,6 @@ router.post('/:id/invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInvoice
 // Ruta para crear cobro sin factura individual (solo ADMIN u OPERADOR)
 router.post('/:id/informal-invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInformalInvoice);
 
-// Ruta para crear cobro sin factura múltiple (solo ADMIN u OPERADOR)
-router.post('/bulk/informal-invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInformalInvoiceMultiple);
-
 // Ruta para importar factura individual (solo ADMIN u OPERADOR)
 router.post('/:id/import-invoice', (req, res, next) => {
   console.log('[ROUTE] POST /:id/import-invoice llamada');
@@ -87,17 +107,5 @@ router.post('/:id/import-invoice', (req, res, next) => {
   console.log('[ROUTE] Archivo recibido:', req.file);
   next();
 }, importInvoice);
-
-// Ruta para importar factura múltiple (solo ADMIN u OPERADOR)
-router.post('/bulk/import-invoice', (req, res, next) => {
-  console.log('[ROUTE] POST /bulk/import-invoice llamada');
-  next();
-}, roleMiddleware(['ADMIN', 'OPERADOR']), (req, res, next) => {
-  console.log('[ROUTE] Pasando por roleMiddleware, req.user:', req.user);
-  next();
-}, upload.single('invoice'), (req, res, next) => {
-  console.log('[ROUTE] Archivo recibido:', req.file);
-  next();
-}, importInvoiceMultiple);
 
 module.exports = router; 
