@@ -90,7 +90,17 @@ const getBuildings = async (req, res) => {
     // Calcular saldos para cada edificio
     const buildingsWithBalance = await Promise.all(buildings.map(async (building) => {
       const buildingServices = servicesByBuilding[building.id] || [];
-      const invoices = buildingServices.map(s => s.invoice).filter(Boolean);
+      
+      // IMPORTANTE: Deduplicar facturas para evitar contar múltiples veces
+      // Una factura puede estar asociada a múltiples servicios
+      const invoiceMap = new Map();
+      buildingServices.forEach(s => {
+        if (s.invoice && !invoiceMap.has(s.invoice.id)) {
+          invoiceMap.set(s.invoice.id, s.invoice);
+        }
+      });
+      const invoices = Array.from(invoiceMap.values());
+      
       const remitos = buildingServices.flatMap(s => s.remitos);
 
       // Calcular saldo usando la misma lógica que la cuenta corriente
@@ -731,10 +741,15 @@ const getPendingInvoices = async (req, res) => {
     });
 
     let pendientes = [];
+    
+    // Deduplicar facturas - un Map para no procesar la misma factura múltiples veces
+    const processedInvoices = new Map();
 
     // Facturas pendientes (monto > suma de pagos asociados)
     for (const service of services) {
-      if (service.invoice) {
+      if (service.invoice && !processedInvoices.has(service.invoice.id)) {
+        processedInvoices.set(service.invoice.id, true);
+        
         // Buscar pagos asociados a esta factura
         const paymentDocs = await prisma.paymentDocument.findMany({
           where: { invoiceId: service.invoice.id },
@@ -868,8 +883,14 @@ const getBuildingAccountDetails = async (req, res) => {
       }
     });
 
-    // Obtener todas las facturas del edificio (incluyendo las de efectivo)
-    const invoices = services.map(s => s.invoice).filter(Boolean);
+    // Obtener todas las facturas del edificio (incluyendo las de efectivo) - DEDUPLICADAS
+    const invoiceMap = new Map();
+    services.forEach(s => {
+      if (s.invoice && !invoiceMap.has(s.invoice.id)) {
+        invoiceMap.set(s.invoice.id, s.invoice);
+      }
+    });
+    const invoices = Array.from(invoiceMap.values());
     const invoiceIds = invoices.map(inv => inv.id);
 
     // Obtener todos los pagos asociados a las facturas de este edificio
@@ -922,7 +943,9 @@ const getBuildingAccountDetails = async (req, res) => {
         status: isEfectivo ? 'PAGADO' : invoice.status,
         paymentMethod: invoice.paymentMethod,
         createdAt: invoice.createdAt,
+        number: invoice.number, // Número de factura real
         service: services.find(s => s.invoice?.id === invoice.id),
+        services: services.filter(s => s.invoice?.id === invoice.id), // TODOS los servicios de esta factura
         payments: associatedPaymentDocs.map(pd => ({
           ...pd.payment,
           amountApplied: pd.amount // Monto específico aplicado a esta factura

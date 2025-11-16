@@ -99,8 +99,7 @@ export default function AssignTechnicianPage() {
   }, [id]);
 
   const handleDaySelect = (day: any) => {
-    if (day.isPast) return; // No permitir seleccionar días pasados
-    
+    // Permitir seleccionar cualquier fecha (incluyendo pasadas)
     const selectedDate = new Date(day.date);
     setVisitDate(selectedDate);
     setSelectedTimeRange(null); // Resetear el rango de tiempo al cambiar día
@@ -129,15 +128,7 @@ export default function AssignTechnicianPage() {
   const handleCustomDateSelect = (date: Date | null) => {
     if (!date) return;
     
-    // Verificar que la fecha no sea en el pasado
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (date < today) {
-      setError('No puedes seleccionar una fecha en el pasado');
-      return;
-    }
-    
-    // Establecer solo la fecha sin hora
+    // Permitir seleccionar cualquier fecha (incluyendo pasadas)
     const selectedDate = new Date(date);
     selectedDate.setHours(0, 0, 0, 0);
     

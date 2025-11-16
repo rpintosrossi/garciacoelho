@@ -18,10 +18,12 @@ import {
   Box,
   Chip,
   CircularProgress,
-  Alert
+  Alert,
+  Collapse,
+  IconButton
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
-import { Payment } from "@mui/icons-material";
+import { Payment, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import BuildingPaymentModal from './BuildingPaymentModal';
 
 interface Transaction {
@@ -38,6 +40,8 @@ interface Transaction {
   associatedInvoiceId?: string;
   service?: any;
   remaining?: number;
+  services?: any[]; // Array de servicios asociados a la factura
+  number?: string; // Número de factura real
 }
 
 interface BuildingAccountDetails {
@@ -68,6 +72,19 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openPaymentModal, setOpenPaymentModal] = useState(false);
+  const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+
+  const toggleInvoice = (invoiceId: string) => {
+    setExpandedInvoices(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(invoiceId)) {
+        newSet.delete(invoiceId);
+      } else {
+        newSet.add(invoiceId);
+      }
+      return newSet;
+    });
+  };
 
   useEffect(() => {
     if (open && buildingId) {
@@ -208,6 +225,7 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
               <Table size="small">
                 <TableHead>
                   <TableRow>
+                    <TableCell width={50}></TableCell>
                     <TableCell>Fecha</TableCell>
                     <TableCell>Tipo</TableCell>
                     <TableCell>Descripción</TableCell>
@@ -219,51 +237,59 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                 </TableHead>
                 <TableBody>
                   {data.transactions.map((transaction) => (
-                    <TableRow 
-                      key={transaction.id} 
-                      sx={{ backgroundColor: getRowColor(transaction) }}
-                    >
-                      <TableCell>
-                        {formatDate(transaction.createdAt)}
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={transaction.displayType === 'invoice' ? 'FACTURA' : 'PAGO'}
-                          color={transaction.displayType === 'invoice' ? 'primary' : 'success'}
-                          size="small"
-                        />
-                      </TableCell>
-                                             <TableCell>
-                         {transaction.displayType === 'invoice' ? (
-                           <Box>
-                             <Box display="flex" alignItems="center" gap={1}>
-                               <Typography variant="body2">
-                                 Factura #{transaction.id.slice(0, 8)}
-                               </Typography>
-                               {transaction.paymentMethod === 'EFECTIVO' && (
-                                 <Chip 
-                                   label="EFECTIVO" 
-                                   size="small" 
-                                   color="success"
-                                 />
-                               )}
-                             </Box>
-                             {transaction.service?.technician && (
-                               <Typography variant="caption" color="text.secondary">
-                                 Técnico: {transaction.service.technician.name}
-                               </Typography>
-                             )}
-                             {transaction.paymentMethod === 'EFECTIVO' ? (
-                               <Typography variant="caption" color="success.main">
-                                 Pagado en efectivo
-                               </Typography>
-                             ) : transaction.remaining !== undefined && transaction.remaining > 0 && (
-                               <Typography variant="caption" color="error">
-                                 Pendiente: {formatCurrency(transaction.remaining)}
-                               </Typography>
-                             )}
-                           </Box>
-                         ) : (
+                    <React.Fragment key={transaction.id}>
+                      <TableRow sx={{ backgroundColor: getRowColor(transaction) }}>
+                        <TableCell>
+                          {transaction.displayType === 'invoice' && transaction.services && transaction.services.length > 0 && (
+                            <IconButton
+                              size="small"
+                              onClick={() => toggleInvoice(transaction.id)}
+                            >
+                              {expandedInvoices.has(transaction.id) ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+                            </IconButton>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {formatDate(transaction.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={transaction.displayType === 'invoice' ? 'FACTURA' : 'PAGO'}
+                            color={transaction.displayType === 'invoice' ? 'primary' : 'success'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {transaction.displayType === 'invoice' ? (
+                            <Box>
+                              <Box display="flex" alignItems="center" gap={1}>
+                                <Typography variant="body2">
+                                  {transaction.number ? `Factura #${transaction.number}` : 'Factura sin número'}
+                                </Typography>
+                                {transaction.paymentMethod === 'EFECTIVO' && (
+                                  <Chip 
+                                    label="EFECTIVO" 
+                                    size="small" 
+                                    color="success"
+                                  />
+                                )}
+                              </Box>
+                              {transaction.services && transaction.services.length > 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {transaction.services.length} servicio(s)
+                                </Typography>
+                              )}
+                              {transaction.paymentMethod === 'EFECTIVO' ? (
+                                <Typography variant="caption" color="success.main">
+                                  Pagado en efectivo
+                                </Typography>
+                              ) : transaction.remaining !== undefined && transaction.remaining > 0 && (
+                                <Typography variant="caption" color="error">
+                                  Pendiente: {formatCurrency(transaction.remaining)}
+                                </Typography>
+                              )}
+                            </Box>
+                          ) : (
                           <Box>
                             <Typography variant="body2">
                               Pago #{transaction.id.slice(0, 8)}
@@ -300,6 +326,54 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                         />
                       </TableCell>
                     </TableRow>
+                    
+                    {/* Fila colapsable con los servicios de la factura */}
+                    {transaction.displayType === 'invoice' && transaction.services && transaction.services.length > 0 && (
+                      <TableRow>
+                        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={8}>
+                          <Collapse in={expandedInvoices.has(transaction.id)} timeout="auto" unmountOnExit>
+                            <Box sx={{ margin: 2, bgcolor: 'grey.50', p: 2, borderRadius: 1 }}>
+                              <Typography variant="subtitle2" gutterBottom component="div" color="primary">
+                                Servicios incluidos en esta factura:
+                              </Typography>
+                              <Table size="small">
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell>Fecha</TableCell>
+                                    <TableCell>Categoría</TableCell>
+                                    <TableCell>Descripción</TableCell>
+                                    <TableCell>Técnico</TableCell>
+                                    <TableCell>Estado</TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {transaction.services.map((service: any) => (
+                                    <TableRow key={service.id}>
+                                      <TableCell>{formatDate(service.createdAt)}</TableCell>
+                                      <TableCell>{service.category?.name || '-'}</TableCell>
+                                      <TableCell>
+                                        <Typography variant="body2">
+                                          {service.description || '-'}
+                                        </Typography>
+                                      </TableCell>
+                                      <TableCell>{service.technician?.name || '-'}</TableCell>
+                                      <TableCell>
+                                        <Chip 
+                                          label={service.status}
+                                          size="small"
+                                          color={service.status === 'COMPLETADO' ? 'success' : 'default'}
+                                        />
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </Box>
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

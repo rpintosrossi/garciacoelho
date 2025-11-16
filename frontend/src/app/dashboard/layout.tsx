@@ -38,7 +38,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import ServicesSidebar from '@/components/ServicesSidebar';
 import { CategoryProvider } from '@/contexts/CategoryContext';
 import api from '@/lib/axios';
-import logo from '/public/logo.png';
 import { useAuth } from '@/contexts/AuthContext';
 
 const drawerWidth = 240;

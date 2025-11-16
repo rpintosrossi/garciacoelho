@@ -9,6 +9,10 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const s3Client = require('../config/s3');
 const https = require('https');
 const http = require('http');
+const os = require('os');
+const { randomBytes } = require('crypto');
+const archiver = require('archiver');
+const hummus = require('hummus');
 
 // Función para descargar archivo desde S3 o URL
 const downloadFile = async (fileUrl) => {
@@ -251,7 +255,7 @@ const testData = async (req, res) => {
     const sampleInvoices = await prisma.invoice.findMany({ 
       take: 3,
       include: {
-        service: {
+        services: {
           include: {
             building: {
               include: {
@@ -290,7 +294,7 @@ const testInvoices = async (req, res) => {
     // Obtener todas las facturas con sus métodos de pago
     const allInvoices = await prisma.invoice.findMany({
       include: {
-        service: {
+        services: {
           include: {
             building: {
               include: {
@@ -314,12 +318,13 @@ const testInvoices = async (req, res) => {
       if (!invoicesByMethod[method]) {
         invoicesByMethod[method] = [];
       }
+      const firstService = invoice.services && invoice.services[0];
       invoicesByMethod[method].push({
         id: invoice.id,
         amount: invoice.amount,
         status: invoice.status,
-        administrator: invoice.service.building.administrator.name,
-        building: invoice.service.building.name,
+        administrator: firstService?.building?.administrator?.name || 'N/A',
+        building: firstService?.building?.name || 'N/A',
         createdAt: invoice.createdAt
       });
     });
@@ -362,7 +367,7 @@ const getPackages = async (req, res) => {
           createdAt: true,
           paymentMethod: true,
           fileUrl: true,
-          service: {
+          services: {
             select: {
               id: true,
               status: true,
@@ -518,7 +523,8 @@ const getPackages = async (req, res) => {
           montoAcordado: montoAcordado
         };
         pendingInvoices.push(invoiceWithBalance);
-        console.log(`📄 [PACKAGES] Factura ${invoice.id}: método de pago = ${invoice.paymentMethod || 'null'}, status = ${invoice.status}, servicio status = ${invoice.service.status}, PENDIENTE`);
+        const firstService = invoice.services && invoice.services[0];
+        console.log(`📄 [PACKAGES] Factura ${invoice.id}: método de pago = ${invoice.paymentMethod || 'null'}, status = ${invoice.status}, servicio status = ${firstService?.status || 'N/A'}, PENDIENTE`);
       } else {
         console.log(`📄 [PACKAGES] Factura ${invoice.id}: PAGADA COMPLETAMENTE, excluyendo del paquete`);
       }
@@ -528,30 +534,37 @@ const getPackages = async (req, res) => {
     
     // Combinar facturas y Prov
     const allTransactions = [
-      ...pendingInvoices.map(invoice => ({
-        type: (invoice.status === 'PENDIENTE' && invoice.service.status === 'FACTURADO') ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
-        id: invoice.id,
-        amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
-        originalAmount: invoice.amount, // Mantener el monto original para referencia
-        totalPaid: invoice.totalPaid,
-        totalDiscounts: invoice.totalDiscounts,
-        montoAcordado: invoice.montoAcordado,
-        status: invoice.status,
-        createdAt: invoice.createdAt,
-        service: invoice.service,
-        building: invoice.service.building,
-        administrator: invoice.service.building.administrator,
-        technician: invoice.service.technician,
-        remitos: invoice.service.remitos,
-        // Información del PDF de la factura
-        invoiceFileUrl: invoice.fileUrl,
-        hasInvoicePDF: invoice.fileUrl && isPDF(invoice.fileUrl),
-        // Para facturas informales, agregar campos de remito sin factura
-        ...(invoice.status === 'PENDIENTE' && invoice.service.status === 'FACTURADO' && {
-          comprobante: `REMITO-SIN-FACTURA-${invoice.id.slice(0, 8)}`,
-          paymentMethod: { name: 'Cuenta Corriente' }
-        })
-      })),
+      ...pendingInvoices.map(invoice => {
+        const firstService = invoice.services && invoice.services[0];
+        if (!firstService) {
+          console.log(`⚠️ [PACKAGES] Factura ${invoice.id} sin servicios, saltando`);
+          return null;
+        }
+        return {
+          type: (invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO') ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
+          id: invoice.id,
+          amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
+          originalAmount: invoice.amount, // Mantener el monto original para referencia
+          totalPaid: invoice.totalPaid,
+          totalDiscounts: invoice.totalDiscounts,
+          montoAcordado: invoice.montoAcordado,
+          status: invoice.status,
+          createdAt: invoice.createdAt,
+          service: firstService,
+          building: firstService.building,
+          administrator: firstService.building.administrator,
+          technician: firstService.technician,
+          remitos: firstService.remitos,
+          // Información del PDF de la factura
+          invoiceFileUrl: invoice.fileUrl,
+          hasInvoicePDF: invoice.fileUrl && isPDF(invoice.fileUrl),
+          // Para facturas informales, agregar campos de remito sin factura
+          ...(invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO' && {
+            comprobante: `REMITO-SIN-FACTURA-${invoice.id.slice(0, 8)}`,
+            paymentMethod: { name: 'Cuenta Corriente' }
+          })
+        };
+      }).filter(Boolean),
       ...payments.map(payment => {
         console.log('🔍 [PACKAGES] Procesando pago:', payment.id, payment.comprobante);
         console.log('🔍 [PACKAGES] Documentos del pago:', payment.documents);
@@ -606,6 +619,9 @@ const getPackages = async (req, res) => {
      const { adminId } = req.params;
      const { paymentMethodId } = req.query;
     
+    console.log(`📦 [PACKAGES] Descargando paquete para adminId: ${adminId}`);
+    console.log(`💳 [PACKAGES] PaymentMethodId recibido: ${paymentMethodId}`);
+    
     // Obtener el administrador
     const administrator = await prisma.administrator.findUnique({
       where: { id: adminId }
@@ -622,17 +638,23 @@ const getPackages = async (req, res) => {
         where: { id: paymentMethodId }
       });
       
+      console.log(`💳 [PACKAGES] Método de pago encontrado:`, selectedPaymentMethod);
+      
       if (!selectedPaymentMethod) {
         return res.status(404).json({ message: 'Método de pago no encontrado' });
       }
+    } else {
+      console.log(`⚠️ [PACKAGES] No se recibió paymentMethodId en la query`);
     }
 
         // Obtener todas las facturas del administrador
     const invoices = await prisma.invoice.findMany({
       where: {
-        service: {
-          building: {
-            administratorId: adminId
+        services: {
+          some: {
+            building: {
+              administratorId: adminId
+            }
           }
         },
         // Excluir facturas con método de pago en efectivo (ya fueron abonadas directamente)
@@ -642,7 +664,7 @@ const getPackages = async (req, res) => {
         ]
       },
       include: {
-        service: {
+        services: {
           include: {
             building: true,
             technician: true,
@@ -743,8 +765,13 @@ const getPackages = async (req, res) => {
       return res.status(404).json({ message: 'No hay facturas ni cobros para este administrador' });
     }
 
+    // Calcular totales
+    const totalFacturas = pendingInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
+    const totalProv = payments.reduce((sum, pay) => sum + pay.amount, 0);
+    const netoTotal = totalFacturas - totalProv;
+
     // Crear el PDF del paquete
-    const doc = new PDFDocument();
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const chunks = [];
     
     doc.on('data', chunk => chunks.push(chunk));
@@ -777,23 +804,36 @@ const getPackages = async (req, res) => {
              }
            }
            
-           // PDFs de remitos de facturas
-           if (invoice.service.remitos && invoice.service.remitos.length > 0) {
-             console.log(`🔍 [PACKAGES] Factura tiene ${invoice.service.remitos.length} remitos`);
-             for (const remito of invoice.service.remitos) {
-               console.log(`🔍 [PACKAGES] Procesando remito: ${remito.number}`);
-               console.log(`🔍 [PACKAGES] Remito tiene ${remito.receiptImages?.length || 0} archivos`);
-               if (remito.receiptImages && remito.receiptImages.length > 0) {
-                 for (const fileUrl of remito.receiptImages) {
-                   console.log(`🔍 [PACKAGES] Archivo: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
-                   if (isPDF(fileUrl)) {
-                     try {
-                       console.log(`📥 [PACKAGES] Descargando PDF de remito desde: ${fileUrl}`);
-                       const pdfBuffer = await downloadFile(fileUrl);
-                       remitoPDFs.push({ buffer: pdfBuffer, name: `remito_${remito.number}` });
-                       console.log(`✅ [PACKAGES] PDF de remito descargado: ${remito.number}`);
-                     } catch (error) {
-                       console.error(`❌ [PACKAGES] Error al descargar PDF de remito ${fileUrl}:`, error.message);
+           // PDFs de remitos de facturas - PROCESAR TODOS LOS SERVICIOS
+           if (invoice.services && invoice.services.length > 0) {
+             console.log(`🔍 [PACKAGES] Factura tiene ${invoice.services.length} servicios`);
+             
+             for (const service of invoice.services) {
+               if (service.remitos && service.remitos.length > 0) {
+                 console.log(`🔍 [PACKAGES] Servicio ${service.id} tiene ${service.remitos.length} remitos`);
+                 
+                 for (const remito of service.remitos) {
+                   console.log(`🔍 [PACKAGES] Procesando remito: ${remito.number}`);
+                   console.log(`🔍 [PACKAGES] Remito tiene ${remito.receiptImages?.length || 0} archivos`);
+                   
+                   if (remito.receiptImages && remito.receiptImages.length > 0) {
+                     for (const fileUrl of remito.receiptImages) {
+                       console.log(`🔍 [PACKAGES] Archivo: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
+                       if (isPDF(fileUrl)) {
+                         try {
+                           console.log(`📥 [PACKAGES] Descargando PDF de remito desde: ${fileUrl}`);
+                           const pdfBuffer = await downloadFile(fileUrl);
+                           remitoPDFs.push({ 
+                             buffer: pdfBuffer, 
+                             name: `remito_${remito.number}`,
+                             buildingAddress: service.building?.address || 'N/A',
+                             remito: remito
+                           });
+                           console.log(`✅ [PACKAGES] PDF de remito descargado: ${remito.number}`);
+                         } catch (error) {
+                           console.error(`❌ [PACKAGES] Error al descargar PDF de remito ${fileUrl}:`, error.message);
+                         }
+                       }
                      }
                    }
                  }
@@ -832,378 +872,356 @@ const getPackages = async (req, res) => {
          console.log(`📄 [PACKAGES] Encontrados ${remitoPDFs.length} PDFs de remitos para incluir`);
          console.log(`📄 [PACKAGES] Encontrados ${invoicePDFs.length} PDFs de facturas para incluir`);
         
-        // Combinar el PDF del paquete con los PDFs de remitos y facturas
-        const mergedPdf = await PDFLib.create();
-        
-        // Agregar el PDF del paquete
-        const packagePdfDoc = await PDFLib.load(packagePdfBuffer);
-        const packagePages = await mergedPdf.copyPages(packagePdfDoc, packagePdfDoc.getPageIndices());
-        packagePages.forEach((page) => mergedPdf.addPage(page));
-        
-        // Agregar los PDFs de facturas primero (para que aparezcan antes que los remitos)
-        for (const pdfData of invoicePDFs) {
-          try {
-            const pdfDoc = await PDFLib.load(pdfData.buffer);
-            const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
-            pages.forEach((page) => mergedPdf.addPage(page));
-            console.log(`📄 [PACKAGES] Agregado PDF de factura: ${pdfData.name}`);
-          } catch (error) {
-            console.error(`❌ [PACKAGES] Error al agregar PDF de factura ${pdfData.name}:`, error);
+        // SOLUCIÓN: Usar hummus para desencriptar y luego combinar con pdf-lib
+        try {
+          // Crear directorio temporal
+          const tempDir = path.join(os.tmpdir(), `paquete-${randomBytes(8).toString('hex')}`);
+          if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
           }
-        }
-        
-        // Agregar los PDFs de remitos
-        for (const pdfData of remitoPDFs) {
+          
+          const tempFiles = [];
+          
           try {
-            const pdfDoc = await PDFLib.load(pdfData.buffer);
-            const pages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
-            pages.forEach((page) => mergedPdf.addPage(page));
-            console.log(`📄 [PACKAGES] Agregado PDF de remito: ${pdfData.name}`);
-          } catch (error) {
-            console.error(`❌ [PACKAGES] Error al agregar PDF de remito ${pdfData.name}:`, error);
+            // 1. Desencriptar PDFs de facturas usando hummus
+            const decryptedInvoicePDFs = [];
+            for (let i = 0; i < invoicePDFs.length; i++) {
+              const pdfData = invoicePDFs[i];
+              try {
+                console.log(`🔓 [PACKAGES] Desencriptando factura: ${pdfData.name}`);
+                
+                // Guardar archivo temporal encriptado
+                const encryptedPath = path.join(tempDir, `encrypted-${i}.pdf`);
+                const decryptedPath = path.join(tempDir, `decrypted-${i}.pdf`);
+                fs.writeFileSync(encryptedPath, pdfData.buffer);
+                tempFiles.push(encryptedPath, decryptedPath);
+                
+                // Desencriptar con hummus usando appendPDFPagesFromPDF
+                const pdfWriter = hummus.createWriter(decryptedPath);
+                pdfWriter.appendPDFPagesFromPDF(encryptedPath);
+                pdfWriter.end();
+                
+                // Leer el PDF desencriptado
+                const decryptedBuffer = fs.readFileSync(decryptedPath);
+                decryptedInvoicePDFs.push({
+                  name: pdfData.name,
+                  buffer: decryptedBuffer
+                });
+                
+                console.log(`✅ [PACKAGES] Factura desencriptada: ${pdfData.name}`);
+              } catch (error) {
+                console.error(`❌ [PACKAGES] Error al desencriptar factura ${pdfData.name}:`, error.message);
+                // Si falla la desencriptación, usar el buffer original
+                decryptedInvoicePDFs.push(pdfData);
+              }
+            }
+            
+            // 2. Ahora combinar todos los PDFs con pdf-lib
+            const mergedPdf = await PDFLib.create();
+            
+            // Agregar el PDF del paquete (resumen)
+            console.log(`📦 [PACKAGES] Agregando PDF del paquete...`);
+            const packagePdfDoc = await PDFLib.load(packagePdfBuffer);
+            const packagePages = await mergedPdf.copyPages(packagePdfDoc, packagePdfDoc.getPageIndices());
+            packagePages.forEach((page) => mergedPdf.addPage(page));
+            console.log(`✅ [PACKAGES] Paquete agregado: ${packagePages.length} páginas`);
+            
+            // Agregar PDF del método de pago (DESPUÉS del resumen, ANTES de las facturas)
+            if (selectedPaymentMethod) {
+              try {
+                console.log(`💳 [PACKAGES] Generando PDF de método de pago: ${selectedPaymentMethod.name}`);
+                
+                // Generar PDF del método de pago dinámicamente
+                const paymentDoc = new PDFDocument({ margin: 50, size: 'A4' });
+                const paymentChunks = [];
+                
+                paymentDoc.on('data', chunk => paymentChunks.push(chunk));
+                
+                await new Promise((resolve) => {
+                  paymentDoc.on('end', resolve);
+                  
+                  // Logo (si existe)
+                  const logoPath = path.join(__dirname, '../../public/logo.png');
+                  if (fs.existsSync(logoPath)) {
+                    paymentDoc.image(logoPath, 205, 30, { width: 200, align: 'center' });
+                  }
+                  
+                  // Cuadro de datos del método de pago - posición fija bien debajo del logo
+                  const boxTop = 200;
+                  const boxLeft = 80;
+                  const boxWidth = 450;
+                  const boxHeight = 280;
+                  
+                  // Dibujar borde del cuadro
+                  paymentDoc.rect(boxLeft, boxTop, boxWidth, boxHeight).stroke();
+                  
+                  // Contenido dentro del cuadro
+                  let currentY = boxTop + 30;
+                  const labelX = boxLeft + 30;
+                  const valueX = boxLeft + 150;
+                  const lineHeight = 40;
+                  
+                  paymentDoc.fontSize(13).fillColor('#000');
+                  
+                  // Titular
+                  paymentDoc.font('Helvetica-Bold').text('Titular:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.titular || 'No especificado', valueX, currentY, { width: 250 });
+                  currentY += lineHeight;
+                  
+                  // Banco
+                  paymentDoc.font('Helvetica-Bold').text('Banco:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.banco || 'No especificado', valueX, currentY, { width: 250 });
+                  currentY += lineHeight;
+                  
+                  // Cuenta
+                  paymentDoc.font('Helvetica-Bold').text('Cuenta:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.cuenta || 'No especificado', valueX, currentY, { width: 250 });
+                  currentY += lineHeight;
+                  
+                  // CUIT
+                  paymentDoc.font('Helvetica-Bold').text('CUIT:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.cuit || 'No especificado', valueX, currentY, { width: 250 });
+                  currentY += lineHeight;
+                  
+                  // CBU
+                  paymentDoc.font('Helvetica-Bold').text('CBU:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.cbu || 'No especificado', valueX, currentY, { width: 250 });
+                  currentY += lineHeight;
+                  
+                  // Alias
+                  paymentDoc.font('Helvetica-Bold').text('Alias:', labelX, currentY);
+                  paymentDoc.font('Helvetica').text(selectedPaymentMethod.alias || 'No especificado', valueX, currentY, { width: 250 });
+                  
+                  // Mensaje final en recuadro azul
+                  const msgBoxTop = boxTop + boxHeight + 40;
+                  const msgBoxHeight = 80;
+                  
+                  // Fondo azul
+                  paymentDoc.rect(50, msgBoxTop, 512, msgBoxHeight).fillAndStroke('#1976d2', '#1976d2');
+                  
+                  // Texto blanco sobre fondo azul
+                  paymentDoc.fontSize(13).fillColor('#ffffff').font('Helvetica-Bold')
+                    .text('POR FAVOR ENVIAR COMPROBANTE AL E-MAIL O AL WHATSAPP', 50, msgBoxTop + 15, { 
+                      align: 'center',
+                      width: 512
+                    });
+                  
+                  paymentDoc.fontSize(11).fillColor('#ffffff').font('Helvetica')
+                    .text('Mail: garciacoelho@hotmail.com', 50, msgBoxTop + 42, { 
+                      align: 'center',
+                      width: 512
+                    })
+                    .text('Whatsapp: 1138341046', 50, msgBoxTop + 58, { 
+                      align: 'center',
+                      width: 512
+                    });
+                  
+                  // Pie de página
+                  paymentDoc.fontSize(9).fillColor('#666').font('Helvetica')
+                    .text('Dirección: Av. San Martín 1234, CABA', 50, 770, { 
+                      align: 'center',
+                      width: 512
+                    });
+                  
+                  paymentDoc.end();
+                });
+                
+                const paymentPdfBuffer = Buffer.concat(paymentChunks);
+                console.log(`💳 [PACKAGES] PDF de método de pago generado: ${paymentPdfBuffer.length} bytes`);
+                
+                // Agregar al merged PDF
+                const paymentPdfDoc = await PDFLib.load(paymentPdfBuffer);
+                const paymentPages = await mergedPdf.copyPages(paymentPdfDoc, paymentPdfDoc.getPageIndices());
+                paymentPages.forEach((page) => mergedPdf.addPage(page));
+                console.log(`✅ [PACKAGES] Método de pago agregado: ${paymentPages.length} páginas`);
+                
+              } catch (error) {
+                console.error(`❌ [PACKAGES] Error al agregar método de pago:`, error.message);
+                console.error(error.stack);
+              }
+            } else {
+              console.log(`⚠️ [PACKAGES] No se seleccionó método de pago`);
+            }
+            
+            // Agregar PDFs de facturas desencriptadas
+            for (const pdfData of decryptedInvoicePDFs) {
+              try {
+                console.log(`📄 [PACKAGES] Agregando factura desencriptada: ${pdfData.name}`);
+                const facturaPdfDoc = await PDFLib.load(pdfData.buffer);
+                const facturaPages = await mergedPdf.copyPages(facturaPdfDoc, facturaPdfDoc.getPageIndices());
+                facturaPages.forEach((page) => mergedPdf.addPage(page));
+                console.log(`✅ [PACKAGES] Factura agregada: ${pdfData.name}`);
+              } catch (error) {
+                console.error(`❌ [PACKAGES] Error al agregar factura ${pdfData.name}:`, error.message);
+              }
+            }
+            
+            // Agregar PDFs de remitos
+            for (const pdfData of remitoPDFs) {
+              try {
+                console.log(`📄 [PACKAGES] Agregando remito: ${pdfData.name}`);
+                const remitoPdfDoc = await PDFLib.load(pdfData.buffer);
+                const remitoPages = await mergedPdf.copyPages(remitoPdfDoc, remitoPdfDoc.getPageIndices());
+                remitoPages.forEach((page) => mergedPdf.addPage(page));
+                console.log(`✅ [PACKAGES] Remito agregado: ${pdfData.name}`);
+              } catch (error) {
+                console.error(`❌ [PACKAGES] Error al agregar remito ${pdfData.name}:`, error.message);
+              }
+            }
+            
+            // Guardar y enviar
+            console.log(`📦 [PACKAGES] Guardando PDF final...`);
+            const mergedPdfBytes = await mergedPdf.save();
+            
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
+            res.send(Buffer.from(mergedPdfBytes));
+            
+            console.log(`✅ [PACKAGES] Paquete enviado exitosamente`);
+            
+          } finally {
+            // Limpiar archivos temporales
+            console.log(`🧹 [PACKAGES] Limpiando archivos temporales...`);
+            for (const file of tempFiles) {
+              try {
+                if (fs.existsSync(file)) {
+                  fs.unlinkSync(file);
+                }
+              } catch (err) {
+                console.error(`⚠️ [PACKAGES] Error al eliminar archivo temporal:`, err.message);
+              }
+            }
+            
+            // Eliminar directorio temporal
+            try {
+              if (fs.existsSync(tempDir)) {
+                fs.rmdirSync(tempDir);
+              }
+            } catch (err) {
+              console.error(`⚠️ [PACKAGES] Error al eliminar directorio temporal:`, err.message);
+            }
           }
+          
+        } catch (error) {
+          console.error('❌ [PACKAGES] Error al combinar PDFs:', error);
+          console.error(error.stack);
+          // Si falla, enviar solo el PDF del paquete
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
+          res.send(packagePdfBuffer);
         }
-        
-        // Generar el PDF final
-        const mergedPdfBytes = await mergedPdf.save();
-        
-        // Enviar el PDF combinado
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
-        res.send(Buffer.from(mergedPdfBytes));
         
       } catch (error) {
-        console.error('Error al combinar PDFs:', error);
-        // Si falla la combinación, enviar solo el PDF del paquete
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
-        res.send(packagePdfBuffer);
+        console.error('❌ [PACKAGES] Error general al generar paquete:', error);
+        res.status(500).json({ message: 'Error al generar paquete', error: error.message });
       }
     });
 
-    // Agregar logo (si existe)
+    // ============ PÁGINA 1: RESUMEN DEL PAQUETE ============
+    // Logo (si existe)
     const logoPath = path.join(__dirname, '../../public/logo.png');
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, 50, 50, { width: 100 });
+      doc.image(logoPath, 50, 45, { width: 80 });
     }
 
-         // Datos de la empresa
-     doc.fontSize(12)
-        .text('Garcia Coelho', 50, 160)
-        .fontSize(10)
-        .text('Av. Pte Illia 1823, San Martin', 50, 180)
-        .text('4753-2393 | 4755-9908', 50, 195);
+    // Título y datos del administrador
+    doc.fontSize(20).text('FACTURACIÓN', 50, 50, { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(14).text(`Administrador: ${administrator.name}`, { align: 'center' });
+    doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, { align: 'center' });
+    doc.moveDown(2);
 
-     // Datos de pago según el método seleccionado
-     let paymentInfo = '';
-     if (selectedPaymentMethod) {
-       paymentInfo = `Datos para ${selectedPaymentMethod.name}:`;
-       
-       if (selectedPaymentMethod.titular) {
-         paymentInfo += `\nTitular: ${selectedPaymentMethod.titular}`;
-       }
-       if (selectedPaymentMethod.banco) {
-         paymentInfo += `\nBanco: ${selectedPaymentMethod.banco}`;
-       }
-       if (selectedPaymentMethod.cuenta) {
-         paymentInfo += `\nCuenta: ${selectedPaymentMethod.cuenta}`;
-       }
-       if (selectedPaymentMethod.cuit) {
-         paymentInfo += `\nCUIT: ${selectedPaymentMethod.cuit}`;
-       }
-       if (selectedPaymentMethod.cbu) {
-         paymentInfo += `\nCBU: ${selectedPaymentMethod.cbu}`;
-       }
-       if (selectedPaymentMethod.alias) {
-         paymentInfo += `\nAlias: ${selectedPaymentMethod.alias}`;
-       }
-       
-       // Agregar información de contacto
-       paymentInfo += `\n\nPor favor enviar comprobante al e-mail o al Whatsapp:
-Mail: garciacoelho@hotmail.com
-Whatsapp: 1138341046`;
-     } else {
-       // Fallback si no hay método de pago seleccionado
-       paymentInfo = `Datos para Transferencia Bancaria:
-Banco: Banco de la Nación Argentina
-Tipo de Cuenta: Cuenta Corriente
-Número de Cuenta: 1234567890
-CBU: 0110123456789012345678
-Titular: Garcia Coelho S.R.L.
-CUIT: 30-12345678-9`;
-     }
+    // Tabla de facturas
+    doc.fontSize(14).text('Facturas Incluidas', 50);
+    doc.moveDown(0.5);
 
-         // Información del administrador
-     doc.fontSize(14)
-        .text(`Administrador: ${administrator.name}`, 50, 230)
-        .fontSize(10)
-        .text(`Fecha de descarga: ${new Date().toLocaleDateString('es-AR')}`, 50, 250);
+    // Encabezados de tabla
+    const tableTop = doc.y;
+    const col1 = 50;
+    const col2 = 220;
+    const col3 = 340;
+    const col4 = 450;
+    
+    doc.fontSize(10).fillColor('#666');
+    doc.text('Edificio (Dirección)', col1, tableTop);
+    doc.text('Fecha', col2, tableTop);
+    doc.text('Nº Factura', col3, tableTop);
+    doc.text('Importe', col4, tableTop);
+    
+    // Línea separadora
+    doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
+    doc.moveDown(0.5);
 
-     // Agregar datos de pago
-     const paymentLines = paymentInfo.split('\n');
-     let paymentY = 280;
-     doc.fontSize(10).text('DATOS PARA PAGO:', 50, paymentY);
-     paymentY += 15;
-     
-     paymentLines.forEach(line => {
-       if (line.trim()) {
-         doc.fontSize(9).text(line.trim(), 50, paymentY);
-         paymentY += 12;
-       }
-     });
-
-         // Línea separadora
-     doc.moveTo(50, paymentY + 10)
-        .lineTo(550, paymentY + 10)
-        .stroke();
-
-     // Tabla de facturas y cobros
-     let yPosition = paymentY + 30;
-    let totalAmount = 0;
-    let totalInvoices = pendingInvoices.length;
-    let totalPayments = payments.length;
-
-    // Encabezados de la tabla
-    doc.fontSize(10)
-       .text('Edificio (Dirección)', 50, yPosition)
-       .text('Fecha', 250, yPosition)
-       .text('N° Factura/Comprobante', 350, yPosition)
-       .text('Importe', 450, yPosition);
-
-    yPosition += 20;
-
-    // Línea de encabezados
-    doc.moveTo(50, yPosition)
-       .lineTo(550, yPosition)
-       .stroke();
-
-    yPosition += 10;
-
-    // Datos de las facturas
+    // Filas de facturas
+    doc.fillColor('#000');
     for (const invoice of pendingInvoices) {
-      const building = invoice.service.building;
-      const buildingInfo = `${building.name} (${building.address})`;
-      const invoiceDate = new Date(invoice.createdAt).toLocaleDateString('es-AR');
-      const invoiceNumber = invoice.id.slice(0, 8);
-      const amount = invoice.remainingAmount; // Usar el saldo pendiente
-
-      totalAmount += amount;
-
-      // Verificar si hay espacio suficiente en la página
-      if (yPosition > 700) {
-        doc.addPage();
-        yPosition = 50;
-      }
-
-      doc.fontSize(9)
-         .text(buildingInfo, 50, yPosition, { width: 180 })
-         .text(invoiceDate, 250, yPosition, { width: 80 })
-         .text(invoiceNumber, 350, yPosition, { width: 80 })
-         .text(`$${amount.toFixed(2)}`, 450, yPosition, { width: 80 });
-
-      yPosition += 15;
-    }
-
-    // Datos de los Prov
-    for (const payment of payments) {
-      const firstRemito = payment.documents.find(doc => doc.remito)?.remito;
-      if (firstRemito) {
-        const building = firstRemito.service.building;
-        const buildingInfo = `${building.name} (${building.address})`;
-        const paymentDate = new Date(payment.createdAt).toLocaleDateString('es-AR');
-        const comprobante = payment.comprobante;
-        const amount = payment.amount;
-
-        totalAmount += amount;
-
-        // Verificar si hay espacio suficiente en la página
-        if (yPosition > 700) {
-          doc.addPage();
-          yPosition = 50;
-        }
-
-        doc.fontSize(9)
-           .text(buildingInfo, 50, yPosition, { width: 180 })
-           .text(paymentDate, 250, yPosition, { width: 80 })
-           .text(comprobante, 350, yPosition, { width: 80 })
-           .text(`$${amount.toFixed(2)}`, 450, yPosition, { width: 80 });
-
-        yPosition += 15;
-      }
-    }
-
-    // Línea separadora antes del resumen
-    yPosition += 10;
-    doc.moveTo(50, yPosition)
-       .lineTo(550, yPosition)
-       .stroke();
-
-    yPosition += 20;
-
-         // Resumen
-     doc.fontSize(12)
-        .text(`Total de Facturas: ${totalInvoices}`, 50, yPosition)
-        .text(`Total de Prov: ${totalPayments}`, 50, yPosition + 15)
-        .text(`Neto Total: $${totalAmount.toFixed(2)}`, 350, yPosition, { width: 200 });
-
-    // Agregar remitos al final
-    yPosition += 40;
-    doc.fontSize(14)
-       .text('Remitos Incluidos:', 50, yPosition);
-
-    yPosition += 20;
-
-    // Remitos de facturas
-    for (const invoice of pendingInvoices) {
-      if (invoice.service.remitos && invoice.service.remitos.length > 0) {
-        for (const remito of invoice.service.remitos) {
-          if (yPosition > 700) {
-            doc.addPage();
-            yPosition = 50;
-          }
-
-                     doc.fontSize(10)
-              .text(`Remito ${remito.number} - ${invoice.service.building.name}`, 50, yPosition);
-
-           yPosition += 15;
-
-           // Agregar solo imágenes del remito (los PDFs se combinan al final)
-           if (remito.receiptImages && remito.receiptImages.length > 0) {
-             for (const fileUrl of remito.receiptImages) {
-               try {
-                 // Solo procesar imágenes, no PDFs
-                 if (!isPDF(fileUrl)) {
-                   // Extraer el nombre del archivo de la URL completa
-                   const filename = fileUrl.split('/').pop();
-                   const filePath = path.join(__dirname, '../../uploads', filename);
-                   
-                   if (fs.existsSync(filePath)) {
-                     if (yPosition > 650) {
-                       doc.addPage();
-                       yPosition = 50;
-                     }
-                     
-                     doc.image(filePath, 70, yPosition, { width: 200 });
-                     yPosition += 220;
-                   }
-                 }
-               } catch (error) {
-                 console.error('Error al agregar imagen al PDF:', error);
-               }
-             }
-           }
-        }
-      }
-    }
-
-    // Remitos de Prov
-    for (const payment of payments) {
-      for (const paymentDoc of payment.documents) {
-        if (paymentDoc.remito) {
-          const remito = paymentDoc.remito;
-          if (yPosition > 700) {
-            doc.addPage();
-            yPosition = 50;
-          }
-
-                     doc.fontSize(10)
-              .text(`Remito ${remito.number} - ${remito.service.building.name} (Cobro: ${payment.comprobante})`, 50, yPosition);
-
-           yPosition += 15;
-
-           // Agregar solo imágenes del remito (los PDFs se combinan al final)
-           if (remito.receiptImages && remito.receiptImages.length > 0) {
-             for (const fileUrl of remito.receiptImages) {
-               try {
-                 // Solo procesar imágenes, no PDFs
-                 if (!isPDF(fileUrl)) {
-                   // Extraer el nombre del archivo de la URL completa
-                   const filename = fileUrl.split('/').pop();
-                   const filePath = path.join(__dirname, '../../uploads', filename);
-                   
-                   if (fs.existsSync(filePath)) {
-                     if (yPosition > 650) {
-                       doc.addPage();
-                       yPosition = 50;
-                     }
-                     
-                     doc.image(filePath, 70, yPosition, { width: 200 });
-                     yPosition += 220;
-                   }
-                 }
-               } catch (error) {
-                 console.error('Error al agregar imagen al PDF:', error);
-               }
-             }
-           }
-        }
-      }
-    }
-
-    // Si hay un método de pago seleccionado, agregar una página con sus datos
-    if (selectedPaymentMethod) {
-      doc.addPage();
+      const building = invoice.services?.[0]?.building;
+      const address = building ? `${building.name || ''} (${building.address || ''})` : 'N/A';
+      const fecha = invoice.date ? new Date(invoice.date).toLocaleDateString('es-AR') : 'N/A';
+      const numero = invoice.number || 'N/A';
+      const importe = `$${(invoice.montoAcordado || invoice.amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
       
-      // Agregar logo en la nueva página
-      if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, 50, 50, { width: 100 });
-      }
-
-      // Datos de la empresa
-      doc.fontSize(12)
-         .text('Garcia Coelho', 50, 160)
-         .fontSize(10)
-         .text('Av. Pte Illia 1823, San Martin', 50, 180)
-         .text('4753-2393 | 4755-9908', 50, 195);
-
-      // Título del método de pago
-      doc.fontSize(16)
-         .text(`Datos para ${selectedPaymentMethod.name}`, 50, 230)
-         .fontSize(12);
-
-      let yPosition = 260;
-
-      // Agregar datos del método de pago
-      if (selectedPaymentMethod.titular) {
-        doc.text(`Titular: ${selectedPaymentMethod.titular}`, 50, yPosition);
-        yPosition += 20;
-      }
-      if (selectedPaymentMethod.banco) {
-        doc.text(`Banco: ${selectedPaymentMethod.banco}`, 50, yPosition);
-        yPosition += 20;
-      }
-      if (selectedPaymentMethod.cuenta) {
-        doc.text(`Cuenta: ${selectedPaymentMethod.cuenta}`, 50, yPosition);
-        yPosition += 20;
-      }
-      if (selectedPaymentMethod.cuit) {
-        doc.text(`CUIT: ${selectedPaymentMethod.cuit}`, 50, yPosition);
-        yPosition += 20;
-      }
-      if (selectedPaymentMethod.cbu) {
-        doc.text(`CBU: ${selectedPaymentMethod.cbu}`, 50, yPosition);
-        yPosition += 20;
-      }
-      if (selectedPaymentMethod.alias) {
-        doc.text(`Alias: ${selectedPaymentMethod.alias}`, 50, yPosition);
-        yPosition += 20;
-      }
-
-      // Información de contacto
-      yPosition += 30;
-      doc.fontSize(14).text('Por favor enviar comprobante al e-mail o al Whatsapp:', 50, yPosition);
-      yPosition += 20;
-      doc.fontSize(12).text('Mail: garciacoelho@hotmail.com', 50, yPosition);
-      yPosition += 20;
-      doc.text('Whatsapp: 1138341046', 50, yPosition);
+      const startY = doc.y;
+      
+      doc.fontSize(9).text(address, col1, startY, { width: 160 });
+      doc.text(fecha, col2, startY, { width: 110 });
+      doc.text(numero, col3, startY, { width: 100 });
+      doc.text(importe, col4, startY, { width: 90, align: 'right' });
+      
+      doc.moveDown(1.5);
     }
 
-    // Finalizar el PDF del paquete
-    doc.end();
+    // Totales
+    doc.moveDown();
+    doc.fontSize(11).fillColor('#333');
+    doc.text(`Total de Facturas: $${totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.moveDown(0.5);
+    doc.text(`Total de Prov: -$${totalProv.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.moveDown(0.5);
+    doc.fontSize(13).fillColor('#000').font('Helvetica-Bold');
+    doc.text(`Neto Total: $${netoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.font('Helvetica');
 
+    // Remitos incluidos
+    doc.moveDown(2);
+    doc.fontSize(14).fillColor('#000').text('Remitos Incluidos:', 50);
+    doc.moveDown(0.5);
+    
+    // Recolectar información de remitos (lo haremos después cuando descarguemos los PDFs)
+    // Por ahora solo mostramos los servicios
+    const remitosInfo = [];
+    for (const invoice of pendingInvoices) {
+      if (invoice.services) {
+        for (const service of invoice.services) {
+          if (service.remitos) {
+            for (const remito of service.remitos) {
+              remitosInfo.push({
+                number: remito.number,
+                address: service.building?.address || 'N/A'
+              });
+            }
+          }
+        }
+      }
+    }
+
+    doc.fontSize(10);
+    for (const remitoInfo of remitosInfo) {
+      doc.text(`• Remito Nº ${remitoInfo.number} - ${remitoInfo.address}`, 70);
+    }
+
+    doc.end();
   } catch (error) {
     console.error('Error al generar paquete:', error);
-    res.status(500).json({ message: 'Error al generar paquete' });
+    res.status(500).json({ message: 'Error al generar paquete', error: error.message });
+  }
+};
+
+// Agregar logo (si existe)
+const addLogoToDoc = (doc) => {
+  const logoPath = path.join(__dirname, '../../public/logo.png');
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, 50, 50, { width: 100 });
   }
 };
 
