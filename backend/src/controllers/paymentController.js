@@ -144,7 +144,7 @@ const getPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                service: {
+                services: {
                   include: {
                     building: true
                   }
@@ -226,8 +226,10 @@ const getBuildingPayments = async (req, res) => {
             OR: [
               {
                 invoice: {
-                  service: {
-                    buildingId: { in: buildingIds }
+                  services: {
+                    some: {
+                      buildingId: { in: buildingIds }
+                    }
                   }
                 }
               },
@@ -269,7 +271,7 @@ const getBuildingPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                service: {
+                services: {
                   include: {
                     building: {
                       include: {
@@ -307,7 +309,7 @@ const getBuildingPayments = async (req, res) => {
     const formattedPayments = payments.map(payment => {
       // Obtener el edificio del primer documento
       const firstDoc = payment.documents[0];
-      const building = firstDoc?.invoice?.service?.building || firstDoc?.remito?.service?.building;
+      const building = firstDoc?.invoice?.services?.[0]?.building || firstDoc?.remito?.service?.building;
       
       return {
         id: payment.id,
@@ -386,9 +388,11 @@ const getAdministratorPayments = async (req, res) => {
             OR: [
               {
                 invoice: {
-                  service: {
-                    building: {
-                      administratorId: { in: adminIds }
+                  services: {
+                    some: {
+                      building: {
+                        administratorId: { in: adminIds }
+                      }
                     }
                   }
                 }
@@ -428,7 +432,7 @@ const getAdministratorPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                service: {
+                services: {
                   include: {
                     building: {
                       include: {
@@ -464,7 +468,7 @@ const getAdministratorPayments = async (req, res) => {
     const massivePayments = allPayments.filter(payment => {
       const buildingIds = new Set();
       payment.documents.forEach(doc => {
-        const buildingId = doc.invoice?.service?.buildingId || doc.remito?.service?.buildingId;
+        const buildingId = doc.invoice?.services?.[0]?.buildingId || doc.remito?.service?.buildingId;
         if (buildingId) buildingIds.add(buildingId);
       });
       return buildingIds.size > 1; // Solo pagos que impactan más de un edificio
@@ -481,7 +485,7 @@ const getAdministratorPayments = async (req, res) => {
       // Agrupar documentos por edificio
       const buildingMap = new Map();
       payment.documents.forEach(doc => {
-        const building = doc.invoice?.service?.building || doc.remito?.service?.building;
+        const building = doc.invoice?.services?.[0]?.building || doc.remito?.service?.building;
         if (building) {
           if (!buildingMap.has(building.id)) {
             buildingMap.set(building.id, {
