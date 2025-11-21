@@ -16,6 +16,7 @@ import {
   Autocomplete,
   Stack,
 } from '@mui/material';
+import { History as HistoryIcon } from '@mui/icons-material';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
@@ -23,6 +24,7 @@ import { useRouter } from 'next/navigation';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 
 import api from '@/lib/axios';
+import QuickPastServiceModal from '@/components/QuickPastServiceModal';
 
 interface Building {
   id: string;
@@ -60,6 +62,7 @@ export default function NewService() {
   const [visitDate, setVisitDate] = useState<Date | null>(null);
   const [receiptImage, setReceiptImage] = useState<File | null>(null);
   const [serviceId, setServiceId] = useState<string | null>(null);
+  const [quickPastModalOpen, setQuickPastModalOpen] = useState(false);
   const router = useRouter();
 
   const {
@@ -315,9 +318,28 @@ export default function NewService() {
 
   return (
     <Box p={3}>
-      <Typography variant="h4" gutterBottom>
-        Nuevo Servicio
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4">
+          Nuevo Servicio
+        </Typography>
+        <Button
+          variant="outlined"
+          color="secondary"
+          startIcon={<HistoryIcon />}
+          onClick={() => setQuickPastModalOpen(true)}
+        >
+          Crear Servicio Anterior
+        </Button>
+      </Box>
+
+      <QuickPastServiceModal
+        open={quickPastModalOpen}
+        onClose={() => setQuickPastModalOpen(false)}
+        onSuccess={() => {
+          router.push('/dashboard/services/invoiced');
+        }}
+      />
+
       <Stepper activeStep={activeStep} sx={{ mb: 3 }}>
         {steps.map((label) => (
           <Step key={label}>

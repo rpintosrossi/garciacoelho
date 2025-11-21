@@ -4,6 +4,7 @@ const {
   getAllServices,
   getServiceById,
   createService,
+  createPastService,
   updateService,
   deleteService,
   saveDraft,
@@ -48,6 +49,9 @@ router.get('/technicians', roleMiddleware(['ADMIN', 'OPERADOR']), getTechnicians
 
 // Ruta para guardar borradores
 router.post('/draft', saveDraft);
+
+// Ruta para crear servicio anterior rápido
+router.post('/past', roleMiddleware(['ADMIN', 'OPERADOR']), upload.array('remitoFiles', 10), createPastService);
 
 // ============================================
 // RUTAS BULK (deben ir ANTES de las rutas con :id)

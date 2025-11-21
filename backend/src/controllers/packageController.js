@@ -1110,7 +1110,7 @@ const getPackages = async (req, res) => {
                   
                   // Pie de página
                   paymentDoc.fontSize(9).fillColor('#666').font('Helvetica')
-                    .text('Dirección: Av. San Martín 1234, CABA', 50, 770, { 
+                    .text('', 50, 770, { 
                       align: 'center',
                       width: 512
                     });

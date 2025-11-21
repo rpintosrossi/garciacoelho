@@ -75,7 +75,7 @@ export default function ServicesWithReceipt() {
   const [remitoModalOpen, setRemitoModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [remitoNumber, setRemitoNumber] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
   
   // Estados para el diálogo de reasignación
@@ -117,35 +117,41 @@ export default function ServicesWithReceipt() {
   const handleUploadClick = (service: Service) => {
     setSelectedService(service);
     setRemitoNumber('');
-    setSelectedFile(null);
+    setSelectedFiles([]);
     setRemitoModalOpen(true);
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      // Validar tipo de archivo
+    const files = event.target.files;
+    if (files) {
+      const filesArray = Array.from(files);
+      
+      // Validar tipo de archivo para cada uno
       const allowedTypes = ['image/jpeg', 'image/jpg', 'application/pdf'];
-      if (!allowedTypes.includes(file.type)) {
+      const invalidFiles = filesArray.filter(file => !allowedTypes.includes(file.type));
+      
+      if (invalidFiles.length > 0) {
         setError('Solo se permiten archivos JPG y PDF');
         return;
       }
       
-      // Validar tamaño (máximo 10MB)
+      // Validar tamaño (máximo 10MB por archivo)
       const maxSize = 10 * 1024 * 1024; // 10MB
-      if (file.size > maxSize) {
-        setError('El archivo es demasiado grande. Máximo 10MB');
+      const oversizedFiles = filesArray.filter(file => file.size > maxSize);
+      
+      if (oversizedFiles.length > 0) {
+        setError('Hay archivos demasiado grandes. Máximo 10MB por archivo');
         return;
       }
       
-      setSelectedFile(file);
+      setSelectedFiles(filesArray);
       setError('');
     }
   };
 
   const handleUploadRemito = async () => {
-    if (!selectedService || !selectedFile) {
-      setError('Debes seleccionar un archivo');
+    if (!selectedService || selectedFiles.length === 0) {
+      setError('Debes seleccionar al menos un archivo');
       return;
     }
 
@@ -154,7 +160,12 @@ export default function ServicesWithReceipt() {
     
     try {
       const formData = new FormData();
-      formData.append('receipts', selectedFile);
+      
+      // Agregar múltiples archivos
+      selectedFiles.forEach((file) => {
+        formData.append('receipts', file);
+      });
+      
       formData.append('remitoNumber', remitoNumber.trim());
       
       const response = await api.post(`/services/${selectedService.id}/receipt`, formData, {
@@ -169,7 +180,7 @@ export default function ServicesWithReceipt() {
       console.log('Cerrando modal...');
       setRemitoModalOpen(false);
       setRemitoNumber('');
-      setSelectedFile(null);
+      setSelectedFiles([]);
       
       console.log('Actualizando servicios...');
       await fetchServices();
@@ -207,7 +218,7 @@ export default function ServicesWithReceipt() {
     setRemitoModalOpen(false);
     setSelectedService(null);
     setRemitoNumber('');
-    setSelectedFile(null);
+    setSelectedFiles([]);
     setError('');
   };
 
@@ -416,23 +427,26 @@ export default function ServicesWithReceipt() {
               <input
                 accept=".jpg,.jpeg,.pdf"
                 type="file"
+                multiple
                 onChange={handleFileSelect}
                 style={{ display: 'none' }}
                 id="remito-file-input"
               />
               <label htmlFor="remito-file-input">
                 <Button variant="contained" component="span">
-                  📄 Seleccionar Archivo (JPG o PDF)
+                  📄 Seleccionar Archivos (JPG o PDF)
                 </Button>
               </label>
-              {selectedFile && (
+              {selectedFiles.length > 0 && (
                 <Box mt={1}>
                   <Typography variant="body2" color="success.main">
-                    ✅ Archivo seleccionado: {selectedFile.name}
+                    ✅ {selectedFiles.length} archivo(s) seleccionado(s)
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Tipo: {selectedFile.type} | Tamaño: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                  </Typography>
+                  {selectedFiles.map((file, index) => (
+                    <Typography key={index} variant="caption" display="block" color="text.secondary">
+                      {index + 1}. {file.name} - {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </Typography>
+                  ))}
                 </Box>
               )}
             </Box>
@@ -443,7 +457,7 @@ export default function ServicesWithReceipt() {
           <Button 
             onClick={handleUploadRemito} 
             variant="contained"
-            disabled={!selectedFile || uploadingId === selectedService?.id}
+            disabled={selectedFiles.length === 0 || uploadingId === selectedService?.id}
           >
             {uploadingId === selectedService?.id ? 'Subiendo...' : 'Subir Remito'}
           </Button>

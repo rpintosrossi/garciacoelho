@@ -23,10 +23,11 @@ import {
   Select,
   SelectChangeEvent,
 } from '@mui/material';
-import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Edit as EditIcon, Delete as DeleteIcon, History as HistoryIcon } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
+import QuickPastServiceModal from '@/components/QuickPastServiceModal';
 
 interface Service {
   id: string;
@@ -53,6 +54,7 @@ interface PaginationData {
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [error, setError] = useState('');
+  const [quickPastModalOpen, setQuickPastModalOpen] = useState(false);
   const [pagination, setPagination] = useState<PaginationData>({
     total: 0,
     page: 1,
@@ -156,17 +158,36 @@ export default function ServicesPage() {
   };
 
   return (
-    <Box>
+    <Box sx={{ mt: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
         <Typography variant="h4">Servicios</Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => router.push('/dashboard/services/new')}
-        >
-          Nuevo Servicio
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<HistoryIcon />}
+            onClick={() => setQuickPastModalOpen(true)}
+          >
+            Crear Servicio Anterior
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => router.push('/dashboard/services/new')}
+          >
+            Nuevo Servicio
+          </Button>
+        </Box>
       </Box>
+
+      <QuickPastServiceModal
+        open={quickPastModalOpen}
+        onClose={() => setQuickPastModalOpen(false)}
+        onSuccess={() => {
+          cachedApi.clearCacheFor('/services');
+          fetchServices();
+        }}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

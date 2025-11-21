@@ -21,10 +21,12 @@ import {
   DialogActions,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { History as HistoryIcon } from '@mui/icons-material';
 import { es } from 'date-fns/locale';
 import { format, startOfWeek, addDays, setHours, setMinutes } from 'date-fns';
 import api from '@/lib/axios';
 import { useServiceCounts } from '@/hooks/useServiceCounts';
+import QuickPastServiceModal from '@/components/QuickPastServiceModal';
 
 interface Technician {
   id: string;
@@ -58,6 +60,7 @@ export default function AssignTechnicianPage() {
   const [saving, setSaving] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
+  const [quickPastModalOpen, setQuickPastModalOpen] = useState(false);
   const { refreshCounts } = useServiceCounts();
 
   // Obtener los días de la semana actual
@@ -186,9 +189,28 @@ export default function AssignTechnicianPage() {
 
   return (
     <Box p={3} maxWidth={800} mx="auto">
-      <Typography variant="h4" gutterBottom>
-        Asignar Técnico
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4">
+          Asignar Técnico
+        </Typography>
+        <Button
+          variant="outlined"
+          color="secondary"
+          startIcon={<HistoryIcon />}
+          onClick={() => setQuickPastModalOpen(true)}
+        >
+          Crear Servicio Anterior
+        </Button>
+      </Box>
+
+      <QuickPastServiceModal
+        open={quickPastModalOpen}
+        onClose={() => setQuickPastModalOpen(false)}
+        onSuccess={() => {
+          router.push('/dashboard/services/invoiced');
+        }}
+      />
+
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="subtitle1"><b>Edificio:</b> {service?.building?.name}</Typography>
         <Typography variant="subtitle1"><b>Descripción:</b> {service?.description}</Typography>
@@ -278,7 +300,6 @@ export default function AssignTechnicianPage() {
               label="Fecha de visita"
               value={customDate}
               onChange={handleCustomDateSelect}
-              minDate={new Date()}
               slotProps={{
                 textField: {
                   fullWidth: true,

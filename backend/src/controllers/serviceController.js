@@ -179,6 +179,78 @@ const createService = async (req, res) => {
   }
 };
 
+// Crear un servicio anterior rápido (estado INVOICED)
+const createPastService = async (req, res) => {
+  try {
+    const { buildingId, description, visitDate, technicianId } = req.body;
+    const remitoFiles = req.files; // Array de archivos
+
+    // Verificar que el edificio existe
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId }
+    });
+
+    if (!building) {
+      return res.status(404).json({ message: 'Edificio no encontrado' });
+    }
+
+    // Verificar que el técnico existe
+    const technician = await prisma.user.findUnique({
+      where: { id: technicianId }
+    });
+
+    if (!technician) {
+      return res.status(404).json({ message: 'Técnico no encontrado' });
+    }
+
+    // Crear el servicio en estado INVOICED
+    const service = await prisma.service.create({
+      data: {
+        name: `Servicio ${building.name}`,
+        description,
+        buildingId,
+        technicianId,
+        visitDate: visitDate ? new Date(visitDate) : new Date(),
+        status: 'INVOICED'
+      },
+      include: {
+        building: {
+          select: {
+            name: true,
+            cuit: true,
+            administrator: {
+              select: {
+                name: true
+              }
+            }
+          }
+        },
+        technician: true
+      }
+    });
+
+    // Si hay archivos de remito, crear el remito con múltiples imágenes
+    if (remitoFiles && remitoFiles.length > 0) {
+      const imagePaths = remitoFiles.map(file => file.path);
+      
+      await prisma.remito.create({
+        data: {
+          serviceId: service.id,
+          number: `R-${service.id}-${Date.now()}`,
+          date: visitDate ? new Date(visitDate) : new Date(),
+          amount: 0, // Se puede actualizar después
+          receiptImages: imagePaths
+        }
+      });
+    }
+
+    res.status(201).json(service);
+  } catch (error) {
+    console.error('Error al crear servicio anterior:', error);
+    res.status(500).json({ message: 'Error al crear servicio anterior' });
+  }
+};
+
 // Actualizar un servicio
 const updateService = async (req, res) => {
   try {
@@ -1363,6 +1435,7 @@ module.exports = {
   getAllServices,
   getServiceById,
   createService,
+  createPastService,
   updateService,
   deleteService,
   saveDraft,

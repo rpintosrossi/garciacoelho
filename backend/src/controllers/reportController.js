@@ -32,7 +32,14 @@ const getAdminDebtReport = async (req, res) => {
           }
         });
 
-        const invoices = services.map(s => s.invoice).filter(Boolean);
+        // Deduplicate invoices to avoid counting the same invoice multiple times
+        const invoiceMap = new Map();
+        services.forEach(s => {
+          if (s.invoice) {
+            invoiceMap.set(s.invoice.id, s.invoice);
+          }
+        });
+        const invoices = Array.from(invoiceMap.values());
         const invoiceIds = invoices.map(inv => inv.id);
         const remitos = services.flatMap(s => s.remitos);
         const remitoIds = remitos.map(r => r.id);
@@ -161,7 +168,14 @@ const getBuildingDebtReport = async (req, res) => {
         }
       });
 
-      const invoices = services.map(s => s.invoice).filter(Boolean);
+      // Deduplicate invoices to avoid counting the same invoice multiple times
+      const invoiceMap = new Map();
+      services.forEach(s => {
+        if (s.invoice) {
+          invoiceMap.set(s.invoice.id, s.invoice);
+        }
+      });
+      const invoices = Array.from(invoiceMap.values());
       const invoiceIds = invoices.map(inv => inv.id);
       const remitos = services.flatMap(s => s.remitos);
       const remitoIds = remitos.map(r => r.id);
