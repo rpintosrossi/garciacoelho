@@ -20,10 +20,11 @@ import {
   CircularProgress,
   Alert,
   Collapse,
-  IconButton
+  IconButton,
+  Link
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
-import { Payment, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
+import { Payment, KeyboardArrowDown, KeyboardArrowUp, Description, GetApp } from "@mui/icons-material";
 import BuildingPaymentModal from './BuildingPaymentModal';
 
 interface Transaction {
@@ -42,6 +43,9 @@ interface Transaction {
   remaining?: number;
   services?: any[]; // Array de servicios asociados a la factura
   number?: string; // Número de factura real
+  invoice?: {
+    fileUrl?: string; // URL del PDF de la factura
+  };
 }
 
 interface BuildingAccountDetails {
@@ -150,6 +154,11 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('es-AR');
+  };
+
+  const handleDownloadFile = (fileUrl: string, fileName: string) => {
+    // Abrir el archivo en una nueva pestaña o descargarlo
+    window.open(fileUrl, '_blank');
   };
 
   if (!open) return null;
@@ -273,6 +282,20 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                                     color="success"
                                   />
                                 )}
+                                {/* Botón para descargar factura si existe fileUrl */}
+                                {transaction.service?.invoice?.fileUrl && (
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={() => handleDownloadFile(
+                                      transaction.service.invoice.fileUrl,
+                                      `factura_${transaction.number || transaction.id}.pdf`
+                                    )}
+                                    title="Descargar factura"
+                                  >
+                                    <GetApp fontSize="small" />
+                                  </IconButton>
+                                )}
                               </Box>
                               {transaction.services && transaction.services.length > 0 && (
                                 <Typography variant="caption" color="text.secondary">
@@ -343,6 +366,7 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                                     <TableCell>Categoría</TableCell>
                                     <TableCell>Descripción</TableCell>
                                     <TableCell>Técnico</TableCell>
+                                    <TableCell>Remitos</TableCell>
                                     <TableCell>Estado</TableCell>
                                   </TableRow>
                                 </TableHead>
@@ -357,6 +381,41 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                                         </Typography>
                                       </TableCell>
                                       <TableCell>{service.technician?.name || '-'}</TableCell>
+                                      <TableCell>
+                                        {service.remitos && service.remitos.length > 0 ? (
+                                          <Box display="flex" flexDirection="column" gap={0.5}>
+                                            {service.remitos.map((remito: any) => (
+                                              <Box key={remito.id} display="flex" alignItems="center" gap={1}>
+                                                <Chip 
+                                                  label={`#${remito.number}`}
+                                                  size="small"
+                                                  variant="outlined"
+                                                  color="info"
+                                                />
+                                                {remito.receiptImages && remito.receiptImages.length > 0 && (
+                                                  <Box display="flex" gap={0.5}>
+                                                    {remito.receiptImages.map((imageUrl: string, idx: number) => (
+                                                      <IconButton
+                                                        key={idx}
+                                                        size="small"
+                                                        color="primary"
+                                                        onClick={() => handleDownloadFile(imageUrl, `remito_${remito.number}_${idx + 1}.pdf`)}
+                                                        title="Descargar remito"
+                                                      >
+                                                        <Description fontSize="small" />
+                                                      </IconButton>
+                                                    ))}
+                                                  </Box>
+                                                )}
+                                              </Box>
+                                            ))}
+                                          </Box>
+                                        ) : (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Sin remitos
+                                          </Typography>
+                                        )}
+                                      </TableCell>
                                       <TableCell>
                                         <Chip 
                                           label={service.status}

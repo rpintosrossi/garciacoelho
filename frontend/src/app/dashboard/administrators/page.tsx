@@ -125,7 +125,27 @@ const AdministratorsPage = () => {
     setOpen(true);
   };
 
+  // Cerrar modal con confirmación si hay cambios
   const handleClose = () => {
+    // Verificar si hay cambios sin guardar
+    const hasChanges = formik.dirty;
+    
+    if (hasChanges) {
+      const confirmClose = window.confirm(
+        "Hay cambios sin guardar. ¿Estás seguro de que deseas cerrar?"
+      );
+      if (!confirmClose) {
+        return; // No cerrar si el usuario cancela
+      }
+    }
+    
+    setEditing(null);
+    setOpen(false);
+    formik.resetForm();
+  };
+
+  // Cerrar modal sin confirmación (para después de guardar)
+  const handleCloseAfterSave = () => {
     setEditing(null);
     setOpen(false);
     formik.resetForm();
@@ -169,7 +189,7 @@ const AdministratorsPage = () => {
         // Limpiar caché y refrescar datos
         cachedApi.clearCacheFor('/administrators');
         await fetchAdministrators();
-        handleClose();
+        handleCloseAfterSave(); // Usar la función sin confirmación
       } catch (error: any) {
         setSnackbar({ 
           open: true, 
@@ -326,7 +346,13 @@ const AdministratorsPage = () => {
       </Box>
         </>
       )}
-      <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+      <Dialog 
+        open={open} 
+        onClose={handleClose}
+        disableEscapeKeyDown={formik.dirty}
+        fullWidth 
+        maxWidth="sm"
+      >
         <DialogTitle>
           {editing ? "Editar Administrador" : "Nuevo Administrador"}
         </DialogTitle>

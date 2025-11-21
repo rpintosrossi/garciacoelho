@@ -167,7 +167,27 @@ const BuildingsPage = () => {
     setOpen(true);
   };
 
+  // Cerrar modal con confirmación si hay cambios
   const handleClose = () => {
+    // Verificar si hay cambios sin guardar
+    const hasChanges = formik.dirty;
+    
+    if (hasChanges) {
+      const confirmClose = window.confirm(
+        "Hay cambios sin guardar. ¿Estás seguro de que deseas cerrar?"
+      );
+      if (!confirmClose) {
+        return; // No cerrar si el usuario cancela
+      }
+    }
+    
+    setEditing(null);
+    setOpen(false);
+    formik.resetForm();
+  };
+
+  // Cerrar modal sin confirmación (para después de guardar)
+  const handleCloseAfterSave = () => {
     setEditing(null);
     setOpen(false);
     formik.resetForm();
@@ -210,7 +230,7 @@ const BuildingsPage = () => {
           setSnackbar({ open: true, message: "Edificio creado", severity: "success" });
         }
         fetchBuildings();
-        handleClose();
+        handleCloseAfterSave(); // Usar la función sin confirmación
       } catch (error: any) {
         setSnackbar({ open: true, message: error?.response?.data?.message || "Error al guardar", severity: "error" });
       }
@@ -227,7 +247,9 @@ const BuildingsPage = () => {
       setSnackbar({ open: true, message: "Edificio eliminado correctamente junto con todos sus datos asociados", severity: "success" });
       fetchBuildings();
     } catch (error: any) {
-      setSnackbar({ open: true, message: error?.response?.data?.message || "Error al eliminar", severity: "error" });
+      console.error('Error al eliminar edificio:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || "Error al eliminar edificio";
+      setSnackbar({ open: true, message: errorMessage, severity: "error" });
     }
   };
 
@@ -433,7 +455,13 @@ const BuildingsPage = () => {
         </Box>
           </>
         )}
-        <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+        <Dialog 
+          open={open} 
+          onClose={handleClose}
+          disableEscapeKeyDown={formik.dirty}
+          fullWidth 
+          maxWidth="sm"
+        >
           <DialogTitle>{editing ? "Editar Edificio" : "Nuevo Edificio"}</DialogTitle>
           <form onSubmit={formik.handleSubmit}>
             <DialogContent>

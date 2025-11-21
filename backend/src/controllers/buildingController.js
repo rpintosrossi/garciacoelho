@@ -1,5 +1,14 @@
 const prisma = require('../lib/prisma');
 
+// Función auxiliar para capitalizar la primera letra de cada palabra
+const capitalizeFirstLetter = (str) => {
+  if (!str) return str;
+  return str
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
 // Obtener todos los edificios
 const getBuildings = async (req, res) => {
   try {
@@ -249,7 +258,7 @@ const createBuilding = async (req, res) => {
 
     const building = await prisma.building.create({
       data: {
-        name,
+        name: capitalizeFirstLetter(name),
         address,
         cuit,
         contact,
@@ -336,7 +345,7 @@ const updateBuilding = async (req, res) => {
     const building = await prisma.building.update({
       where: { id },
       data: {
-        name,
+        name: capitalizeFirstLetter(name),
         address,
         cuit,
         contact,
@@ -441,35 +450,20 @@ const deleteBuilding = async (req, res) => {
       });
     }
 
-    // 6. Eliminar pagos asociados al edificio (si los hay)
-    const payments = await prisma.payment.findMany({
+    // 6. Eliminar pagos huérfanos (si los hay) - buscar por PaymentDocuments sin invoice ni remito
+    // Como ya eliminamos las facturas y remitos, los PaymentDocuments se eliminan en cascada
+    // Solo necesitamos eliminar los pagos que ahora están huérfanos
+    const orphanPayments = await prisma.payment.findMany({
       where: {
         documents: {
-          some: {
-            OR: [
-              {
-                invoice: {
-                  service: {
-                    buildingId: id
-                  }
-                }
-              },
-              {
-                remito: {
-                  service: {
-                    buildingId: id
-                  }
-                }
-              }
-            ]
-          }
+          none: {} // Pagos sin documentos asociados (quedaron huérfanos)
         }
       }
     });
 
-    if (payments.length > 0) {
-      console.log(`🗑️ [BUILDINGS] Eliminando ${payments.length} pagos asociados`);
-      for (const payment of payments) {
+    if (orphanPayments.length > 0) {
+      console.log(`🗑️ [BUILDINGS] Eliminando ${orphanPayments.length} pagos huérfanos`);
+      for (const payment of orphanPayments) {
         await prisma.payment.delete({
           where: { id: payment.id }
         });
@@ -876,7 +870,8 @@ const getBuildingAccountDetails = async (req, res) => {
       where: { buildingId: id },
       include: {
         invoice: true,
-        technician: true
+        technician: true,
+        remitos: true // Incluir remitos con todas sus imágenes
       },
       orderBy: {
         createdAt: 'asc'

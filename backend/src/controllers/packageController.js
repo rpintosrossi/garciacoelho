@@ -779,25 +779,32 @@ const getPackages = async (req, res) => {
       try {
         const packagePdfBuffer = Buffer.concat(chunks);
         
-         // Recolectar todos los PDFs de remitos y facturas
-         const remitoPDFs = [];
-         const invoicePDFs = [];
+         // Recolectar facturas con sus remitos asociados (nuevo formato)
+         const invoicesWithRemitos = [];
+         const orphanRemitoPDFs = []; // Remitos sin factura asociada (de pagos)
          
          console.log('🔍 [PACKAGES] Buscando PDFs en remitos y facturas...');
          console.log(`🔍 [PACKAGES] Total de facturas: ${pendingInvoices.length}`);
          console.log(`🔍 [PACKAGES] Total de pagos: ${payments.length}`);
          
-         // PDFs de facturas importadas
+         // PDFs de facturas importadas con sus remitos
          for (const invoice of pendingInvoices) {
            console.log(`🔍 [PACKAGES] Procesando factura: ${invoice.id}`);
            console.log(`🔍 [PACKAGES] Factura tiene fileUrl: ${invoice.fileUrl}`);
            
+           const invoiceData = {
+             invoice: invoice,
+             pdfBuffer: null,
+             name: `factura_${invoice.number}`,
+             remitos: []
+           };
+           
            // Verificar si la factura tiene un PDF asociado
            if (invoice.fileUrl && isPDF(invoice.fileUrl)) {
              try {
-               console.log(`� [PACKAGES] Descargando PDF de factura desde: ${invoice.fileUrl}`);
+               console.log(`📥 [PACKAGES] Descargando PDF de factura desde: ${invoice.fileUrl}`);
                const pdfBuffer = await downloadFile(invoice.fileUrl);
-               invoicePDFs.push({ buffer: pdfBuffer, name: `factura_${invoice.number}` });
+               invoiceData.pdfBuffer = pdfBuffer;
                console.log(`✅ [PACKAGES] PDF de factura descargado: ${invoice.number}`);
              } catch (error) {
                console.error(`❌ [PACKAGES] Error al descargar PDF de factura ${invoice.fileUrl}:`, error.message);
@@ -823,7 +830,7 @@ const getPackages = async (req, res) => {
                          try {
                            console.log(`📥 [PACKAGES] Descargando PDF de remito desde: ${fileUrl}`);
                            const pdfBuffer = await downloadFile(fileUrl);
-                           remitoPDFs.push({ 
+                           invoiceData.remitos.push({ 
                              buffer: pdfBuffer, 
                              name: `remito_${remito.number}`,
                              buildingAddress: service.building?.address || 'N/A',
@@ -840,9 +847,14 @@ const getPackages = async (req, res) => {
                }
              }
            }
+           
+           // Solo agregar facturas que tengan PDF
+           if (invoiceData.pdfBuffer) {
+             invoicesWithRemitos.push(invoiceData);
+           }
          }
         
-         // PDFs de remitos de Prov
+         // PDFs de remitos de Pagos (huérfanos - sin factura asociada)
          for (const payment of payments) {
            console.log(`🔍 [PACKAGES] Procesando pago: ${payment.id}`);
            for (const paymentDoc of payment.documents) {
@@ -855,9 +867,9 @@ const getPackages = async (req, res) => {
                    console.log(`🔍 [PACKAGES] Archivo de pago: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
                    if (isPDF(fileUrl)) {
                      try {
-                       console.log(`� [PACKAGES] Descargando PDF de remito de pago desde: ${fileUrl}`);
+                       console.log(`📥 [PACKAGES] Descargando PDF de remito de pago desde: ${fileUrl}`);
                        const pdfBuffer = await downloadFile(fileUrl);
-                       remitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
+                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
                        console.log(`✅ [PACKAGES] PDF de remito de pago descargado: ${remito.number}`);
                      } catch (error) {
                        console.error(`❌ [PACKAGES] Error al descargar PDF de remito de pago ${fileUrl}:`, error.message);
@@ -869,8 +881,10 @@ const getPackages = async (req, res) => {
            }
          }
         
-         console.log(`📄 [PACKAGES] Encontrados ${remitoPDFs.length} PDFs de remitos para incluir`);
-         console.log(`📄 [PACKAGES] Encontrados ${invoicePDFs.length} PDFs de facturas para incluir`);
+         // Contar totales para log
+         const totalRemitos = invoicesWithRemitos.reduce((sum, inv) => sum + inv.remitos.length, 0) + orphanRemitoPDFs.length;
+         console.log(`📄 [PACKAGES] Encontrados ${invoicesWithRemitos.length} facturas con PDFs`);
+         console.log(`📄 [PACKAGES] Encontrados ${totalRemitos} PDFs de remitos para incluir`);
         
         // SOLUCIÓN: Usar hummus para desencriptar y luego combinar con pdf-lib
         try {
@@ -883,17 +897,19 @@ const getPackages = async (req, res) => {
           const tempFiles = [];
           
           try {
-            // 1. Desencriptar PDFs de facturas usando hummus
-            const decryptedInvoicePDFs = [];
-            for (let i = 0; i < invoicePDFs.length; i++) {
-              const pdfData = invoicePDFs[i];
+            // 1. Desencriptar PDFs de facturas y extraer solo la primera página
+            const processedInvoices = [];
+            
+            for (let i = 0; i < invoicesWithRemitos.length; i++) {
+              const invoiceData = invoicesWithRemitos[i];
+              
               try {
-                console.log(`🔓 [PACKAGES] Desencriptando factura: ${pdfData.name}`);
+                console.log(`🔓 [PACKAGES] Desencriptando factura: ${invoiceData.name}`);
                 
                 // Guardar archivo temporal encriptado
-                const encryptedPath = path.join(tempDir, `encrypted-${i}.pdf`);
-                const decryptedPath = path.join(tempDir, `decrypted-${i}.pdf`);
-                fs.writeFileSync(encryptedPath, pdfData.buffer);
+                const encryptedPath = path.join(tempDir, `encrypted-invoice-${i}.pdf`);
+                const decryptedPath = path.join(tempDir, `decrypted-invoice-${i}.pdf`);
+                fs.writeFileSync(encryptedPath, invoiceData.pdfBuffer);
                 tempFiles.push(encryptedPath, decryptedPath);
                 
                 // Desencriptar con hummus usando appendPDFPagesFromPDF
@@ -901,18 +917,94 @@ const getPackages = async (req, res) => {
                 pdfWriter.appendPDFPagesFromPDF(encryptedPath);
                 pdfWriter.end();
                 
-                // Leer el PDF desencriptado
+                // Leer el PDF desencriptado y extraer SOLO LA PRIMERA PÁGINA
                 const decryptedBuffer = fs.readFileSync(decryptedPath);
-                decryptedInvoicePDFs.push({
-                  name: pdfData.name,
+                const facturaPdfDoc = await PDFLib.load(decryptedBuffer);
+                const totalPages = facturaPdfDoc.getPageCount();
+                
+                console.log(`📄 [PACKAGES] Factura ${invoiceData.name} tiene ${totalPages} páginas (3 copias)`);
+                
+                // Crear nuevo PDF con solo la primera página
+                const singlePagePdf = await PDFLib.create();
+                const [firstPage] = await singlePagePdf.copyPages(facturaPdfDoc, [0]);
+                singlePagePdf.addPage(firstPage);
+                const singlePageBytes = await singlePagePdf.save();
+                
+                console.log(`✅ [PACKAGES] Factura desencriptada y reducida a 1 página: ${invoiceData.name}`);
+                
+                // Desencriptar remitos de esta factura
+                const decryptedRemitos = [];
+                for (let j = 0; j < invoiceData.remitos.length; j++) {
+                  const remitoData = invoiceData.remitos[j];
+                  try {
+                    console.log(`🔓 [PACKAGES] Desencriptando remito: ${remitoData.name}`);
+                    
+                    const encryptedRemitoPath = path.join(tempDir, `encrypted-remito-${i}-${j}.pdf`);
+                    const decryptedRemitoPath = path.join(tempDir, `decrypted-remito-${i}-${j}.pdf`);
+                    fs.writeFileSync(encryptedRemitoPath, remitoData.buffer);
+                    tempFiles.push(encryptedRemitoPath, decryptedRemitoPath);
+                    
+                    const remitoPdfWriter = hummus.createWriter(decryptedRemitoPath);
+                    remitoPdfWriter.appendPDFPagesFromPDF(encryptedRemitoPath);
+                    remitoPdfWriter.end();
+                    
+                    const decryptedRemitoBuffer = fs.readFileSync(decryptedRemitoPath);
+                    decryptedRemitos.push({
+                      name: remitoData.name,
+                      buffer: decryptedRemitoBuffer
+                    });
+                    
+                    console.log(`✅ [PACKAGES] Remito desencriptado: ${remitoData.name}`);
+                  } catch (error) {
+                    console.error(`❌ [PACKAGES] Error al desencriptar remito ${remitoData.name}:`, error.message);
+                    // Si falla la desencriptación, usar el buffer original
+                    decryptedRemitos.push(remitoData);
+                  }
+                }
+                
+                processedInvoices.push({
+                  name: invoiceData.name,
+                  buffer: Buffer.from(singlePageBytes),
+                  remitos: decryptedRemitos
+                });
+                
+              } catch (error) {
+                console.error(`❌ [PACKAGES] Error al procesar factura ${invoiceData.name}:`, error.message);
+                // Si falla, intentar usar el buffer original (con las 3 páginas)
+                processedInvoices.push({
+                  name: invoiceData.name,
+                  buffer: invoiceData.pdfBuffer,
+                  remitos: invoiceData.remitos
+                });
+              }
+            }
+            
+            // Desencriptar remitos huérfanos (de pagos)
+            const decryptedOrphanRemitos = [];
+            for (let k = 0; k < orphanRemitoPDFs.length; k++) {
+              const remitoData = orphanRemitoPDFs[k];
+              try {
+                console.log(`🔓 [PACKAGES] Desencriptando remito huérfano: ${remitoData.name}`);
+                
+                const encryptedPath = path.join(tempDir, `encrypted-orphan-${k}.pdf`);
+                const decryptedPath = path.join(tempDir, `decrypted-orphan-${k}.pdf`);
+                fs.writeFileSync(encryptedPath, remitoData.buffer);
+                tempFiles.push(encryptedPath, decryptedPath);
+                
+                const pdfWriter = hummus.createWriter(decryptedPath);
+                pdfWriter.appendPDFPagesFromPDF(encryptedPath);
+                pdfWriter.end();
+                
+                const decryptedBuffer = fs.readFileSync(decryptedPath);
+                decryptedOrphanRemitos.push({
+                  name: remitoData.name,
                   buffer: decryptedBuffer
                 });
                 
-                console.log(`✅ [PACKAGES] Factura desencriptada: ${pdfData.name}`);
+                console.log(`✅ [PACKAGES] Remito huérfano desencriptado: ${remitoData.name}`);
               } catch (error) {
-                console.error(`❌ [PACKAGES] Error al desencriptar factura ${pdfData.name}:`, error.message);
-                // Si falla la desencriptación, usar el buffer original
-                decryptedInvoicePDFs.push(pdfData);
+                console.error(`❌ [PACKAGES] Error al desencriptar remito huérfano ${remitoData.name}:`, error.message);
+                decryptedOrphanRemitos.push(remitoData);
               }
             }
             
@@ -1043,29 +1135,54 @@ const getPackages = async (req, res) => {
               console.log(`⚠️ [PACKAGES] No se seleccionó método de pago`);
             }
             
-            // Agregar PDFs de facturas desencriptadas
-            for (const pdfData of decryptedInvoicePDFs) {
+            // NUEVO ORDEN: Agregar FACTURA + sus REMITOS de forma intercalada
+            console.log(`📦 [PACKAGES] Agregando facturas con sus remitos (formato intercalado)...`);
+            
+            for (const invoiceData of processedInvoices) {
               try {
-                console.log(`📄 [PACKAGES] Agregando factura desencriptada: ${pdfData.name}`);
-                const facturaPdfDoc = await PDFLib.load(pdfData.buffer);
+                // 1. Agregar la factura (solo 1 página)
+                console.log(`📄 [PACKAGES] Agregando factura: ${invoiceData.name}`);
+                const facturaPdfDoc = await PDFLib.load(invoiceData.buffer);
                 const facturaPages = await mergedPdf.copyPages(facturaPdfDoc, facturaPdfDoc.getPageIndices());
                 facturaPages.forEach((page) => mergedPdf.addPage(page));
-                console.log(`✅ [PACKAGES] Factura agregada: ${pdfData.name}`);
+                console.log(`✅ [PACKAGES] Factura agregada: ${invoiceData.name} (${facturaPages.length} página)`);
+                
+                // 2. Agregar todos los remitos de esta factura inmediatamente después
+                if (invoiceData.remitos && invoiceData.remitos.length > 0) {
+                  console.log(`📄 [PACKAGES] Agregando ${invoiceData.remitos.length} remitos de ${invoiceData.name}...`);
+                  
+                  for (const remitoData of invoiceData.remitos) {
+                    try {
+                      console.log(`📄 [PACKAGES] Agregando remito: ${remitoData.name}`);
+                      const remitoPdfDoc = await PDFLib.load(remitoData.buffer);
+                      const remitoPages = await mergedPdf.copyPages(remitoPdfDoc, remitoPdfDoc.getPageIndices());
+                      remitoPages.forEach((page) => mergedPdf.addPage(page));
+                      console.log(`✅ [PACKAGES] Remito agregado: ${remitoData.name}`);
+                    } catch (error) {
+                      console.error(`❌ [PACKAGES] Error al agregar remito ${remitoData.name}:`, error.message);
+                    }
+                  }
+                }
+                
               } catch (error) {
-                console.error(`❌ [PACKAGES] Error al agregar factura ${pdfData.name}:`, error.message);
+                console.error(`❌ [PACKAGES] Error al agregar factura ${invoiceData.name}:`, error.message);
               }
             }
             
-            // Agregar PDFs de remitos
-            for (const pdfData of remitoPDFs) {
-              try {
-                console.log(`📄 [PACKAGES] Agregando remito: ${pdfData.name}`);
-                const remitoPdfDoc = await PDFLib.load(pdfData.buffer);
-                const remitoPages = await mergedPdf.copyPages(remitoPdfDoc, remitoPdfDoc.getPageIndices());
-                remitoPages.forEach((page) => mergedPdf.addPage(page));
-                console.log(`✅ [PACKAGES] Remito agregado: ${pdfData.name}`);
-              } catch (error) {
-                console.error(`❌ [PACKAGES] Error al agregar remito ${pdfData.name}:`, error.message);
+            // Agregar remitos huérfanos al final (remitos de pagos sin factura asociada)
+            if (decryptedOrphanRemitos.length > 0) {
+              console.log(`📄 [PACKAGES] Agregando ${decryptedOrphanRemitos.length} remitos huérfanos (de pagos)...`);
+              
+              for (const remitoData of decryptedOrphanRemitos) {
+                try {
+                  console.log(`📄 [PACKAGES] Agregando remito huérfano: ${remitoData.name}`);
+                  const remitoPdfDoc = await PDFLib.load(remitoData.buffer);
+                  const remitoPages = await mergedPdf.copyPages(remitoPdfDoc, remitoPdfDoc.getPageIndices());
+                  remitoPages.forEach((page) => mergedPdf.addPage(page));
+                  console.log(`✅ [PACKAGES] Remito huérfano agregado: ${remitoData.name}`);
+                } catch (error) {
+                  console.error(`❌ [PACKAGES] Error al agregar remito huérfano ${remitoData.name}:`, error.message);
+                }
               }
             }
             
