@@ -230,7 +230,7 @@ const getAdministratorById = async (req, res) => {
 // Crear un nuevo administrador
 const createAdministrator = async (req, res) => {
   try {
-    const { name, email, phone, phones, phoneNames, emails, emailNames } = req.body;
+    const { name, administratorName, email, phone, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: { email }
@@ -243,12 +243,14 @@ const createAdministrator = async (req, res) => {
     const administrator = await prisma.administrator.create({
       data: {
         name,
+        administratorName: administratorName || null,
         email,
         phone,
         phones: phones || [],
         phoneNames: phoneNames || [],
         emails: emails || [],
-        emailNames: emailNames || []
+        emailNames: emailNames || [],
+        officeAddress: officeAddress || null
       }
     });
 
@@ -263,7 +265,7 @@ const createAdministrator = async (req, res) => {
 const updateAdministrator = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, phones, phoneNames, emails, emailNames } = req.body;
+    const { name, administratorName, email, phone, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: {
@@ -282,12 +284,14 @@ const updateAdministrator = async (req, res) => {
       where: { id },
       data: {
         name,
+        administratorName,
         email,
         phone,
         phones,
         phoneNames,
         emails,
-        emailNames
+        emailNames,
+        officeAddress
       }
     });
 

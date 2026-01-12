@@ -44,6 +44,8 @@ const getAllServices = async (req, res) => {
         building: {
           select: {
             name: true,
+            address: true,
+            doormanType: true,
             cuit: true,
             administrator: {
               select: {
@@ -54,7 +56,12 @@ const getAllServices = async (req, res) => {
         },
         technician: true,
         invoice: true,
-        remitos: true
+        remitos: true,
+        workshopRepairs: {
+          select: {
+            id: true
+          }
+        }
       },
       orderBy: {
         [sortBy]: sortOrder

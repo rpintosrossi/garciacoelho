@@ -57,6 +57,7 @@ const ZonesPage = () => {
   const [createLocalityModalOpen, setCreateLocalityModalOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({ open: false, message: "", severity: "success" });
   const [loading, setLoading] = useState(true);
+  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
 
   const fetchZones = async () => {
     try {
@@ -197,6 +198,18 @@ const ZonesPage = () => {
     }
   };
 
+  const toggleExpandZone = (zoneId: string) => {
+    setExpandedZones(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(zoneId)) {
+        newSet.delete(zoneId);
+      } else {
+        newSet.add(zoneId);
+      }
+      return newSet;
+    });
+  };
+
   if (loading) {
     return (
       <Container>
@@ -268,7 +281,7 @@ const ZonesPage = () => {
                 </Box>
                 
                 <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {zone.localities.slice(0, 3).map((locality) => (
+                  {(expandedZones.has(zone.id) ? zone.localities : zone.localities.slice(0, 3)).map((locality) => (
                     <Chip
                       key={locality.id}
                       label={locality.locality}
@@ -279,11 +292,12 @@ const ZonesPage = () => {
                   ))}
                   {zone.localities.length > 3 && (
                     <Chip
-                      label={`+${zone.localities.length - 3} más`}
-                      color="default"
+                      label={expandedZones.has(zone.id) ? 'Ver menos' : `+${zone.localities.length - 3} más`}
+                      color="primary"
                       size="small"
                       variant="outlined"
-                      sx={{ fontSize: '0.7rem' }}
+                      onClick={() => toggleExpandZone(zone.id)}
+                      sx={{ fontSize: '0.7rem', cursor: 'pointer' }}
                     />
                   )}
                 </Box>

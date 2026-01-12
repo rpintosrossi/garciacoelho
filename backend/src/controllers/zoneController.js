@@ -270,10 +270,10 @@ const getAllPredefinedLocalities = async (req, res) => {
     const localities = await prisma.locality.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
-      select: { name: true, category: true }
+      select: { name: true }
     });
     
-    res.json(localities);
+    res.json(localities.map(l => l.name));
   } catch (error) {
     console.error('Error al obtener localidades predefinidas:', error);
     res.status(500).json({ message: 'Error interno del servidor' });

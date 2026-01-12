@@ -33,6 +33,8 @@ import * as Yup from "yup";
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { formatCurrency } from '@/utils/formatCurrency';
 import BuildingAccountModal from '../administrators/BuildingAccountModal';
+import AdministratorFormModal from '../administrators/AdministratorFormModal';
+import BuildingHistoryModal from '@/components/BuildingHistoryModal';
 import { Pagination } from "@mui/material";
 
 interface Administrator {
@@ -108,6 +110,11 @@ const BuildingsPage = () => {
   const [orderBy, setOrderBy] = useState<string>('name');
   const [orderDirection, setOrderDirection] = useState<'asc' | 'desc'>('asc');
   const [buildingFilter, setBuildingFilter] = useState('');
+  const [openHistory, setOpenHistory] = useState(false);
+  const [historyBuildingId, setHistoryBuildingId] = useState<string | null>(null);
+  const [openNewAdmin, setOpenNewAdmin] = useState(false);
+  const [openNewLocality, setOpenNewLocality] = useState(false);
+  const [newLocalityName, setNewLocalityName] = useState('');
 
   const fetchBuildings = async () => {
     setLoading(true);
@@ -258,12 +265,26 @@ const BuildingsPage = () => {
     setOpenAccount(true);
   };
 
+  const handleOpenHistory = (buildingId: string) => {
+    setHistoryBuildingId(buildingId);
+    setOpenHistory(true);
+  };
+
+  const handleCloseHistory = () => {
+    setOpenHistory(false);
+    setHistoryBuildingId(null);
+  };
+
   const handleCloseAccount = () => {
     setOpenAccount(false);
     setSelectedBuilding(null);
   };
 
-
+  const handleAdministratorCreated = (newAdmin: any) => {
+    setAdministrators(prev => [...prev, newAdmin]);
+    // Seleccionar automáticamente el nuevo administrador en el formulario
+    formik.setFieldValue('administratorId', newAdmin.id);
+  };
 
   const handleSort = (column: string) => {
     if (orderBy === column) {
@@ -271,6 +292,19 @@ const BuildingsPage = () => {
     } else {
       setOrderBy(column);
       setOrderDirection('asc');
+    }
+  };
+
+  const handleCreateLocality = () => {
+    if (newLocalityName.trim()) {
+      const formattedLocality = newLocalityName.trim();
+      formik.setFieldValue('locality', formattedLocality);
+      if (!availableLocalities.includes(formattedLocality)) {
+        setAvailableLocalities(prev => [...prev, formattedLocality].sort());
+      }
+      setOpenNewLocality(false);
+      setNewLocalityName('');
+      setSnackbar({ open: true, message: "Localidad seleccionada", severity: "success" });
     }
   };
 
@@ -333,21 +367,17 @@ const BuildingsPage = () => {
           </Box>
         ) : (
           <>
-            <Autocomplete
-              options={Array.from(new Set([
-                ...buildings.map(b => b.administrator?.name).filter(Boolean),
-                ...buildings.map(b => b.cuit).filter(Boolean),
-                ...buildings.map(b => b.locality).filter(Boolean),
-                ...buildings.map(b => b.name).filter(Boolean)
-              ]))}
+            <TextField
+              label="Buscar por nombre, administrador, CUIT o localidad"
               value={buildingFilter}
-              onInputChange={(_, value) => setBuildingFilter(value)}
-              renderInput={params => <TextField {...params} label="Buscar por nombre, administrador, CUIT o localidad" sx={{ mb: 2, maxWidth: 400 }} />}
-              freeSolo
+              onChange={(e) => setBuildingFilter(e.target.value)}
+              sx={{ mb: 2, maxWidth: 400 }}
             />
-            <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()} sx={{ mb: 2 }}>
-              Nuevo Edificio
-            </Button>
+            <Box mb={2}>
+              <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()}>
+                Nuevo Edificio
+              </Button>
+            </Box>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -360,9 +390,6 @@ const BuildingsPage = () => {
                 </TableCell>
                 <TableCell onClick={() => handleSort('cuit')} style={{ cursor: 'pointer' }}>
                   CUIT {orderBy === 'cuit' && (orderDirection === 'asc' ? '↑' : '↓')}
-                </TableCell>
-                <TableCell onClick={() => handleSort('contact')} style={{ cursor: 'pointer' }}>
-                  Contacto {orderBy === 'contact' && (orderDirection === 'asc' ? '↑' : '↓')}
                 </TableCell>
                 <TableCell onClick={() => handleSort('taxCondition')} style={{ cursor: 'pointer' }}>
                   Condición Fiscal {orderBy === 'taxCondition' && (orderDirection === 'asc' ? '↑' : '↓')}
@@ -379,7 +406,9 @@ const BuildingsPage = () => {
                 <TableCell onClick={() => handleSort('floors')} style={{ cursor: 'pointer' }}>
                   Pisos {orderBy === 'floors' && (orderDirection === 'asc' ? '↑' : '↓')}
                 </TableCell>
-                <TableCell>Teléfonos</TableCell>
+                <TableCell onClick={() => handleSort('doormanType')} style={{ cursor: 'pointer' }}>
+                  Tipo Portero {orderBy === 'doormanType' && (orderDirection === 'asc' ? '↑' : '↓')}
+                </TableCell>
                 <TableCell onClick={() => handleSort('balance')} style={{ cursor: 'pointer' }}>
                   Saldo {orderBy === 'balance' && (orderDirection === 'asc' ? '↑' : '↓')}
                 </TableCell>
@@ -388,34 +417,23 @@ const BuildingsPage = () => {
             </TableHead>
             <TableBody>
               {sortedAndFilteredBuildings.map((building) => (
-                <TableRow key={building.id}>
+                <TableRow 
+                  key={building.id}
+                  hover
+                  sx={{ cursor: 'pointer' }}
+                  onClick={() => handleOpenHistory(building.id)}
+                >
                   <TableCell>{building.name}</TableCell>
                   <TableCell>{building.address}</TableCell>
                   <TableCell>{building.cuit}</TableCell>
-                  <TableCell>{building.contact}</TableCell>
                   <TableCell>{taxConditionLabels[building.taxCondition]}</TableCell>
                   <TableCell>{building.administrator?.name || '-'}</TableCell>
                   <TableCell>{building.debtThreshold || '-'} días</TableCell>
                   <TableCell>{building.locality || '-'}</TableCell>
                   <TableCell>{building.floors || '-'}</TableCell>
-                  <TableCell>
-                    {building.phones && building.phones.length > 0 ? (
-                      <Box>
-                        {building.phones.slice(0, 2).map((phone, index) => (
-                          <Typography key={index} variant="body2" sx={{ fontSize: '0.75rem' }}>
-                            {phone} {building.phoneNames && building.phoneNames[index] ? `(${building.phoneNames[index]})` : ''}
-                          </Typography>
-                        ))}
-                        {building.phones.length > 2 && (
-                          <Typography variant="caption" color="text.secondary">
-                            +{building.phones.length - 2} más
-                          </Typography>
-                        )}
-                      </Box>
-                    ) : '-'}
-                  </TableCell>
+                  <TableCell>{building.doormanType || '-'}</TableCell>
                   <TableCell>{formatCurrency(building.account?.balance)}</TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <IconButton color="primary" onClick={() => handleOpen(building)}><Edit /></IconButton>
                     <IconButton color="info" onClick={() => handleOpenAccount(building)} title="Cuenta corriente"><AccountBalance /></IconButton>
                     <IconButton color="error" onClick={() => handleDelete(building.id)}><Delete /></IconButton>
@@ -424,7 +442,7 @@ const BuildingsPage = () => {
               ))}
               {/* Fila de total */}
               <TableRow sx={{ backgroundColor: 'grey.100', fontWeight: 'bold' }}>
-                <TableCell colSpan={10} align="right" sx={{ fontWeight: 'bold' }}>
+                <TableCell colSpan={9} align="right" sx={{ fontWeight: 'bold' }}>
                   <Typography variant="subtitle1" fontWeight="bold">
                     SALDO TOTAL:
                   </Typography>
@@ -519,25 +537,34 @@ const BuildingsPage = () => {
                   ))}
                 </Select>
               </FormControl>
-              <Autocomplete
-                options={administrators}
-                getOptionLabel={(option) => option.name}
-                value={administrators.find(admin => admin.id === formik.values.administratorId) || null}
-                onChange={(_, newValue) => {
-                  formik.setFieldValue('administratorId', newValue ? newValue.id : '');
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    margin="dense"
-                    label="Administrador"
-                    error={formik.touched.administratorId && Boolean(formik.errors.administratorId)}
-                    helperText={formik.touched.administratorId && formik.errors.administratorId}
-                  />
-                )}
-                fullWidth
-                sx={{ mt: 2 }}
-              />
+              <Box display="flex" alignItems="flex-start" gap={1} sx={{ mt: 2 }}>
+                <Autocomplete
+                  options={administrators}
+                  getOptionLabel={(option) => option.name}
+                  value={administrators.find(admin => admin.id === formik.values.administratorId) || null}
+                  onChange={(_, newValue) => {
+                    formik.setFieldValue('administratorId', newValue ? newValue.id : '');
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      margin="dense"
+                      label="Administrador"
+                      error={formik.touched.administratorId && Boolean(formik.errors.administratorId)}
+                      helperText={formik.touched.administratorId && formik.errors.administratorId}
+                    />
+                  )}
+                  fullWidth
+                />
+                <Button 
+                  variant="outlined" 
+                  sx={{ mt: 1, minWidth: '40px', width: '40px', height: '40px', p: 0 }}
+                  onClick={() => setOpenNewAdmin(true)}
+                  title="Nuevo Administrador"
+                >
+                  <Add />
+                </Button>
+              </Box>
               
               {/* Nuevos campos */}
               <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>Información Adicional</Typography>
@@ -632,24 +659,34 @@ const BuildingsPage = () => {
                 />
               </Box>
               
-              <Autocomplete
-                options={availableLocalities}
-                value={formik.values.locality || null}
-                onChange={(_, newValue) => {
-                  formik.setFieldValue('locality', newValue || '');
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    margin="dense"
-                    label="Localidad"
-                    error={formik.touched.locality && Boolean(formik.errors.locality)}
-                    helperText={formik.touched.locality && formik.errors.locality}
-                  />
-                )}
-                freeSolo
-                fullWidth
-              />
+              <Box display="flex" alignItems="flex-start" gap={1} sx={{ mt: 1 }}>
+                <Autocomplete
+                  options={availableLocalities}
+                  value={formik.values.locality || null}
+                  onChange={(_, newValue) => {
+                    formik.setFieldValue('locality', newValue || '');
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      margin="dense"
+                      label="Localidad"
+                      error={formik.touched.locality && Boolean(formik.errors.locality)}
+                      helperText={formik.touched.locality && formik.errors.locality}
+                    />
+                  )}
+                  freeSolo
+                  fullWidth
+                />
+                <Button 
+                  variant="outlined" 
+                  sx={{ mt: 1, minWidth: '40px', width: '40px', height: '40px', p: 0 }}
+                  onClick={() => setOpenNewLocality(true)}
+                  title="Nueva Localidad"
+                >
+                  <Add />
+                </Button>
+              </Box>
               
               <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Teléfonos</Typography>
               {formik.values.phones.map((phone, index) => (
@@ -714,6 +751,46 @@ const BuildingsPage = () => {
           buildingId={selectedBuilding?.id || null}
           buildingName={selectedBuilding?.name}
         />
+        <BuildingHistoryModal
+          open={openHistory}
+          onClose={handleCloseHistory}
+          buildingId={historyBuildingId}
+        />
+
+        <AdministratorFormModal
+          open={openNewAdmin}
+          onClose={() => setOpenNewAdmin(false)}
+          editing={null}
+          onSuccess={(msg) => setSnackbar({ open: true, message: msg, severity: "success" })}
+          onError={(msg) => setSnackbar({ open: true, message: msg, severity: "error" })}
+          onAdministratorCreated={handleAdministratorCreated}
+        />
+
+        <Dialog open={openNewLocality} onClose={() => setOpenNewLocality(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Nueva Localidad</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Nombre de la Localidad"
+              fullWidth
+              value={newLocalityName}
+              onChange={(e) => setNewLocalityName(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCreateLocality();
+                }
+              }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setOpenNewLocality(false)}>Cancelar</Button>
+            <Button onClick={handleCreateLocality} variant="contained" disabled={!newLocalityName.trim()}>
+              Agregar
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
           <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>

@@ -22,12 +22,16 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
+import { Build as BuildIcon } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
 import { useServiceCounts } from '@/hooks/useServiceCounts';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
+import WorkshopRepairModal from '@/components/WorkshopRepairModal';
 
 interface Service {
   id: string;
@@ -38,6 +42,8 @@ interface Service {
   buildingId: string;
   building: {
     name: string;
+    address: string;
+    doormanType?: string;
   };
   technician: {
     name: string;
@@ -45,6 +51,8 @@ interface Service {
   receipt: {
     imageUrl: string;
   };
+  visitDate?: string;
+  workshopRepairs?: Array<{ id: string }>;
 }
 
 interface PaginationData {
@@ -77,6 +85,8 @@ export default function ServicesWithReceipt() {
   const [remitoNumber, setRemitoNumber] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  const [workshopRepairModalOpen, setWorkshopRepairModalOpen] = useState(false);
+  const [selectedServiceForRepair, setSelectedServiceForRepair] = useState<Service | null>(null);
   
   // Estados para el diálogo de reasignación
   const [reassignDialogOpen, setReassignDialogOpen] = useState(false);
@@ -174,6 +184,9 @@ export default function ServicesWithReceipt() {
         },
       });
       
+      // Limpiar caché para que se actualice la lista
+      cachedApi.clearCacheFor('/services');
+
       console.log('Respuesta exitosa:', response);
       console.log('Respuesta data:', response.data);
       
@@ -228,6 +241,15 @@ export default function ServicesWithReceipt() {
     setReassignReason('');
   };
 
+  const handleOpenWorkshopRepair = (service: Service) => {
+    setSelectedServiceForRepair(service);
+    setWorkshopRepairModalOpen(true);
+  };
+
+  const handleWorkshopRepairSuccess = () => {
+    fetchServices();
+  };
+
   const handleConfirmReassign = async () => {
     if (!serviceToReassign) return;
     
@@ -243,6 +265,9 @@ export default function ServicesWithReceipt() {
       await api.post(`/services/${serviceToReassign.id}/cancel`, {
         cancellationReason: reassignReason.trim()
       });
+      
+      // Limpiar caché para que se actualice la lista
+      cachedApi.clearCacheFor('/services');
       
       // Cerrar el diálogo
       setReassignDialogOpen(false);
@@ -373,6 +398,17 @@ export default function ServicesWithReceipt() {
                     >
                       Subir Remito
                     </Button>
+                    <Tooltip title={service.workshopRepairs && service.workshopRepairs.length > 0 ? "Ya existe un taller para este servicio" : "Reparación a Taller"}>
+                      <span>
+                        <IconButton
+                          onClick={() => handleOpenWorkshopRepair(service)}
+                          color="warning"
+                          disabled={uploadingId === service.id || reassigningId === service.id || (service.workshopRepairs && service.workshopRepairs.length > 0)}
+                        >
+                          <BuildIcon />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
                     <Button
                       variant="outlined"
                       color="warning"
@@ -506,6 +542,14 @@ export default function ServicesWithReceipt() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Modal de Reparación a Taller */}
+      <WorkshopRepairModal
+        open={workshopRepairModalOpen}
+        onClose={() => setWorkshopRepairModalOpen(false)}
+        service={selectedServiceForRepair}
+        onSuccess={handleWorkshopRepairSuccess}
+      />
     </Box>
   );
 } 

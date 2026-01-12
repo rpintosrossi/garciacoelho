@@ -19,18 +19,19 @@ model User {
 }
 
 model Administrator {
-  id              String     @id @default(uuid())
-  name            String
-  email           String     @unique
-  phone           String
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  emailNames      String[]
-  emails          String[]
-  phoneNames      String[]
-  phones          String[]
-  officeAddress   String?
-  buildings       Building[]
+  id                String     @id @default(uuid())
+  name              String
+  administratorName String?
+  email             String     @unique
+  phone             String
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  emailNames        String[]
+  emails            String[]
+  phoneNames        String[]
+  phones            String[]
+  officeAddress     String?
+  buildings         Building[]
 
   @@index([email])
   @@index([name])
@@ -40,7 +41,7 @@ model Building {
   id              String         @id @default(uuid())
   name            String
   address         String
-  cuit            String         @unique
+  cuit            String
   contact         String
   taxCondition    TaxCondition   @default(CONSUMIDOR_FINAL)
   administratorId String
@@ -68,22 +69,23 @@ model Building {
 }
 
 model Service {
-  id                   String        @id @default(uuid())
+  id                   String             @id @default(uuid())
   description          String
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
   buildingId           String
   name                 String
   technicianId         String?
   visitDate            DateTime?
-  status               ServiceStatus @default(PENDIENTE)
+  status               ServiceStatus      @default(PENDIENTE)
   receiptImages        String[]
   cancellationReason   String?
   invoiceId            String?
   remitos              Remito[]
-  building             Building      @relation(fields: [buildingId], references: [id])
-  technician           Technician?   @relation(fields: [technicianId], references: [id])
-  invoice              Invoice?      @relation(fields: [invoiceId], references: [id])
+  workshopRepairs      WorkshopRepair[]
+  building             Building           @relation(fields: [buildingId], references: [id])
+  technician           Technician?        @relation(fields: [technicianId], references: [id])
+  invoice              Invoice?           @relation(fields: [invoiceId], references: [id])
 
   @@index([buildingId])
   @@index([buildingId, status])
@@ -309,4 +311,39 @@ enum TaxCondition {
   MONOTRIBUTO
   EXENTO
   CONSUMIDOR_FINAL
+}
+
+model Workshop {
+  id              String           @id @default(uuid())
+  name            String           @unique
+  address         String?
+  phone           String?
+  contact         String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  workshopRepairs WorkshopRepair[]
+
+  @@index([name])
+}
+
+model WorkshopRepair {
+  id                  String    @id @default(uuid())
+  serviceId           String
+  workshopId          String
+  buildingAddress     String
+  doormanBrand        String?
+  workshopCost        Float?
+  clientPrice         Float?
+  visitDate           DateTime?
+  workshopEntryDate   DateTime?
+  installationDate    DateTime?
+  paid                Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  service             Service   @relation(fields: [serviceId], references: [id])
+  workshop            Workshop  @relation(fields: [workshopId], references: [id])
+
+  @@index([serviceId])
+  @@index([workshopId])
+  @@index([createdAt])
 }

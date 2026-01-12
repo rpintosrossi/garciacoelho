@@ -24,7 +24,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { History as HistoryIcon } from '@mui/icons-material';
 import { es } from 'date-fns/locale';
 import { format, startOfWeek, addDays, setHours, setMinutes } from 'date-fns';
-import api from '@/lib/axios';
+import api, { cachedApi } from '@/lib/axios';
 import { useServiceCounts } from '@/hooks/useServiceCounts';
 import QuickPastServiceModal from '@/components/QuickPastServiceModal';
 
@@ -164,6 +164,8 @@ export default function AssignTechnicianPage() {
         technicianId: selectedTechnician.id,
         visitDate,
       });
+      // Limpiar caché de servicios para que se actualice la lista de pendientes
+      cachedApi.clearCacheFor('/services');
       await refreshCounts();
       router.push('/dashboard/services/receipt');
     } catch (err) {

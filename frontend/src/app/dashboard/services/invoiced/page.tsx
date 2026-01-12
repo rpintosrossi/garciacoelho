@@ -224,6 +224,9 @@ export default function InvoicedServices() {
       console.log('🔍 [FRONTEND] Cobro sin factura creado exitosamente');
       setOpenRemito(false);
       
+      // Limpiar caché para que se actualice la lista
+      cachedApi.clearCacheFor('/services');
+      
       // Notificar cambio usando localStorage para actualizar otras páginas
       localStorage.setItem('servicesLastUpdate', Date.now().toString());
       localStorage.setItem('servicesUpdateType', 'service_invoiced');
@@ -295,6 +298,9 @@ export default function InvoicedServices() {
       localStorage.setItem('servicesLastUpdate', Date.now().toString());
       localStorage.setItem('servicesUpdateType', 'service_invoiced');
       
+      // Limpiar caché para que se actualice la lista
+      cachedApi.clearCacheFor('/services');
+      
       await fetchServices();
     } catch (error) {
       console.error('Error al crear cobro sin factura múltiple:', error);
@@ -352,7 +358,7 @@ export default function InvoicedServices() {
       localStorage.setItem('servicesLastUpdate', Date.now().toString());
       localStorage.setItem('servicesUpdateType', 'service_invoiced');
       
-      axios.clearCacheFor?.('/services');
+      cachedApi.clearCacheFor('/services');
       
       await fetchServices();
       
@@ -416,7 +422,7 @@ export default function InvoicedServices() {
       localStorage.setItem('servicesUpdateType', 'service_invoiced');
       
       // Limpiar caché de axios
-      axios.clearCacheFor?.('/services');
+      cachedApi.clearCacheFor('/services');
       
       // Recargar los servicios para mostrar los cambios inmediatamente
       await fetchServices();

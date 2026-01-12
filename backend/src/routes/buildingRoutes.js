@@ -12,13 +12,15 @@ const {
   getPendingInvoices,
   getAvailableLocalities,
   getBuildingAccountDetails,
-  createBuildingPayment
+  createBuildingPayment,
+  getBuildingServiceHistory
 } = require('../controllers/buildingController');
 
 // Rutas protegidas con autenticación y roles
 router.get('/', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildings);
 router.get('/localities/available', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getAvailableLocalities);
 router.get('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingById);
+router.get('/:id/service-history', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingServiceHistory);
 router.post('/', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), createBuilding);
 router.put('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), updateBuilding);
 router.delete('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), deleteBuilding);

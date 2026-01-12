@@ -21,7 +21,8 @@ import {
   TableCell,
   TableBody,
   IconButton,
-  Tooltip
+  Tooltip,
+  Button
 } from "@mui/material";
 import {
   Business as BuildingIcon,
@@ -83,6 +84,17 @@ export default function DashboardPage() {
   const theme = useTheme();
   const router = useRouter();
 
+  // Función para convertir "2025-11" a "Noviembre 2025"
+  const formatMonthYear = (monthStr: string) => {
+    const [year, month] = monthStr.split('-');
+    const monthNames = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    const monthIndex = parseInt(month) - 1;
+    return `${monthNames[monthIndex]} ${year}`;
+  };
+
   useEffect(() => {
     const fetchStats = async () => {
       setLoading(true);
@@ -97,7 +109,7 @@ export default function DashboardPage() {
         // Formatear datos para el gráfico
         const trabajosMes = serviceStatsRes.data.trabajosPorMes || {};
         const chartData = Object.keys(trabajosMes).map(mes => ({
-          mes,
+          mes: formatMonthYear(mes),
           cantidad: trabajosMes[mes]
         }));
         setTrabajosPorMes(chartData);
@@ -111,18 +123,31 @@ export default function DashboardPage() {
     fetchStats();
   }, []);
 
+  const handleRefreshData = () => {
+    cachedApi.clearCache();
+    window.location.reload();
+  };
+
   if (loading) {
     return <Box p={3}><CircularProgress /></Box>;
   }
   if (error) {
     return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
-  }
-
-  return (
+  }  return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4">
+          Dashboard
+        </Typography>
+        <Button 
+          variant="outlined" 
+          size="small"
+          onClick={handleRefreshData}
+          sx={{ textTransform: 'none' }}
+        >
+          🔄 Actualizar Datos
+        </Button>
+      </Box>
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
@@ -191,11 +216,11 @@ export default function DashboardPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
             <WarningIcon sx={{ color: 'error.main', mr: 1, fontSize: 28 }} />
             <Typography variant="h6" color="error.main" sx={{ fontWeight: 'bold' }}>
-              Empresas con Deudas Vencidas ({overdueDebts.buildingsOverThreshold})
+              Edificios con Deudas Vencidas ({overdueDebts.buildingsOverThreshold})
             </Typography>
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Empresas que superan el umbral de tolerancia configurado en cada edificio
+            Edificios que superan el umbral de tolerancia de días de deuda vencida.
           </Typography>
           
           <Box sx={{ overflowX: 'auto' }}>

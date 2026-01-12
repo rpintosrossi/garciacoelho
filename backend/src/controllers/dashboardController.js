@@ -180,58 +180,42 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
     const buildingsWithDebts = [];
 
     for (const building of buildings) {
-      // Calcular el saldo actual del edificio
-      let saldo = 0;
-      
-      // Sumar todas las facturas
-      for (const service of building.services) {
-        if (service.invoice) {
-          saldo += service.invoice.amount;
-        }
-        for (const remito of service.remitos) {
-          saldo += remito.amount;
-        }
-      }
-
-      // Restar todos los pagos
-      const buildingInvoiceIds = building.services
-        .map(s => s.invoice?.id)
-        .filter(Boolean);
-      const buildingRemitoIds = building.services
-        .flatMap(s => s.remitos.map(r => r.id));
-      
-      const paymentDocuments = (buildingInvoiceIds.length > 0 || buildingRemitoIds.length > 0)
-        ? await prisma.paymentDocument.findMany({
-            where: {
-              OR: [
-                ...(buildingInvoiceIds.length > 0 ? [{ invoiceId: { in: buildingInvoiceIds } }] : []),
-                ...(buildingRemitoIds.length > 0 ? [{ remitoId: { in: buildingRemitoIds } }] : [])
-              ]
-            },
-            include: {
-              payment: true
-            }
-          })
-        : [];
-
-      for (const pd of paymentDocuments) {
-        saldo -= (pd.payment.originalAmount || pd.payment.amount);
-      }
+      // Usar directamente el saldo de la cuenta en lugar de recalcular
+      const saldo = building.account?.balance || 0;
 
       // Verificar si la deuda supera el umbral configurado
       const debtThreshold = building.debtThreshold || 30; // días por defecto
       const hasOverdueDebt = saldo > 0;
 
       if (hasOverdueDebt) {
-        // Calcular días de atraso (usando la fecha más antigua de factura/remito)
+        // Obtener IDs únicos de facturas y remitos
+        const uniqueInvoiceIds = [...new Set(building.services
+          .map(s => s.invoice?.id)
+          .filter(Boolean))];
+        const uniqueRemitoIds = [...new Set(building.services
+          .flatMap(s => s.remitos.map(r => r.id)))];
+
+        // Calcular días de atraso usando la fecha más antigua
         let oldestDate = null;
-        for (const service of building.services) {
-          if (service.invoice && service.invoice.date) {
-            if (!oldestDate || service.invoice.date < oldestDate) {
-              oldestDate = service.invoice.date;
+        
+        if (uniqueInvoiceIds.length > 0) {
+          const invoices = await prisma.invoice.findMany({
+            where: { id: { in: uniqueInvoiceIds } },
+            select: { date: true }
+          });
+          for (const invoice of invoices) {
+            if (invoice.date && (!oldestDate || invoice.date < oldestDate)) {
+              oldestDate = invoice.date;
             }
           }
-          for (const remito of service.remitos) {
+        }
+        
+        if (uniqueRemitoIds.length > 0) {
+          const remitos = await prisma.remito.findMany({
+            where: { id: { in: uniqueRemitoIds } },
+            select: { date: true }
+          });
+          for (const remito of remitos) {
             if (!oldestDate || remito.date < oldestDate) {
               oldestDate = remito.date;
             }

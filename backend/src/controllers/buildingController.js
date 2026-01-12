@@ -235,6 +235,26 @@ const createBuilding = async (req, res) => {
       locality
     } = req.body;
 
+    // Validar campos obligatorios
+    if (!name) {
+      return res.status(400).json({ message: 'El nombre es obligatorio' });
+    }
+    if (!address) {
+      return res.status(400).json({ message: 'La dirección es obligatoria' });
+    }
+    if (!cuit) {
+      return res.status(400).json({ message: 'El CUIT es obligatorio' });
+    }
+    if (!contact) {
+      return res.status(400).json({ message: 'El contacto es obligatorio' });
+    }
+    if (!taxCondition) {
+      return res.status(400).json({ message: 'La condición fiscal es obligatoria' });
+    }
+    if (!administratorId) {
+      return res.status(400).json({ message: 'El administrador es obligatorio' });
+    }
+
     // Verificar que el administrador existe
     const administrator = await prisma.administrator.findUnique({
       where: { id: administratorId }
@@ -242,18 +262,6 @@ const createBuilding = async (req, res) => {
 
     if (!administrator) {
       return res.status(404).json({ message: 'Administrador no encontrado' });
-    }
-
-    const existingBuilding = await prisma.building.findFirst({
-      where: {
-        OR: [
-          { cuit }
-        ]
-      }
-    });
-
-    if (existingBuilding) {
-      return res.status(400).json({ message: 'El CUIT ya está registrado' });
     }
 
     const building = await prisma.building.create({
@@ -266,14 +274,14 @@ const createBuilding = async (req, res) => {
         administratorId,
         debtThreshold: debtThreshold || 30,
         rating: rating || 1,
-        managerPhone,
-        generalInfo,
-        doormanType,
-        floors,
-        apartments,
+        managerPhone: managerPhone || null,
+        generalInfo: generalInfo || null,
+        doormanType: doormanType || null,
+        floors: floors ? parseInt(floors) : null,
+        apartments: apartments ? parseInt(apartments) : null,
         phones: phones || [],
         phoneNames: phoneNames || [],
-        locality,
+        locality: locality || null,
         account: {
           create: {
             balance: 0
@@ -327,21 +335,6 @@ const updateBuilding = async (req, res) => {
       }
     }
 
-    const existingBuilding = await prisma.building.findFirst({
-      where: {
-        OR: [
-          { cuit }
-        ],
-        NOT: {
-          id
-        }
-      }
-    });
-
-    if (existingBuilding) {
-      return res.status(400).json({ message: 'El CUIT ya está registrado' });
-    }
-
     const building = await prisma.building.update({
       where: { id },
       data: {
@@ -353,14 +346,14 @@ const updateBuilding = async (req, res) => {
         administratorId,
         debtThreshold,
         rating,
-        managerPhone,
-        generalInfo,
-        doormanType,
-        floors,
-        apartments,
+        managerPhone: managerPhone || null,
+        generalInfo: generalInfo || null,
+        doormanType: doormanType || null,
+        floors: floors ? parseInt(floors) : null,
+        apartments: apartments ? parseInt(apartments) : null,
         phones,
         phoneNames,
-        locality
+        locality: locality || null
       },
       include: {
         administrator: true,
@@ -1222,6 +1215,176 @@ const createBuildingPayment = async (req, res) => {
   }
 };
 
+// Obtener historial de servicios de un edificio
+const getBuildingServiceHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Verificar que el edificio existe
+    const building = await prisma.building.findUnique({
+      where: { id },
+      include: {
+        administrator: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    if (!building) {
+      return res.status(404).json({ message: 'Edificio no encontrado' });
+    }
+
+    // Obtener todos los servicios del edificio con sus relaciones
+    const services = await prisma.service.findMany({
+      where: { buildingId: id },
+      include: {
+        technician: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        remitos: {
+          include: {
+            paymentDocuments: {
+              include: {
+                payment: {
+                  select: {
+                    id: true,
+                    amount: true,
+                    date: true,
+                    method: true,
+                    comprobante: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        invoice: {
+          include: {
+            paymentDocuments: {
+              include: {
+                payment: {
+                  select: {
+                    id: true,
+                    amount: true,
+                    date: true,
+                    method: true,
+                    comprobante: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Calcular totales
+    const totalServices = services.length;
+    const totalInvoices = services.filter(s => s.invoice).length;
+    const totalRemitos = services.reduce((sum, s) => sum + s.remitos.length, 0);
+    
+    // Calcular monto total facturado y pagado
+    let totalInvoiced = 0;
+    let totalPaid = 0;
+
+    services.forEach(service => {
+      // Sumar facturas
+      if (service.invoice) {
+        totalInvoiced += service.invoice.amount;
+        
+        // Sumar pagos de facturas
+        if (service.invoice.paymentDocuments) {
+          service.invoice.paymentDocuments.forEach(pd => {
+            totalPaid += pd.amount;
+          });
+        }
+      }
+
+      // Sumar remitos
+      service.remitos.forEach(remito => {
+        totalInvoiced += remito.amount;
+        
+        // Sumar pagos de remitos
+        if (remito.paymentDocuments) {
+          remito.paymentDocuments.forEach(pd => {
+            totalPaid += pd.amount;
+          });
+        }
+      });
+    });
+
+    res.json({
+      building: {
+        id: building.id,
+        name: building.name,
+        address: building.address,
+        cuit: building.cuit,
+        administrator: building.administrator
+      },
+      summary: {
+        totalServices,
+        totalInvoices,
+        totalRemitos,
+        totalInvoiced,
+        totalPaid,
+        pending: totalInvoiced - totalPaid
+      },
+      services: services.map(service => ({
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        status: service.status,
+        createdAt: service.createdAt,
+        visitDate: service.visitDate,
+        technician: service.technician,
+        remitos: service.remitos.map(remito => ({
+          id: remito.id,
+          number: remito.number,
+          amount: remito.amount,
+          date: remito.date,
+          status: remito.status,
+          receiptImages: remito.receiptImages,
+          payments: remito.paymentDocuments?.map(pd => ({
+            id: pd.payment.id,
+            amount: pd.amount,
+            date: pd.payment.date,
+            method: pd.payment.method,
+            comprobante: pd.payment.comprobante
+          })) || []
+        })),
+        invoice: service.invoice ? {
+          id: service.invoice.id,
+          number: service.invoice.number,
+          amount: service.invoice.amount,
+          date: service.invoice.date,
+          status: service.invoice.status,
+          fileUrl: service.invoice.fileUrl,
+          payments: service.invoice.paymentDocuments?.map(pd => ({
+            id: pd.payment.id,
+            amount: pd.amount,
+            date: pd.payment.date,
+            method: pd.payment.method,
+            comprobante: pd.payment.comprobante
+          })) || []
+        } : null
+      }))
+    });
+  } catch (error) {
+    console.error('Error al obtener historial de servicios:', error);
+    res.status(500).json({ message: 'Error al obtener historial de servicios' });
+  }
+};
+
 module.exports = {
   getBuildings,
   getBuildingById,
@@ -1233,5 +1396,6 @@ module.exports = {
   getPendingInvoices,
   getAvailableLocalities,
   getBuildingAccountDetails,
-  createBuildingPayment
+  createBuildingPayment,
+  getBuildingServiceHistory
 }; 

@@ -32,7 +32,8 @@ import {
   Assessment as AssessmentIcon,
   Inventory as InventoryIcon,
   LocationOn as LocationOnIcon,
-  Payment as PaymentIcon
+  Payment as PaymentIcon,
+  Build as BuildIcon
 } from '@mui/icons-material';
 import { useRouter, usePathname } from 'next/navigation';
 import ServicesSidebar from '@/components/ServicesSidebar';
@@ -135,6 +136,11 @@ export default function DashboardLayout({
       text: 'Usuarios',
       icon: <PeopleIcon sx={{ color: '#ff9800' }} />,
       path: '/dashboard/users',
+    },
+    {
+      text: 'Talleres',
+      icon: <BuildIcon sx={{ color: '#ff5722' }} />,
+      path: '/dashboard/workshops',
     },
     {
       text: 'Stock',
@@ -353,7 +359,10 @@ export default function DashboardLayout({
           justifyContent: 'center',
           borderBottom: '1px solid #eee',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        }}>
+          cursor: 'pointer',
+        }}
+        onClick={() => router.push('/dashboard')}
+        >
           <img 
             src="/logo-menu.png" 
             alt="Garcia Coelho Logo" 
