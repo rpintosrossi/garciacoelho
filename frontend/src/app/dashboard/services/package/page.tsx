@@ -155,8 +155,8 @@ export default function PackagePage() {
       }
     };
 
-    // Verificar cambios cada 2 segundos
-    const interval = setInterval(checkLocalStorageChanges, 2000);
+    // Verificar cambios cada 30 segundos (optimizado para reducir consumo de CPU)
+    const interval = setInterval(checkLocalStorageChanges, 30000);
 
     // Limpiar intervalo al desmontar
     return () => {

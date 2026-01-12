@@ -120,8 +120,8 @@ export default function ServicesPage() {
       }
     };
 
-    // Verificar cambios cada 10 segundos (reducido de 2s para mejorar rendimiento)
-    const interval = setInterval(checkLocalStorageChanges, 10000);
+    // Verificar cambios cada 30 segundos (optimizado para reducir consumo de CPU)
+    const interval = setInterval(checkLocalStorageChanges, 30000);
 
     // Suscribirse a cambios en servicios
     cachedApi.onServicesChanged(handleServicesChanged);

@@ -7,6 +7,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
+  /* 
+  // REWRITE ELIMINADO: Causaba bucle infinito en Railway si el frontend escucha en el puerto 3000
   async rewrites() {
     return [
       {
@@ -15,6 +17,7 @@ const nextConfig = {
       }
     ]
   },
+  */
   // Configuración específica para Railway
   serverExternalPackages: [],
   // Asegurar que Next.js escuche en todas las interfaces
