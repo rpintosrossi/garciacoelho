@@ -25,7 +25,9 @@ const getBuildings = async (req, res) => {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { cuit: { contains: search, mode: 'insensitive' } },
-          { address: { contains: search, mode: 'insensitive' } }
+          { address: { contains: search, mode: 'insensitive' } },
+          { locality: { contains: search, mode: 'insensitive' } },
+          { administrator: { name: { contains: search, mode: 'insensitive' } } }
         ]
       };
     }
@@ -35,6 +37,7 @@ const getBuildings = async (req, res) => {
 
     // Obtener edificios con paginación, administrador y cuenta en una sola consulta
     const buildings = await prisma.building.findMany({
+      where: whereClause,
       include: {
         administrator: true,
         account: true

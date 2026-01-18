@@ -120,7 +120,7 @@ const BuildingsPage = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await api.get(`/buildings?page=${pagination.page}&limit=${pagination.limit}`, {
+      const res = await api.get(`/buildings?page=${pagination.page}&limit=${pagination.limit}&search=${buildingFilter}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setBuildings(res.data.buildings);
@@ -159,8 +159,12 @@ const BuildingsPage = () => {
 
 
   useEffect(() => {
-    fetchBuildings();
-  }, [pagination.page]);
+    const delayDebounceFn = setTimeout(() => {
+      fetchBuildings();
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [pagination.page, buildingFilter]);
 
   useEffect(() => {
     fetchAdministrators();
@@ -308,17 +312,10 @@ const BuildingsPage = () => {
     }
   };
 
-  // Primero filtrar
-  const filteredBuildings = buildingFilter
-    ? buildings.filter(b =>
-        (b.administrator?.name && b.administrator.name.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.cuit && b.cuit.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.locality && b.locality.toLowerCase().includes(buildingFilter.toLowerCase())) ||
-        (b.name && b.name.toLowerCase().includes(buildingFilter.toLowerCase()))
-      )
-    : buildings;
+  // No filtramos en el cliente, ya viene filtrado del servidor
+  const filteredBuildings = buildings;
 
-  // Luego ordenar los filtrados
+  // Luego ordenar los filtrados (esto solo ordena la página actual)
   const sortedAndFilteredBuildings = [...filteredBuildings].sort((a, b) => {
     let comparison = 0;
     switch (orderBy) {
@@ -370,7 +367,10 @@ const BuildingsPage = () => {
             <TextField
               label="Buscar por nombre, administrador, CUIT o localidad"
               value={buildingFilter}
-              onChange={(e) => setBuildingFilter(e.target.value)}
+              onChange={(e) => {
+                setBuildingFilter(e.target.value);
+                setPagination(prev => ({ ...prev, page: 1 }));
+              }}
               sx={{ mb: 2, maxWidth: 400 }}
             />
             <Box mb={2}>
