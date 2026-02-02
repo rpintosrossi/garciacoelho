@@ -31,7 +31,7 @@ export const generatePaymentMethodPDF = async (paymentMethod: {
     </div>
     
     <div style="margin-bottom: 25px; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border-left: 4px solid #1976d2;">
-      <p style="margin: 8px 0; font-size: 16px;"><strong>Dirección:</strong> Av. San Martín 1234, CABA</p>
+      <p style="margin: 8px 0; font-size: 16px;"><strong>Dirección:</strong> Av. Presidente A. Illia 1823, Gral. San Martin</p>
       <p style="margin: 8px 0; font-size: 16px;"><strong>Casilla de mail:</strong> garciacoelho@hotmail.com</p>
       <p style="margin: 8px 0; font-size: 16px;"><strong>Whatsapp:</strong> 1138341046</p>
     </div>
