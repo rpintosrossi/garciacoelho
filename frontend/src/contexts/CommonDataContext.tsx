@@ -66,7 +66,7 @@ export function CommonDataProvider({ children }: { children: ReactNode }) {
       
       const [adminsRes, buildingsRes, techniciansRes, methodsRes] = await Promise.all([
         cachedApi.get('/administrators?basic=true'),
-        cachedApi.get('/buildings'),
+        cachedApi.get('/buildings?limit=1000'),
         cachedApi.get('/technicians'),
         cachedApi.get('/payment-methods')
       ]);

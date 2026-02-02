@@ -168,3 +168,4 @@ Si después de aplicar estas optimizaciones el sistema sigue lento:
 4. Considerar migración a servidor dedicado
 
 
+

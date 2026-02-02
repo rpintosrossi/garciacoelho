@@ -86,7 +86,7 @@ export default function NewService() {
       try {
         console.log('Iniciando carga de datos...');
         const [buildingsRes, techniciansRes] = await Promise.all([
-          api.get('/buildings'),
+          api.get('/buildings?limit=1000'),
           api.get('/technicians'),
         ]);
         console.log('Respuesta de edificios:', buildingsRes.data);

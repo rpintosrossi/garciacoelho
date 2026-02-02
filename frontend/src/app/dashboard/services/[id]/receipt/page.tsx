@@ -42,7 +42,7 @@ export default function ReceiptPage() {
       try {
         const [serviceRes, buildingsRes, adminsRes] = await Promise.all([
           api.get(`/services/${id}`),
-          api.get('/buildings'),
+          api.get('/buildings?limit=1000'),
           api.get('/administrators'),
         ]);
         setService(serviceRes.data);

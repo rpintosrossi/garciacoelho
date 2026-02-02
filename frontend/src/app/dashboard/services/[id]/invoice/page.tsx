@@ -50,7 +50,7 @@ export default function InvoicePage() {
       try {
         const [serviceRes, buildingsRes, adminsRes] = await Promise.all([
           api.get(`/services/${id}`),
-          api.get('/buildings'),
+          api.get('/buildings?limit=1000'),
           api.get('/administrators'),
         ]);
         console.log('🔍 [FRONTEND] Datos del servicio recibidos:', serviceRes.data);
