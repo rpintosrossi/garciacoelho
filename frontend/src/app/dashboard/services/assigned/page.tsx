@@ -41,6 +41,7 @@ interface Service {
   buildingId: string;
   building: {
     name: string;
+    address?: string;
   };
   technician: {
     name: string;
@@ -205,13 +206,13 @@ export default function AssignedServices() {
         />
         <Autocomplete
           options={selectedAdmin ? buildings.filter((b: any) => b.administratorId === selectedAdmin.id) : buildings}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={(option) => `${option.name} ${option.address ? `(${option.address})` : ''}`}
           value={selectedBuilding}
           onChange={handleBuildingChange}
           renderInput={(params) => <TextField {...params} label="Edificio" />}
           isOptionEqualToValue={(option, value) => option.id === value.id}
           noOptionsText="No se encontraron edificios"
-          sx={{ minWidth: 220 }}
+          sx={{ minWidth: 220, flexGrow: 1 }}
         />
         <Button onClick={handleClearFilters} variant="outlined">Limpiar filtros</Button>
       </Stack>
@@ -220,6 +221,7 @@ export default function AssignedServices() {
           <TableHead>
             <TableRow>
               <TableCell>Edificio</TableCell>
+              <TableCell>Dirección</TableCell>
               <TableCell>Administrador</TableCell>
               <TableCell>Descripción</TableCell>
               <TableCell>Técnico</TableCell>
@@ -231,6 +233,7 @@ export default function AssignedServices() {
             {services.map((service) => (
               <TableRow key={service.id}>
                 <TableCell>{service.building?.name}</TableCell>
+                <TableCell>{service.building?.address || '-'}</TableCell>
                 <TableCell>{buildings.find((b: any) => b.id === service.buildingId)?.administrator?.name || '-'}</TableCell>
                 <TableCell>{service.description}</TableCell>
                 <TableCell>{service.technician?.name}</TableCell>

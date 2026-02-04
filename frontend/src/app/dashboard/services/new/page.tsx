@@ -42,7 +42,7 @@ const steps = ['Registro de Servicio', 'Asignación', 'Remito', 'Facturación'];
 
 const schema = yup.object().shape({
   buildingId: yup.string().required('El edificio es requerido'),
-  description: yup.string().required('La descripción de la falla es requerida'),
+  description: yup.string().required('La descripción del servicio es requerido'),
   technicianId: yup.string().nullable(),
   visitDate: yup.date().nullable(),
   receiptImage: yup.string().nullable(),
@@ -230,7 +230,7 @@ export default function NewService() {
               fullWidth
               multiline
               rows={4}
-              label="Descripción de la falla"
+              label="Descripción del Servicio"
               placeholder="Ejemplo: No funciona el portero en 7C, 4B y 8D"
               {...register('description')}
               error={!!errors.description}

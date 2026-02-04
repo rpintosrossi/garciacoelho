@@ -10,6 +10,8 @@ import {
   DialogActions,
   TextField,
   FormControl,
+  FormControlLabel,
+  Checkbox,
   InputLabel,
   Select,
   MenuItem,
@@ -34,6 +36,7 @@ interface User {
   name: string;
   email: string;
   role: 'ADMIN' | 'OPERADOR' | 'TECNICO';
+  isTechnician: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +78,7 @@ export default function UsersPage() {
       email: '',
       password: '',
       role: 'OPERADOR',
+      isTechnician: false,
       isNew: true
     },
     validationSchema,
@@ -103,6 +107,7 @@ export default function UsersPage() {
         email: user.email,
         password: '',
         role: user.role,
+        isTechnician: user.isTechnician || false,
         isNew: false
       });
     } else {
@@ -235,6 +240,20 @@ export default function UsersPage() {
                 <MenuItem value="TECNICO">Técnico</MenuItem>
               </Select>
             </FormControl>
+
+            {(formik.values.role === 'ADMIN' || formik.values.role === 'OPERADOR') && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    name="isTechnician"
+                    checked={formik.values.isTechnician}
+                    onChange={formik.handleChange}
+                    color="primary"
+                  />
+                }
+                label="Es también técnico (aparece en asignación de tareas)"
+              />
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={handleClose}>Cancelar</Button>

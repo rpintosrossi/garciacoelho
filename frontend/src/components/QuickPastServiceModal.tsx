@@ -185,7 +185,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
           </TextField>
 
           <TextField
-            label="Descripción de la falla *"
+            label="Descripción del Servicio *"
             multiline
             rows={3}
             value={formData.description}

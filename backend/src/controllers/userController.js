@@ -11,6 +11,7 @@ const getUsers = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        isTechnician: true,
         createdAt: true,
         updatedAt: true
       }
@@ -33,6 +34,7 @@ const getUserById = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        isTechnician: true,
         createdAt: true,
         updatedAt: true
       }
@@ -52,7 +54,7 @@ const getUserById = async (req, res) => {
 // Crear un nuevo usuario
 const createUser = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, isTechnician } = req.body;
 
     // Validar que el rol sea válido
     if (!['ADMIN', 'OPERADOR', 'TECNICO'].includes(role)) {
@@ -78,26 +80,29 @@ const createUser = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const shouldBeTechnician = role === 'TECNICO' || isTechnician === true;
 
     const user = await prisma.user.create({
       data: {
         name,
         email,
         password: hashedPassword,
-        role
+        role,
+        isTechnician: shouldBeTechnician
       },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
+        isTechnician: true,
         createdAt: true,
         updatedAt: true
       }
     });
 
     // Si el usuario es técnico, crear también en Technician
-    if (role === 'TECNICO') {
+    if (shouldBeTechnician) {
       await prisma.technician.create({
         data: {
           name,
@@ -117,7 +122,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, isTechnician } = req.body;
 
     // Validar que el rol sea válido
     if (role && !['ADMIN', 'OPERADOR', 'TECNICO'].includes(role)) {
@@ -147,10 +152,23 @@ const updateUser = async (req, res) => {
       return res.status(403).json({ message: 'No puedes asignar el rol de administrador' });
     }
 
+    const newRole = role || existingUser.role;
+    // Determine if user should be technician: if role is TECNICO OR explicitly set to true
+    // If isTechnician is not provided in body, keep previous state unless role is TECNICO
+    let shouldBeTechnician;
+    if (newRole === 'TECNICO') {
+        shouldBeTechnician = true;
+    } else if (isTechnician !== undefined) {
+        shouldBeTechnician = isTechnician;
+    } else {
+        shouldBeTechnician = existingUser.isTechnician;
+    }
+
     const updateData = {
       name,
       email,
-      role
+      role,
+      isTechnician: shouldBeTechnician
     };
 
     if (password) {
@@ -165,46 +183,44 @@ const updateUser = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        isTechnician: true,
         createdAt: true,
         updatedAt: true
       }
     });
 
     // Sincronizar con la tabla Technician
-    const oldRole = existingUser.role;
-    const newRole = role || existingUser.role;
+    const wasTechnician = await prisma.technician.findUnique({ where: { email: existingUser.email } });
 
-    // Si cambió de no-técnico a técnico, crear registro en Technician
-    if (oldRole !== 'TECNICO' && newRole === 'TECNICO') {
-      const existingTechnician = await prisma.technician.findUnique({
-        where: { email: user.email }
-      });
-      
-      if (!existingTechnician) {
+    // Si debe ser técnico y no existe, crear
+    if (shouldBeTechnician) {
+      if (!wasTechnician) {
         await prisma.technician.create({
           data: {
             name: user.name,
             email: user.email,
           }
         });
+      } else if (wasTechnician.status !== 'ACTIVE') {
+          // Reactivar si estaba inactivo
+          await prisma.technician.update({
+              where: { id: wasTechnician.id },
+              data: { status: 'ACTIVE' }
+          });
+      }
+      // Actualizar datos si cambio nombre/email
+      if (wasTechnician && (user.name !== existingUser.name || user.email !== existingUser.email)) {
+          await prisma.technician.update({
+              where: { id: wasTechnician.id },
+              data: { name: user.name, email: user.email }
+          });
       }
     }
 
-    // Si cambió de técnico a no-técnico, eliminar registro en Technician
-    if (oldRole === 'TECNICO' && newRole !== 'TECNICO') {
-      await prisma.technician.deleteMany({
-        where: { email: user.email }
-      });
-    }
-
-    // Si sigue siendo técnico pero cambió el nombre o email, actualizar Technician
-    if (oldRole === 'TECNICO' && newRole === 'TECNICO') {
-      await prisma.technician.updateMany({
-        where: { email: existingUser.email },
-        data: {
-          name: user.name,
-          email: user.email,
-        }
+    // Si NO debe ser técnico y existe, eliminar (o desactivar)
+    if (!shouldBeTechnician && wasTechnician) {
+      await prisma.technician.delete({
+        where: { id: wasTechnician.id }
       });
     }
 
@@ -249,12 +265,10 @@ const deleteUser = async (req, res) => {
       }
     }
 
-    // Si es técnico, eliminar también de la tabla Technician
-    if (existingUser.role === 'TECNICO') {
-      await prisma.technician.deleteMany({
+    // Eliminar también de la tabla Technician si existe
+    await prisma.technician.deleteMany({
         where: { email: existingUser.email }
-      });
-    }
+    });
 
     await prisma.user.delete({
       where: { id }
