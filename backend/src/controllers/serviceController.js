@@ -384,9 +384,15 @@ const saveDraft = async (req, res) => {
 // Asignar técnico (Paso b: Designación de trabajos) - VERSIÓN MEJORADA
 const assignTechnician = async (req, res) => {
   try {
-    console.log('👨‍🔧 [ASSIGN] Iniciando asignación de técnico...');
     const { id } = req.params;
-    const { technicianId, visitDate } = req.body;
+    let { technicianId, visitDate } = req.body;
+    
+    // Sanitize input
+    if (typeof technicianId === 'string') {
+        technicianId = technicianId.trim();
+    }
+
+    console.log(`👨‍🔧 [ASSIGN] Iniciando asignación. ServiceID: ${id}, TechID: ${technicianId}`);
 
     // Validaciones
     if (!technicianId) {
@@ -403,6 +409,7 @@ const assignTechnician = async (req, res) => {
     });
 
     if (!service) {
+      console.log(`❌ [ASSIGN] Servicio no encontrado: ${id}`);
       return res.status(404).json({ 
         message: 'Servicio no encontrado',
         type: 'SERVICE_NOT_FOUND'
@@ -420,11 +427,17 @@ const assignTechnician = async (req, res) => {
     }
 
     // Verificar que el técnico existe
+    console.log(`🔍 [ASSIGN] Buscando técnico con ID: ${technicianId}`);
     const technician = await prisma.technician.findUnique({
       where: { id: technicianId }
     });
 
     if (!technician) {
+      console.log(`❌ [ASSIGN] Técnico no encontrado en DB. ID buscado: ${technicianId}`);
+      // DEBUG: Listar todos los IDs para ver si hay mismatch
+      const allTechs = await prisma.technician.findMany({ select: { id: true, name: true } });
+      console.log('📋 [DEBUG] Técnicos disponibles:', JSON.stringify(allTechs));
+      
       return res.status(404).json({ 
         message: 'Técnico no encontrado',
         type: 'TECHNICIAN_NOT_FOUND'

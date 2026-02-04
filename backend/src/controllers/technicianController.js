@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Obtener todos los técnicos - VERSIÓN OPTIMIZADA
 const getAllTechnicians = async (req, res) => {
