@@ -202,7 +202,7 @@ const createPastService = async (req, res) => {
     }
 
     // Verificar que el técnico existe
-    const technician = await prisma.user.findUnique({
+    const technician = await prisma.technician.findUnique({
       where: { id: technicianId }
     });
 
@@ -210,7 +210,7 @@ const createPastService = async (req, res) => {
       return res.status(404).json({ message: 'Técnico no encontrado' });
     }
 
-    // Crear el servicio en estado INVOICED
+    // Crear el servicio en estado CON_REMITO en lugar de INVOICED si no hay factura
     const service = await prisma.service.create({
       data: {
         name: `Servicio ${building.name}`,
@@ -218,7 +218,7 @@ const createPastService = async (req, res) => {
         buildingId,
         technicianId,
         visitDate: visitDate ? new Date(visitDate) : new Date(),
-        status: 'INVOICED'
+        status: 'CON_REMITO' 
       },
       include: {
         building: {
