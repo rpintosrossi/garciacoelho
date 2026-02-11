@@ -6,7 +6,13 @@ const getQuickStats = async (req, res) => {
     const [totalBuildings, totalAdmins, totalServices] = await Promise.all([
       prisma.building.count(),
       prisma.administrator.count(),
-      prisma.service.count(),
+      prisma.service.count({
+        where: {
+          status: {
+            in: ['CON_REMITO', 'FACTURADO']
+          }
+        }
+      }),
     ]);
 
     // Calcular fechas de inicio y fin de mes actual

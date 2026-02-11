@@ -238,7 +238,10 @@ const createPastService = async (req, res) => {
 
     // Si hay archivos de remito, crear el remito con múltiples imágenes
     if (remitoFiles && remitoFiles.length > 0) {
-      const imagePaths = remitoFiles.map(file => file.path);
+      const imagePaths = remitoFiles.map(file => {
+        if (file.location) return file.location;
+        return getFileUrl(file.filename) || file.path;
+      });
       
       await prisma.remito.create({
         data: {
@@ -488,7 +491,7 @@ const uploadReceipt = async (req, res) => {
     console.log('Datos del formulario:', req.body);
     
     const { id } = req.params;
-    const { remitoNumber } = req.body;
+    const { remitoNumber, description } = req.body;
     const files = req.files;
 
     if (!files || files.length === 0) {
@@ -629,12 +632,18 @@ const uploadReceipt = async (req, res) => {
     
     let updatedService;
     try {
+      const updateData = {
+        receiptImages: [...(service.receiptImages || []), ...fileUrls],
+        status: 'CON_REMITO'
+      };
+
+      if (description !== undefined) {
+        updateData.description = description;
+      }
+
       updatedService = await prisma.service.update({
         where: { id },
-        data: {
-          receiptImages: [...(service.receiptImages || []), ...fileUrls],
-          status: 'CON_REMITO'
-        },
+        data: updateData,
         include: {
           technician: true,
           remitos: true
@@ -970,6 +979,15 @@ const createInformalInvoice = async (req, res) => {
         });
 
         console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a remito y factura:', payment);
+        
+        // Actualizar el estado de la factura a PAGADA
+        await prisma.invoice.update({
+          where: { id: invoice.id },
+          data: { status: 'PAGADA' }
+        });
+        
+        // Actualizar el objeto invoice para devolverlo actualizado
+        invoice.status = 'PAGADA';
       }
     }
 
@@ -1046,11 +1064,14 @@ const createInformalInvoiceMultiple = async (req, res) => {
 
     // Crear la factura y actualizar todos los servicios en una transacción
     const result = await prisma.$transaction(async (tx) => {
+      // Determinar estado de la factura
+      const invoiceStatus = paymentMethod === 'EFECTIVO' ? 'PAGADA' : 'PENDIENTE';
+
       // Crear la factura
       const invoice = await tx.invoice.create({
         data: {
           amount: parseFloat(amount),
-          status: 'PENDIENTE',
+          status: invoiceStatus,
           paymentMethod: paymentMethod
         }
       });
@@ -1075,6 +1096,26 @@ const createInformalInvoiceMultiple = async (req, res) => {
           })
         )
       );
+
+      // Si el pago es en EFECTIVO, generar el pago automáticamente
+      if (paymentMethod === 'EFECTIVO') {
+        await tx.payment.create({
+          data: {
+            amount: parseFloat(amount),
+            date: new Date(),
+            method: 'EFECTIVO',
+            comprobante: `COBRO-EFECTIVO-${Date.now()}`,
+            documents: {
+              create: [
+                {
+                  invoiceId: invoice.id,
+                  amount: parseFloat(amount)
+                }
+              ]
+            }
+          }
+        });
+      }
 
       return { invoice, services: updatedServices };
     });

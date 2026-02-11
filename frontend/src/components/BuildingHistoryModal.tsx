@@ -23,7 +23,9 @@ import {
   IconButton,
   Card,
   CardContent,
-  Divider
+  Divider,
+  TextField,
+  InputAdornment
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
 import {
@@ -35,7 +37,8 @@ import {
   CheckCircle,
   HourglassEmpty,
   Build,
-  Download
+  Download,
+  Edit
 } from "@mui/icons-material";
 
 interface Payment {
@@ -119,6 +122,13 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
+  
+  // Edit Invoice State
+  const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<{id: string, amount: number} | null>(null);
+  const [editAmount, setEditAmount] = useState<string>('');
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const [errorEdit, setErrorEdit] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && buildingId) {
@@ -142,6 +152,51 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       setError("Error al cargar el historial de servicios");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEditClick = (invoice: {id: string, amount: number}) => {
+    setSelectedInvoice(invoice);
+    setEditAmount(invoice.amount.toString());
+    setEditInvoiceOpen(true);
+    setErrorEdit(null);
+  };
+
+  const handleEditClose = () => {
+    setEditInvoiceOpen(false);
+    setSelectedInvoice(null);
+    setEditAmount('');
+    setErrorEdit(null);
+  };
+
+  const handleSaveInvoiceChanges = async () => {
+    if (!selectedInvoice || !editAmount) return;
+
+    const amount = parseFloat(editAmount);
+    if (isNaN(amount) || amount < 0) {
+      setErrorEdit('El monto debe ser un número válido mayor o igual a 0');
+      return;
+    }
+
+    setSavingInvoice(true);
+    setErrorEdit(null);
+
+    try {
+      const token = localStorage.getItem("token");
+      await api.put(`/invoices/${selectedInvoice.id}`, {
+        amount: amount
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      // Update local state or refetch
+      await fetchHistory();
+      handleEditClose();
+    } catch (err) {
+      console.error('Error actualizando factura:', err);
+      setErrorEdit('Error al actualizar el monto de la factura');
+    } finally {
+      setSavingInvoice(false);
     }
   };
 
@@ -173,7 +228,8 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+    <>
+      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
       <DialogTitle>
         <Typography variant="h5" component="div">
           Historial de Servicios
@@ -392,9 +448,23 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                               <Typography variant="caption" color="text.secondary">
                                                 Monto
                                               </Typography>
-                                              <Typography variant="body2" fontWeight="bold">
-                                                {formatCurrency(service.invoice.amount)}
-                                              </Typography>
+                                              <Box display="flex" alignItems="center">
+                                                <Typography variant="body2" fontWeight="bold">
+                                                  {formatCurrency(service.invoice.amount)}
+                                                </Typography>
+                                                <IconButton
+                                                  size="small"
+                                                  color="primary"
+                                                  onClick={() => handleEditClick({
+                                                    id: service.invoice!.id,
+                                                    amount: service.invoice!.amount
+                                                  })}
+                                                  sx={{ ml: 0.5, p: 0.5 }}
+                                                  title="Editar monto"
+                                                >
+                                                  <Edit fontSize="small" sx={{ fontSize: '1rem' }} />
+                                                </IconButton>
+                                              </Box>
                                             </Box>
                                             <Box>
                                               <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
@@ -565,6 +635,44 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
         <Button onClick={onClose}>Cerrar</Button>
       </DialogActions>
     </Dialog>
+
+    <Dialog open={editInvoiceOpen} onClose={handleEditClose} maxWidth="sm" fullWidth>
+        <DialogTitle>Editar Monto de Factura</DialogTitle>
+        <DialogContent>
+          <Box pt={2}>
+            {errorEdit && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {errorEdit}
+              </Alert>
+            )}
+            <TextField
+              sx={{ marginTop: 1 }}
+              fullWidth
+              label="Nuevo monto"
+              type="number"
+              value={editAmount}
+              onChange={(e) => setEditAmount(e.target.value)}
+              InputProps={{
+                startAdornment: <InputAdornment position="start">$</InputAdornment>,
+              }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleEditClose} disabled={savingInvoice}>
+            Cancelar
+          </Button>
+          <Button 
+            onClick={handleSaveInvoiceChanges} 
+            variant="contained" 
+            disabled={savingInvoice}
+            color="primary"
+          >
+            {savingInvoice ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 };
 

@@ -83,6 +83,7 @@ export default function ServicesWithReceipt() {
   const [remitoModalOpen, setRemitoModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [remitoNumber, setRemitoNumber] = useState('');
+  const [remitoDescription, setRemitoDescription] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
   const [workshopRepairModalOpen, setWorkshopRepairModalOpen] = useState(false);
@@ -127,6 +128,7 @@ export default function ServicesWithReceipt() {
   const handleUploadClick = (service: Service) => {
     setSelectedService(service);
     setRemitoNumber('');
+    setRemitoDescription(service.description || '');
     setSelectedFiles([]);
     setRemitoModalOpen(true);
   };
@@ -177,6 +179,10 @@ export default function ServicesWithReceipt() {
       });
       
       formData.append('remitoNumber', remitoNumber.trim());
+
+      if (remitoDescription !== undefined) {
+        formData.append('description', remitoDescription);
+      }
       
       const response = await api.post(`/services/${selectedService.id}/receipt`, formData, {
         headers: {
@@ -231,6 +237,7 @@ export default function ServicesWithReceipt() {
     setRemitoModalOpen(false);
     setSelectedService(null);
     setRemitoNumber('');
+    setRemitoDescription('');
     setSelectedFiles([]);
     setError('');
   };
@@ -446,8 +453,19 @@ export default function ServicesWithReceipt() {
         <DialogContent>
           <Box sx={{ mt: 2 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              <b>Descripción:</b> {selectedService?.description}
+              <b>Servicio:</b> {selectedService?.building?.name}
             </Typography>
+
+            <TextField
+              label="Descripción del Servicio"
+              multiline
+              rows={3}
+              value={remitoDescription}
+              onChange={(e) => setRemitoDescription(e.target.value)}
+              fullWidth
+              placeholder="Descripción del trabajo realizado"
+              sx={{ mb: 2 }}
+            />
             
             <TextField
               label="Número de Remito (opcional)"

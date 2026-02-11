@@ -47,33 +47,45 @@ import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
 import StockAlerts from '@/components/StockAlerts';
 
-const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => (
-  <Card sx={{
-    height: '100%',
-    background: `linear-gradient(135deg, ${alpha(color, 0.1)} 0%, ${alpha(color, 0.05)} 100%)`,
-    border: `1px solid ${alpha(color, 0.2)}`,
-    cursor: 'pointer',
-    '&:hover': {
-      transform: 'translateY(-4px)',
-      transition: 'transform 0.2s ease-in-out',
-      boxShadow: `0 4px 20px ${alpha(color, 0.15)}`
-    }
-  }} onClick={onClick}>
-    <CardActionArea sx={{ height: '100%' }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Icon sx={{ color: color, fontSize: 32, mr: 1 }} />
-          <Typography variant="h6" color="text.secondary">
-            {title}
-          </Typography>
-        </Box>
-        <Typography variant="h4" component="div" sx={{ fontWeight: 'bold', color: color }}>
-          {value}
+const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => {
+  const content = (
+    <CardContent>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Icon sx={{ color: color, fontSize: 32, mr: 1 }} />
+        <Typography variant="h6" color="text.secondary">
+          {title}
         </Typography>
-      </CardContent>
-    </CardActionArea>
-  </Card>
-);
+      </Box>
+      <Typography variant="h4" component="div" sx={{ fontWeight: 'bold', color: color }}>
+        {value}
+      </Typography>
+    </CardContent>
+  );
+
+  return (
+    <Card sx={{
+      height: '100%',
+      background: `linear-gradient(135deg, ${alpha(color, 0.1)} 0%, ${alpha(color, 0.05)} 100%)`,
+      border: `1px solid ${alpha(color, 0.2)}`,
+      cursor: onClick ? 'pointer' : 'default',
+      '&:hover': onClick ? {
+        transform: 'translateY(-4px)',
+        transition: 'transform 0.2s ease-in-out',
+        boxShadow: `0 4px 20px ${alpha(color, 0.15)}`
+      } : undefined
+    }} onClick={onClick}>
+      {onClick ? (
+        <CardActionArea sx={{ height: '100%' }}>
+          {content}
+        </CardActionArea>
+      ) : (
+        <Box sx={{ height: '100%' }}>
+          {content}
+        </Box>
+      )}
+    </Card>
+  );
+};
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -173,7 +185,6 @@ export default function DashboardPage() {
             value={stats?.totalServices || 0}
             icon={ServiceIcon}
             color={theme.palette.success.main}
-            onClick={() => router.push('/dashboard/services')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>

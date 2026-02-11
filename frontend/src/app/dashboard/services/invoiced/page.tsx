@@ -33,6 +33,7 @@ import {
 import { useRouter } from 'next/navigation';
 import axios from '@/lib/axios';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
 import { formatCurrency } from '@/utils/formatCurrency';
@@ -45,18 +46,22 @@ interface Service {
   description: string;
   status: string;
   createdAt: string;
+  visitDate?: string;
   buildingId: string;
   building: {
     name: string;
+    address: string;
   };
   technician: {
     name: string;
   };
-  invoice: {
+  invoice?: {
     number: string;
     amount: number;
     date: string;
   };
+  receiptImages?: string[];
+  remitos?: any[];
 }
 
 interface PaginationData {
@@ -96,6 +101,14 @@ export default function InvoicedServices() {
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [invoiceDate, setInvoiceDate] = useState<Date | null>(new Date());
   const [savingInvoice, setSavingInvoice] = useState(false);
+
+  // Estados para subir remito (corrección/adición)
+  const [openUploadRemito, setOpenUploadRemito] = useState(false);
+  const [uploadRemitoService, setUploadRemitoService] = useState<Service | null>(null);
+  const [uploadRemitoNumber, setUploadRemitoNumber] = useState('');
+  const [uploadRemitoDescription, setUploadRemitoDescription] = useState('');
+  const [uploadRemitoFiles, setUploadRemitoFiles] = useState<File[]>([]);
+  const [isUploadingRemito, setIsUploadingRemito] = useState(false);
 
   // Estados para selección múltiple
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -276,6 +289,68 @@ export default function InvoicedServices() {
 
   const handleCloseBulkRemito = () => {
     setOpenBulkRemito(false);
+  };
+
+  const handleOpenUploadRemito = (service: Service) => {
+    setUploadRemitoService(service);
+    setUploadRemitoNumber('');
+    setUploadRemitoDescription(service.description || '');
+    setUploadRemitoFiles([]);
+    setOpenUploadRemito(true);
+  };
+
+  const handleCloseUploadRemito = () => {
+    setOpenUploadRemito(false);
+    setUploadRemitoService(null);
+    setUploadRemitoDescription('');
+    setUploadRemitoFiles([]);
+    setError(null);
+  };
+
+  const handleUploadFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      setUploadRemitoFiles(Array.from(event.target.files));
+    }
+  };
+
+  const handleUploadRemitoSubmit = async () => {
+    if (!uploadRemitoService || uploadRemitoFiles.length === 0) return;
+    
+    setIsUploadingRemito(true);
+    setError(null);
+    
+    const formData = new FormData();
+    uploadRemitoFiles.forEach(file => {
+      formData.append('receipts', file);
+    });
+    
+    if (uploadRemitoNumber.trim()) {
+      formData.append('remitoNumber', uploadRemitoNumber.trim());
+    }
+
+    if (uploadRemitoDescription !== undefined) {
+      formData.append('description', uploadRemitoDescription);
+    }
+    
+    try {
+      await axios.post(`/services/${uploadRemitoService.id}/receipt`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      // Limpiar caché para asegurar que se vean los cambios
+      cachedApi.clearCacheFor('/services');
+      
+      handleCloseUploadRemito();
+      fetchServices();
+      // Opcional: mostrar notificación de éxito
+    } catch (err: any) {
+      console.error('Error uploading remito:', err);
+      setError(err.response?.data?.message || 'Error al subir el remito');
+    } finally {
+      setIsUploadingRemito(false);
+    }
   };
 
   const handleSaveBulkRemito = async () => {
@@ -549,15 +624,21 @@ export default function InvoicedServices() {
                 </TableCell>
               )}
               <TableCell>Edificio</TableCell>
+              <TableCell>Dirección</TableCell>
               <TableCell>Administrador</TableCell>
               <TableCell>Descripción</TableCell>
               <TableCell>Técnico</TableCell>
               <TableCell>Fecha</TableCell>
+              <TableCell>N° Remito</TableCell>
               <TableCell>Acciones</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {services.map((service) => (
+            {services.map((service) => {
+              const hasReceipt = (service.receiptImages && service.receiptImages.length > 0) || (service.remitos && service.remitos.length > 0);
+              const remitoNumber = service.remitos && service.remitos.length > 0 ? service.remitos[0].number : '-';
+              
+              return (
               <TableRow key={service.id}>
                 {bulkMode && (
                   <TableCell padding="checkbox">
@@ -568,10 +649,43 @@ export default function InvoicedServices() {
                   </TableCell>
                 )}
                 <TableCell>{service.building?.name}</TableCell>
+                <TableCell>{service.building?.address}</TableCell>
                 <TableCell>{buildings.find((b: any) => b.id === service.buildingId)?.administrator?.name || '-'}</TableCell>
                 <TableCell>{service.description}</TableCell>
                 <TableCell>{service.technician?.name}</TableCell>
-                <TableCell>{new Date(service.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell>{new Date(service.visitDate || service.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {hasReceipt ? (
+                      <>
+                        <Typography variant="body2">{remitoNumber}</Typography>
+                        <Button
+                          size="small"
+                          variant="text" 
+                          onClick={() => {
+                            const urls = service.remitos?.[0]?.receiptImages || service.receiptImages || [];
+                            if (urls.length > 0) {
+                              window.open(urls[0], '_blank');
+                            }
+                          }}
+                        >
+                          Ver
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="contained"
+                        color="success"
+                        size="small"
+                        startIcon={<CloudUploadIcon />}
+                        onClick={() => handleOpenUploadRemito(service)}
+                        sx={{ whiteSpace: 'nowrap' }}
+                      >
+                        Subir
+                      </Button>
+                    )}
+                  </Stack>
+                </TableCell>
                 <TableCell>
                   <Box display="flex" justifyContent="flex-end">
                     <Stack direction="row" spacing={1}>
@@ -626,7 +740,8 @@ export default function InvoicedServices() {
                   </Box>
                 </TableCell>
               </TableRow>
-            ))}
+            );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
@@ -664,6 +779,76 @@ export default function InvoicedServices() {
           <Button onClick={handleCloseRemito}>Cancelar</Button>
           <Button onClick={handleSaveRemito} variant="contained" disabled={savingRemito || !remitoAmount}>
             Guardar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para subir remito adicional/corrección */}
+      <Dialog open={openUploadRemito} onClose={handleCloseUploadRemito} fullWidth maxWidth="sm">
+        <DialogTitle>Subir/Corregir Remito</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={1}>
+            <Typography variant="body2" color="text.secondary">
+              Sube un nuevo archivo de remito para el servicio: <b>{uploadRemitoService?.description}</b>.
+              Esto agregará nuevas imágenes al remito existente.
+            </Typography>
+
+            <TextField
+              label="Descripción del Servicio"
+              multiline
+              rows={3}
+              value={uploadRemitoDescription}
+              onChange={(e) => setUploadRemitoDescription(e.target.value)}
+              fullWidth
+              placeholder="Descripción del trabajo realizado"
+            />
+            
+            <TextField
+              label="Número de Remito (opcional)"
+              value={uploadRemitoNumber}
+              onChange={(e) => setUploadRemitoNumber(e.target.value)}
+              fullWidth
+              placeholder="Ej: REM-2024-001 (dejar vacío para auto-generar uno nuevo si no existe)"
+            />
+            
+            <Box>
+                <input
+                  accept=".jpg,.jpeg,.pdf"
+                  type="file"
+                  multiple
+                  onChange={handleUploadFileSelect}
+                  style={{ display: 'none' }}
+                  id="remito-upload-input-invoiced"
+              />
+              <label htmlFor="remito-upload-input-invoiced">
+                <Button variant="contained" component="span">
+                  📄 Seleccionar Archivos (JPG o PDF)
+                </Button>
+              </label>
+              {uploadRemitoFiles.length > 0 && (
+                <Box mt={1}>
+                  <Typography variant="body2" color="success.main">
+                    ✅ {uploadRemitoFiles.length} archivo(s) seleccionado(s)
+                  </Typography>
+                  {uploadRemitoFiles.map((file, index) => (
+                    <Typography key={index} variant="caption" display="block" color="text.secondary">
+                      {index + 1}. {file.name} - {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseUploadRemito}>Cancelar</Button>
+          <Button 
+            onClick={handleUploadRemitoSubmit} 
+            disabled={isUploadingRemito || uploadRemitoFiles.length === 0} 
+            variant="contained" 
+            color="primary"
+          >
+            {isUploadingRemito ? 'Subiendo...' : 'Subir'}
           </Button>
         </DialogActions>
       </Dialog>

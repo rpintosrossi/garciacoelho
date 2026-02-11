@@ -12,7 +12,8 @@ import {
   Box,
   Typography,
   CircularProgress,
-  Alert
+  Alert,
+  Autocomplete
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { History as HistoryIcon, Upload as UploadIcon } from '@mui/icons-material';
@@ -30,6 +31,12 @@ interface Technician {
   email: string;
 }
 
+interface ServiceType {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 interface QuickPastServiceModalProps {
   open: boolean;
   onClose: () => void;
@@ -39,6 +46,7 @@ interface QuickPastServiceModalProps {
 export default function QuickPastServiceModal({ open, onClose, onSuccess }: QuickPastServiceModalProps) {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
@@ -54,6 +62,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
     if (open) {
       loadBuildings();
       loadTechnicians();
+      loadServiceTypes();
     }
   }, [open]);
 
@@ -64,6 +73,17 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
     } catch (error) {
       console.error('Error al cargar edificios:', error);
       setError('Error al cargar edificios');
+    }
+  };
+
+  const loadServiceTypes = async () => {
+    try {
+      // Agregar timestamp para evitar caché del navegador
+      const response = await api.get(`/service-types?_t=${Date.now()}`);
+      setServiceTypes(response.data || []);
+    } catch (error) {
+      console.error('Error al cargar tipos de servicio:', error);
+      // No mostramos error al usuario, simplemente no habrá sugerencias
     }
   };
 
@@ -168,21 +188,53 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
         )}
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField
-            select
-            label="Edificio *"
-            value={formData.buildingId}
-            onChange={(e) => setFormData({ ...formData, buildingId: e.target.value })}
-            fullWidth
+          <Autocomplete
+            options={buildings}
+            getOptionLabel={(option) => `${option.name} - ${option.address}`}
+            value={buildings.find(b => b.id === formData.buildingId) || null}
+            onChange={(_, newValue) => {
+              setFormData({ ...formData, buildingId: newValue ? newValue.id : '' });
+            }}
             disabled={loading}
-          >
-            <MenuItem value="">Seleccionar edificio</MenuItem>
-            {buildings.map((building) => (
-              <MenuItem key={building.id} value={building.id}>
-                {building.name} - {building.address}
-              </MenuItem>
-            ))}
-          </TextField>
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Edificio *"
+                fullWidth
+              />
+            )}
+            noOptionsText="No se encontraron edificios"
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+          />
+
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+              Servicios Frecuentes (Click para agregar)
+            </Typography>
+            <Autocomplete
+              options={serviceTypes.map((option) => option.name)}
+              value={null}
+              onChange={(_, newValue) => {
+                if (newValue) {
+                  const currentDesc = formData.description;
+                  const separator = currentDesc ? '\n' : '';
+                  setFormData({ 
+                    ...formData, 
+                    description: currentDesc + separator + newValue 
+                  });
+                }
+              }}
+              disabled={loading}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Buscar servicio frecuente..."
+                  size="small"
+                />
+              )}
+              noOptionsText="No hay tipos de servicio configurados"
+            />
+          </Box>
 
           <TextField
             label="Descripción del Servicio *"
@@ -190,6 +242,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
             rows={3}
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Escribe la descripción del trabajo realizado..."
             fullWidth
             disabled={loading}
           />

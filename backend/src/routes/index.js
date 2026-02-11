@@ -19,6 +19,7 @@ const categoryRoutes = require('./categoryRoutes');
 const productRoutes = require('./productRoutes');
 const workshopRoutes = require('./workshops');
 const workshopRepairRoutes = require('./workshopRepairs');
+const serviceTypeRoutes = require('./serviceTypeRoutes');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -28,6 +29,7 @@ router.use('/users', userRoutes);
 router.use('/buildings', buildingRoutes);
 router.use('/administrators', administratorRoutes);
 router.use('/payment-methods', paymentMethodRoutes);
+router.use('/service-types', serviceTypeRoutes);
 router.use('/services', serviceRoutes);
 router.use('/technicians', technicianRoutes);
 router.use('/clients', clientRoutes);

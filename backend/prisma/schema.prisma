@@ -348,3 +348,11 @@ model WorkshopRepair {
   @@index([workshopId])
   @@index([createdAt])
 }
+
+model ServiceType {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

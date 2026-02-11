@@ -121,14 +121,31 @@ const updateInvoice = async (req, res) => {
     const { id } = req.params;
     const { amount, status } = req.body;
 
+    // Obtener la factura actual para calcular diferencias si es necesario
+    const currentInvoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: {
+        paymentDocuments: {
+          include: {
+            payment: true
+          }
+        }
+      }
+    });
+
+    if (!currentInvoice) {
+      return res.status(404).json({ message: 'Factura no encontrada' });
+    }
+
+    // Actualizar la factura
     const invoice = await prisma.invoice.update({
       where: { id },
       data: {
-        ...(amount !== undefined && { amount }),
+        ...(amount !== undefined && { amount: parseFloat(amount) }),
         ...(status !== undefined && { status })
       },
       include: {
-        service: {
+        services: {
           include: {
             building: true,
             technician: true
@@ -136,6 +153,31 @@ const updateInvoice = async (req, res) => {
         }
       }
     });
+
+    // Si hay cambio de monto, verificar si debemos actualizar pagos automáticos (EFECTIVO)
+    if (amount !== undefined && currentInvoice.paymentMethod === 'EFECTIVO' && currentInvoice.status === 'PAGADA') {
+      // Si la factura fue pagada en efectivo automáticamente, actualizamos también el pago asociado
+      // Buscamos el pago asociado que sea de tipo efectivo y tenga el mismo monto original
+      const cashPaymentDoc = currentInvoice.paymentDocuments.find(pd => 
+        pd.payment.method === 'EFECTIVO' && 
+        Math.abs(pd.amount - currentInvoice.amount) < 0.01 // Floating point comparison
+      );
+
+      if (cashPaymentDoc) {
+        // Actualizamos el documento de pago y el pago principal
+        await prisma.$transaction([
+          prisma.paymentDocument.update({
+            where: { id: cashPaymentDoc.id },
+            data: { amount: parseFloat(amount) }
+          }),
+          prisma.payment.update({
+            where: { id: cashPaymentDoc.paymentId },
+            data: { amount: parseFloat(amount) }
+          })
+        ]);
+        console.log(`[UPDATE INVOICE] Monto actualizado también en el pago asociado ${cashPaymentDoc.paymentId}`);
+      }
+    }
 
     res.json(invoice);
   } catch (error) {
