@@ -726,21 +726,20 @@ const getServiceCounts = async (req, res) => {
 // Estadísticas de servicios: trabajos realizados por mes (remitos subidos)
 const getServiceStats = async (req, res) => {
   try {
-    // Agrupar remitos por mes y año
-    const remitosPorMes = await prisma.remito.groupBy({
-      by: ['date'],
-      _count: { id: true },
-      orderBy: {
-        date: 'asc'
-      }
+    // Obtener servicios ordenados por fecha de creación para estadística de "Servicios Creados"
+    const services = await prisma.service.findMany({
+      select: { createdAt: true },
+      orderBy: { createdAt: 'asc' }
     });
+
     // Formatear resultado: { '2024-05': 10, ... }
     const stats = {};
-    remitosPorMes.forEach(r => {
-      const date = new Date(r.date);
+    services.forEach(s => {
+      const date = new Date(s.createdAt);
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      stats[key] = (stats[key] || 0) + r._count.id;
+      stats[key] = (stats[key] || 0) + 1;
     });
+    
     res.json({ trabajosPorMes: stats });
   } catch (error) {
     console.error('Error al obtener estadísticas de servicios:', error);
