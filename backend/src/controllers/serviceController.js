@@ -189,7 +189,7 @@ const createService = async (req, res) => {
 // Crear un servicio anterior rápido (estado INVOICED)
 const createPastService = async (req, res) => {
   try {
-    const { buildingId, description, visitDate, technicianId } = req.body;
+    const { buildingId, description, visitDate, technicianId, remitoNumber } = req.body;
     const remitoFiles = req.files; // Array de archivos
 
     // Verificar que el edificio existe
@@ -242,11 +242,23 @@ const createPastService = async (req, res) => {
         if (file.location) return file.location;
         return getFileUrl(file.filename) || file.path;
       });
+
+      // Determinar el número de remito (usar el enviado, o el nombre del archivo, o generar uno)
+      let finalRemitoNumber = remitoNumber ? remitoNumber.trim() : null;
+      
+      if (!finalRemitoNumber && remitoFiles.length > 0) {
+        // Usar el nombre del primer archivo original como fallback
+        finalRemitoNumber = remitoFiles[0].originalname.split('.')[0];
+      }
+
+      if (!finalRemitoNumber) {
+         finalRemitoNumber = `R-${service.id}-${Date.now()}`;
+      }
       
       await prisma.remito.create({
         data: {
           serviceId: service.id,
-          number: `R-${service.id}-${Date.now()}`,
+          number: finalRemitoNumber,
           date: visitDate ? new Date(visitDate) : new Date(),
           amount: 0, // Se puede actualizar después
           receiptImages: imagePaths
@@ -491,7 +503,7 @@ const uploadReceipt = async (req, res) => {
     console.log('Datos del formulario:', req.body);
     
     const { id } = req.params;
-    const { remitoNumber, description } = req.body;
+    const { remitoNumber, description, remitoDate } = req.body;
     const files = req.files;
 
     if (!files || files.length === 0) {
@@ -601,7 +613,7 @@ const uploadReceipt = async (req, res) => {
       serviceId: id,
       number: finalRemitoNumber,
       amount: 0,
-      date: new Date(),
+      date: remitoDate ? new Date(remitoDate) : new Date(),
       receiptImages: fileUrls
     });
     
@@ -612,7 +624,7 @@ const uploadReceipt = async (req, res) => {
           serviceId: id,
           number: finalRemitoNumber,
           amount: 0, // Se puede actualizar después
-          date: new Date(),
+          date: remitoDate ? new Date(remitoDate) : new Date(),
           receiptImages: fileUrls
         }
       });

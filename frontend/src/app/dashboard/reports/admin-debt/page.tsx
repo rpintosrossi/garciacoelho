@@ -16,12 +16,19 @@ import {
   Chip,
   Card,
   CardContent,
-  Grid
+  Grid,
+  TextField,
+  Button,
+  Stack,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import {
   Assignment as AssignmentIcon,
   Business as BuildingIcon,
-  AttachMoney as MoneyIcon
+  AttachMoney as MoneyIcon,
+  PictureAsPdf as PdfIcon,
+  Search as SearchIcon
 } from '@mui/icons-material';
 import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
@@ -50,21 +57,53 @@ export default function AdminDebtReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reports, setReports] = useState<DebtReport[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [startDate, endDate]); // Refetch on date change, manual search for text
 
   const fetchReport = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await cachedApi.get('/reports/admin-debt');
+      const params: any = {};
+      if (searchQuery) params.search = searchQuery;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+
+      const response = await api.get('/reports/admin-debt', { params });
       setReports(response.data);
     } catch (err) {
       setError('Error al cargar el reporte de deuda de administradores');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownloadPDF = async (adminId: string, adminName: string) => {
+    try {
+      const params: any = {};
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      
+      const response = await api.get(`/reports/admin-debt/${adminId}/pdf`, {
+        params,
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Resumen_Deuda_${adminName.replace(/\s+/g, '_')}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error('Error downloading PDF', error);
+      alert('Error al descargar el PDF');
     }
   };
 
@@ -102,6 +141,58 @@ export default function AdminDebtReport() {
         Reporte de Deuda de Administradores
       </Typography>
       
+      {/* Filtros */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
+          <TextField
+            label="Buscar Administrador"
+            variant="outlined"
+            size="small"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && fetchReport()}
+            fullWidth
+          />
+          <TextField
+            label="Desde"
+            type="date"
+            size="small"
+            InputLabelProps={{ shrink: true }}
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+          <TextField
+            label="Hasta"
+            type="date"
+            size="small"
+            InputLabelProps={{ shrink: true }}
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+          <Button 
+            variant="contained" 
+            startIcon={<SearchIcon />}
+            onClick={() => fetchReport()}
+          >
+            Filtrar
+          </Button>
+          {(startDate || endDate || searchQuery) && (
+            <Button 
+              variant="outlined"
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+                setSearchQuery('');
+                // El efecto se encargará de recargar si cambian las fechas
+                if (!startDate && !endDate) fetchReport(); // Si solo era texto, forzar recarga
+              }}
+            >
+              Limpiar
+            </Button>
+          )}
+        </Stack>
+      </Paper>
+
       {/* Resumen */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 3, mb: 3 }}>
         <Card>
@@ -164,6 +255,7 @@ export default function AdminDebtReport() {
                 <TableCell>Email</TableCell>
                 <TableCell>Edificios con Deuda</TableCell>
                 <TableCell>Deuda Total</TableCell>
+                <TableCell>Acciones</TableCell>
                 <TableCell>Documentos Pendientes</TableCell>
               </TableRow>
             </TableHead>
@@ -187,6 +279,16 @@ export default function AdminDebtReport() {
                     <Typography variant="subtitle2" color="error" fontWeight="bold">
                       {formatCurrency(report.totalDebt)}
                     </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Tooltip title="Descargar Resumen PDF">
+                      <IconButton 
+                        color="primary"
+                        onClick={() => handleDownloadPDF(report.administratorId, report.administratorName)}
+                      >
+                        <PdfIcon />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                   <TableCell>
                     <Box>

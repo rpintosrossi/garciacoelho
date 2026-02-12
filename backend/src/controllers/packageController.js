@@ -1242,8 +1242,8 @@ const getPackages = async (req, res) => {
     }
 
     // Título y datos del administrador
-    doc.fontSize(20).text('FACTURACIÓN', 50, 50, { align: 'center' });
-    doc.moveDown();
+    // doc.fontSize(20).text('FACTURACIÓN', 50, 50, { align: 'center' }); // REMOVED
+    doc.moveDown(5); // Bajamos un poco el contenido como se pidio
     doc.fontSize(14).text(`Administrador: ${administrator.name}`, { align: 'center' });
     doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, { align: 'center' });
     doc.moveDown(2);
@@ -1260,20 +1260,21 @@ const getPackages = async (req, res) => {
     const col4 = 450;
     
     doc.fontSize(10).fillColor('#666');
-    doc.text('Edificio (Dirección)', col1, tableTop);
+    doc.text('Dirección', col1, tableTop);
     doc.text('Fecha', col2, tableTop);
     doc.text('Nº Factura', col3, tableTop);
     doc.text('Importe', col4, tableTop);
     
     // Línea separadora
     doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
-    doc.moveDown(0.5);
+    doc.moveDown(2); // Aumentado espacio antes del primer item
 
     // Filas de facturas
     doc.fillColor('#000');
     for (const invoice of pendingInvoices) {
       const building = invoice.services?.[0]?.building;
-      const address = building ? `${building.name || ''} (${building.address || ''})` : 'N/A';
+      // Solo mostramos la dirección
+      const address = building ? (building.address || building.name || 'N/A') : 'N/A';
       const fecha = invoice.date ? new Date(invoice.date).toLocaleDateString('es-AR') : 'N/A';
       const numero = invoice.number || 'N/A';
       const importe = `$${(invoice.montoAcordado || invoice.amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;

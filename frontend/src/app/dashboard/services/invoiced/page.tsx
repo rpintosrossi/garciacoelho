@@ -563,6 +563,16 @@ export default function InvoicedServices() {
           noOptionsText="No se encontraron edificios"
           sx={{ minWidth: 220 }}
         />
+        <Autocomplete
+          options={selectedAdmin ? buildings.filter((b: any) => b.administratorId === selectedAdmin.id) : buildings}
+          getOptionLabel={(option) => option.address || ''}
+          value={selectedBuilding}
+          onChange={handleBuildingChange}
+          renderInput={(params) => <TextField {...params} label="Dirección" />}
+          isOptionEqualToValue={(option, value) => option.id === value.id}
+          noOptionsText="No se encontraron direcciones"
+          sx={{ minWidth: 220 }}
+        />
         <Button onClick={handleClearFilters} variant="outlined">Limpiar filtros</Button>
       </Stack>
       

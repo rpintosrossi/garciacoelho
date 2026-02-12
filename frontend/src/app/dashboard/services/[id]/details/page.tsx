@@ -35,6 +35,7 @@ export default function ServiceDetailsPage() {
   // Estados para subir remito
   const [openUploadRemito, setOpenUploadRemito] = useState(false);
   const [uploadRemitoNumber, setUploadRemitoNumber] = useState('');
+  const [uploadRemitoDate, setUploadRemitoDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [uploadRemitoDescription, setUploadRemitoDescription] = useState('');
   const [uploadRemitoFiles, setUploadRemitoFiles] = useState<File[]>([]);
   const [isUploadingRemito, setIsUploadingRemito] = useState(false);
@@ -63,6 +64,7 @@ export default function ServiceDetailsPage() {
 
   const handleOpenUploadRemito = () => {
     setUploadRemitoNumber('');
+    setUploadRemitoDate(new Date().toISOString().split('T')[0]);
     setUploadRemitoDescription(service?.description || '');
     setUploadRemitoFiles([]);
     setOpenUploadRemito(true);
@@ -71,6 +73,7 @@ export default function ServiceDetailsPage() {
   const handleCloseUploadRemito = () => {
     setOpenUploadRemito(false);
     setUploadRemitoNumber('');
+    setUploadRemitoDate(new Date().toISOString().split('T')[0]);
     setUploadRemitoDescription('');
     setUploadRemitoFiles([]);
   };
@@ -93,6 +96,10 @@ export default function ServiceDetailsPage() {
     
     if (uploadRemitoNumber.trim()) {
       formData.append('remitoNumber', uploadRemitoNumber.trim());
+    }
+
+    if (uploadRemitoDate) {
+      formData.append('remitoDate', uploadRemitoDate);
     }
 
     if (uploadRemitoDescription !== undefined) {
@@ -284,6 +291,15 @@ export default function ServiceDetailsPage() {
               onChange={(e) => setUploadRemitoNumber(e.target.value)}
               fullWidth
               placeholder="Ej: REM-2024-001 (dejar vacío para auto-generar uno nuevo si no existe)"
+            />
+
+            <TextField
+              label="Fecha del Remito"
+              type="date"
+              value={uploadRemitoDate}
+              onChange={(e) => setUploadRemitoDate(e.target.value)}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
             />
             
             <Box>

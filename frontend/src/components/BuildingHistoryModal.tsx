@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import api from '@/lib/axios';
+import { jsPDF } from "jspdf";
 import {
   Dialog,
   DialogTitle,
@@ -14,6 +15,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Paper,
   Box,
   Chip,
@@ -25,7 +27,8 @@ import {
   CardContent,
   Divider,
   TextField,
-  InputAdornment
+  InputAdornment,
+  Stack
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
 import {
@@ -105,6 +108,12 @@ interface BuildingHistoryData {
     pending: number;
   };
   services: Service[];
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
 }
 
 interface BuildingHistoryModalProps {
@@ -123,6 +132,12 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
   
+  // Pagination & Filtering
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  
   // Edit Invoice State
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<{id: string, amount: number} | null>(null);
@@ -132,9 +147,17 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
   useEffect(() => {
     if (open && buildingId) {
+      setPage(0); // Reset page on open
       fetchHistory();
     }
   }, [open, buildingId]);
+  
+  // Refetch when pagination changes
+  useEffect(() => {
+    if (open && buildingId && data) { // Only if already loaded
+      fetchHistory();
+    }
+  }, [page, rowsPerPage]);
 
   const fetchHistory = async () => {
     if (!buildingId) return;
@@ -143,8 +166,15 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     setError(null);
     try {
       const token = localStorage.getItem("token");
+      const params = new URLSearchParams();
+      params.append('page', (page + 1).toString());
+      params.append('limit', rowsPerPage.toString());
+      if (dateFrom) params.append('startDate', dateFrom);
+      if (dateTo) params.append('endDate', dateTo);
+
       const response = await api.get(`/buildings/${buildingId}/service-history`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        params
       });
       setData(response.data);
     } catch (err) {
@@ -153,6 +183,99 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFilter = () => {
+    setPage(0); // Reset page when filtering
+    fetchHistory();
+  };
+
+  const handleChangePage = (event: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const handleExportPDF = () => {
+    if (!data || !data.services.length) return;
+
+    const doc = new jsPDF();
+    const logoUrl = '/logo.png'; // Asegúrate de que esta ruta sea correcta
+
+    // Función para dibujar header
+    const drawHeader = () => {
+      // Intentar cargar logo
+      const img = new Image();
+      img.src = logoUrl;
+      // Como img.onload es asíncrono, para simplificar en jsPDF básico sin plugins complejos:
+      // Si el logo es importante, deberíamos precargarlo o usar base64. 
+      // Asumiremos texto si falla o usaremos una lógica simple.
+      // Pero jsPDF addImage requiere base64 o URL accesible. 
+      // Simplemente pondremos el nombre de la empresa por ahora para asegurar funcionalidad inmediata.
+      
+      doc.setFontSize(18);
+      doc.text("García Coelho", 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Historial de Servicios - ${data.building.name}`, 14, 30);
+      doc.text(`Fecha de emisión: ${new Date().toLocaleDateString()}`, 14, 38);
+      
+      if (dateFrom || dateTo) {
+        doc.text(`Período: ${dateFrom || 'Inicio'} - ${dateTo || 'Actualidad'}`, 14, 46);
+      }
+    };
+
+    drawHeader();
+    
+    let y = 60;
+    
+    // Encabezados de tabla
+    doc.setFontSize(10);
+    doc.setFillColor(240, 240, 240);
+    doc.rect(14, y - 5, 180, 8, 'F');
+    doc.font = "helvetica";
+    doc.setFont("helvetica", "bold");
+    doc.text("Fecha", 16, y);
+    doc.text("Descripción", 50, y);
+    doc.text("Monto", 160, y);
+    
+    y += 10;
+    doc.setFont("helvetica", "normal");
+    
+    data.services.forEach((service) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 30;
+        // Reprint header headers
+        doc.setFont("helvetica", "bold"); 
+        doc.text("Fecha", 16, y);
+        doc.text("Descripción", 50, y);
+        doc.text("Monto", 160, y);
+        y += 10;
+        doc.setFont("helvetica", "normal"); 
+      }
+      
+      const date = new Date(service.createdAt).toLocaleDateString();
+      const desc = doc.splitTextToSize(service.name + (service.description ? ` - ${service.description}` : ''), 100);
+      const total = (service.invoice?.amount || 0) + service.remitos.reduce((acc, r) => acc + r.amount, 0);
+      const amount = total > 0 ? `$ ${total.toLocaleString()}` : '-';
+      
+      doc.text(date, 16, y);
+      doc.text(desc, 50, y);
+      doc.text(amount, 160, y);
+      
+      // Calculate height based on description lines
+      const height = desc.length * 5;
+      y += Math.max(10, height + 5);
+      
+      // Linea separadora ligera
+      doc.setDrawColor(220, 220, 220);
+      doc.line(14, y - 2, 194, y - 2);
+    });
+    
+    doc.save(`Historial_${data.building.name.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleEditClick = (invoice: {id: string, amount: number}) => {
@@ -227,51 +350,49 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     return new Date(dateString).toLocaleDateString('es-AR');
   };
 
-  return (
-    <>
-      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle>
-        <Typography variant="h5" component="div">
-          Historial de Servicios
-        </Typography>
-      </DialogTitle>
-      <DialogContent>
-        {loading ? (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-            <CircularProgress />
+  // Determine modal content
+  let modalContent = null;
+  if (loading) {
+    modalContent = (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+         <CircularProgress />
+      </Box>
+    );
+  } else if (error) {
+    modalContent = <Alert severity="error">{error}</Alert>;
+  } else if (data) {
+    modalContent = (
+      <Box>
+        <Paper sx={{ p: 2, mb: 3, bgcolor: 'grey.50' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                {data.building.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {data.building.address}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                CUIT: {data.building.cuit}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2">
+                <strong>Administrador:</strong> {data.building.administrator.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {data.building.administrator.email}
+              </Typography>
+            </Box>
           </Box>
-        ) : error ? (
-          <Alert severity="error">{error}</Alert>
-        ) : data ? (
-          <>
-            {/* Información del edificio */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'grey.50' }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-                <Box>
-                  <Typography variant="subtitle1" fontWeight="bold" color="primary">
-                    {data.building.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {data.building.address}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    CUIT: {data.building.cuit}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2">
-                    <strong>Administrador:</strong> {data.building.administrator.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {data.building.administrator.email}
-                  </Typography>
-                </Box>
-              </Box>
-            </Paper>
+        </Paper>
 
             {/* Resumen */}
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
-              <Card>
+              <Card 
+                sx={{ cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.02)' } }}
+                onClick={() => document.getElementById('services-list')?.scrollIntoView({ behavior: 'smooth' })}
+              >
                 <CardContent>
                   <Box display="flex" alignItems="center" gap={1}>
                     <Build color="primary" />
@@ -330,13 +451,49 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
             <Divider sx={{ my: 2 }} />
 
             {/* Lista de servicios */}
-            <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-              Servicios ({data.services.length})
-            </Typography>
+            <Box id="services-list" sx={{ mt: 4, mb: 2 }}>
+              <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2}>
+                <Typography variant="h6">
+                  Servicios ({data.pagination?.total || data.services.length})
+                </Typography>
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <TextField 
+                    label="Desde" 
+                    type="date" 
+                    size="small"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)} 
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ width: 140 }}
+                  />
+                  <TextField 
+                    label="Hasta" 
+                    type="date" 
+                    size="small"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)} 
+                    InputLabelProps={{ shrink: true }}
+                    sx={{ width: 140 }}
+                  />
+                  <Button variant="outlined" onClick={handleFilter}>
+                    Filtrar
+                  </Button>
+                  <Button 
+                    variant="contained" 
+                    color="secondary" 
+                    startIcon={<Download />}
+                    onClick={handleExportPDF}
+                  >
+                    PDF
+                  </Button>
+                </Stack>
+              </Stack>
+            </Box>
             
             {data.services.length === 0 ? (
               <Alert severity="info">No hay servicios registrados para este edificio</Alert>
             ) : (
+              <>
               <TableContainer component={Paper}>
                 <Table size="small">
                   <TableHead>
@@ -627,10 +784,33 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                   </TableBody>
                 </Table>
               </TableContainer>
+              <TablePagination
+                rowsPerPageOptions={[5, 10, 25]}
+                component="div"
+                count={data.pagination?.total || data.services.length}
+                rowsPerPage={rowsPerPage}
+                page={page}
+                onPageChange={handleChangePage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+                labelRowsPerPage="Filas por página"
+              />
+              </>
             )}
-          </>
-        ) : null}
-      </DialogContent>
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+        <DialogTitle>
+          <Typography variant="h5" component="div">
+            Historial de Servicios
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          {modalContent}
+        </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cerrar</Button>
       </DialogActions>

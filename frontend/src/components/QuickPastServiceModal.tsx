@@ -55,6 +55,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
     description: '',
     visitDate: new Date(),
     technicianId: '',
+    remitoNumber: '',
     remitoFiles: [] as File[]
   });
 
@@ -120,6 +121,9 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
       submitData.append('description', formData.description);
       submitData.append('visitDate', formData.visitDate.toISOString());
       submitData.append('technicianId', formData.technicianId);
+      if (formData.remitoNumber) {
+        submitData.append('remitoNumber', formData.remitoNumber);
+      }
       
       // Agregar múltiples archivos
       if (formData.remitoFiles.length > 0) {
@@ -140,6 +144,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
         description: '',
         visitDate: new Date(),
         technicianId: '',
+        remitoNumber: '',
         remitoFiles: []
       });
 
@@ -160,6 +165,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
         description: '',
         visitDate: new Date(),
         technicianId: '',
+        remitoNumber: '',
         remitoFiles: []
       });
       setError('');
@@ -274,6 +280,15 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
               </MenuItem>
             ))}
           </TextField>
+
+          <TextField
+            label="Número de Remito (Opcional)"
+            value={formData.remitoNumber}
+            onChange={(e) => setFormData({ ...formData, remitoNumber: e.target.value })}
+            placeholder="Si no se especifica, se usará el nombre del archivo"
+            fullWidth
+            disabled={loading}
+          />
 
           <Box>
             <Button

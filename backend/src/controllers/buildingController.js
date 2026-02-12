@@ -1222,6 +1222,11 @@ const createBuildingPayment = async (req, res) => {
 const getBuildingServiceHistory = async (req, res) => {
   try {
     const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+    const skip = (page - 1) * limit;
 
     // Verificar que el edificio existe
     const building = await prisma.building.findUnique({
@@ -1241,9 +1246,52 @@ const getBuildingServiceHistory = async (req, res) => {
       return res.status(404).json({ message: 'Edificio no encontrado' });
     }
 
-    // Obtener todos los servicios del edificio con sus relaciones
+    // Construir filtro
+    const whereClause = {
+      buildingId: id,
+    };
+
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) {
+        whereClause.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        // Ajustar endDate para incluir todo el día
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        whereClause.createdAt.lte = end;
+      }
+    }
+
+    // Obtener total de registros para paginación
+    const total = await prisma.service.count({ where: whereClause });
+
+    // Obtener todos los serviciosmatching filters para calcular resumen
+    // Nota: Esto podría optimizarse usando agregate de Prisma, pero mantenemos la lógica actual por consistencia
+    const servicesForSummary = await prisma.service.findMany({
+      where: whereClause,
+      include: {
+        invoice: {
+          include: {
+            paymentDocuments: {
+              include: { payment: true }
+            }
+          }
+        },
+        remitos: {
+          include: {
+            paymentDocuments: {
+              include: { payment: true }
+            }
+          }
+        }
+      }
+    });
+
+    // Obtener servicios paginados para mostrar
     const services = await prisma.service.findMany({
-      where: { buildingId: id },
+      where: whereClause,
       include: {
         technician: {
           select: {
@@ -1288,19 +1336,21 @@ const getBuildingServiceHistory = async (req, res) => {
       },
       orderBy: {
         createdAt: 'desc'
-      }
+      },
+      skip,
+      take: limit
     });
 
-    // Calcular totales
-    const totalServices = services.length;
-    const totalInvoices = services.filter(s => s.invoice).length;
-    const totalRemitos = services.reduce((sum, s) => sum + s.remitos.length, 0);
+    // Calcular totales usando servicesForSummary
+    const totalServices = servicesForSummary.length;
+    const totalInvoices = servicesForSummary.filter(s => s.invoice).length;
+    const totalRemitos = servicesForSummary.reduce((sum, s) => sum + s.remitos.length, 0);
     
     // Calcular monto total facturado y pagado
     let totalInvoiced = 0;
     let totalPaid = 0;
 
-    services.forEach(service => {
+    servicesForSummary.forEach(service => {
       // Sumar facturas
       if (service.invoice) {
         totalInvoiced += service.invoice.amount;
@@ -1341,6 +1391,12 @@ const getBuildingServiceHistory = async (req, res) => {
         totalInvoiced,
         totalPaid,
         pending: totalInvoiced - totalPaid
+      },
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
       },
       services: services.map(service => ({
         id: service.id,
