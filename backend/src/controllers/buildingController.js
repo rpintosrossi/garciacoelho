@@ -27,7 +27,8 @@ const getBuildings = async (req, res) => {
           { cuit: { contains: search, mode: 'insensitive' } },
           { address: { contains: search, mode: 'insensitive' } },
           { locality: { contains: search, mode: 'insensitive' } },
-          { administrator: { name: { contains: search, mode: 'insensitive' } } }
+          { administrator: { name: { contains: search, mode: 'insensitive' } } },
+          { administrator: { cuit: { contains: search, mode: 'insensitive' } } }
         ]
       };
     }
@@ -1444,6 +1445,38 @@ const getBuildingServiceHistory = async (req, res) => {
   }
 };
 
+// Búsqueda liviana de edificios para autocomplete (no calcula saldos)
+const searchBuildingsAutocomplete = async (req, res) => {
+  try {
+    const search = req.query.search || '';
+    if (search.length < 2) return res.json([]);
+
+    const buildings = await prisma.building.findMany({
+      where: {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { cuit: { contains: search, mode: 'insensitive' } },
+          { address: { contains: search, mode: 'insensitive' } },
+          { locality: { contains: search, mode: 'insensitive' } },
+          { administrator: { name: { contains: search, mode: 'insensitive' } } },
+          { administrator: { cuit: { contains: search, mode: 'insensitive' } } }
+        ]
+      },
+      include: {
+        administrator: true,
+        account: true
+      },
+      orderBy: { name: 'asc' },
+      take: 20
+    });
+
+    res.json(buildings);
+  } catch (error) {
+    console.error('Error en búsqueda autocomplete:', error);
+    res.status(500).json({ message: 'Error al buscar edificios' });
+  }
+};
+
 module.exports = {
   getBuildings,
   getBuildingById,
@@ -1456,5 +1489,6 @@ module.exports = {
   getAvailableLocalities,
   getBuildingAccountDetails,
   createBuildingPayment,
-  getBuildingServiceHistory
+  getBuildingServiceHistory,
+  searchBuildingsAutocomplete
 }; 

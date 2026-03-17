@@ -142,6 +142,46 @@ const isPDF = (filename) => {
   return lowerFilename.endsWith('.pdf') || lowerFilename.includes('.pdf');
 };
 
+// Función para verificar si un archivo es imagen
+const isImage = (filename) => {
+  if (!filename) return false;
+  const lowerFilename = filename.toLowerCase();
+  return lowerFilename.endsWith('.jpg') || lowerFilename.endsWith('.jpeg') ||
+         lowerFilename.endsWith('.png') || lowerFilename.endsWith('.gif') ||
+         lowerFilename.endsWith('.webp');
+};
+
+// Convierte un buffer de imagen a un PDF de una página usando PDFKit
+const imageToPdf = (imageBuffer, filename) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 20, size: 'A4' });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const pageWidth = doc.page.width - 40;  // margin * 2
+      const pageHeight = doc.page.height - 40;
+
+      // Detectar tipo de imagen por extensión
+      const lowerFilename = (filename || '').toLowerCase();
+      const imgType = lowerFilename.endsWith('.png') ? 'png' : 'jpeg';
+
+      doc.image(imageBuffer, 20, 20, {
+        fit: [pageWidth, pageHeight],
+        align: 'center',
+        valign: 'center',
+        type: imgType
+      });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
 // Función para agregar PDF de remito al documento principal
 const addPDFToDocument = (doc, pdfPath, yPosition, maxWidth = 500) => {
   try {
@@ -365,12 +405,15 @@ const getPackages = async (req, res) => {
           amount: true,
           status: true,
           createdAt: true,
+          date: true,
+          number: true,
           paymentMethod: true,
           fileUrl: true,
           services: {
             select: {
               id: true,
               status: true,
+              visitDate: true,
               building: {
                 select: {
                   id: true,
@@ -543,6 +586,7 @@ const getPackages = async (req, res) => {
         return {
           type: (invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO') ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
           id: invoice.id,
+          number: invoice.number || null,
           amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
           originalAmount: invoice.amount, // Mantener el monto original para referencia
           totalPaid: invoice.totalPaid,
@@ -550,6 +594,7 @@ const getPackages = async (req, res) => {
           montoAcordado: invoice.montoAcordado,
           status: invoice.status,
           createdAt: invoice.createdAt,
+          date: invoice.date || null,
           service: firstService,
           building: firstService.building,
           administrator: firstService.building.administrator,
@@ -617,9 +662,10 @@ const getPackages = async (req, res) => {
  const downloadPackage = async (req, res) => {
    try {
      const { adminId } = req.params;
-     const { paymentMethodId } = req.query;
+     const { paymentMethodId, mode } = req.query;
+     const splitMode = mode === 'split';
     
-    console.log(`📦 [PACKAGES] Descargando paquete para adminId: ${adminId}`);
+    console.log(`📦 [PACKAGES] Descargando paquete para adminId: ${adminId} | modo: ${splitMode ? 'separado' : 'único'}`);
     console.log(`💳 [PACKAGES] PaymentMethodId recibido: ${paymentMethodId}`);
     
     // Obtener el administrador
@@ -825,7 +871,7 @@ const getPackages = async (req, res) => {
                    
                    if (remito.receiptImages && remito.receiptImages.length > 0) {
                      for (const fileUrl of remito.receiptImages) {
-                       console.log(`🔍 [PACKAGES] Archivo: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
+                       console.log(`🔍 [PACKAGES] Archivo: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}, ¿Es imagen?: ${isImage(fileUrl)}`);
                        if (isPDF(fileUrl)) {
                          try {
                            console.log(`📥 [PACKAGES] Descargando PDF de remito desde: ${fileUrl}`);
@@ -839,6 +885,21 @@ const getPackages = async (req, res) => {
                            console.log(`✅ [PACKAGES] PDF de remito descargado: ${remito.number}`);
                          } catch (error) {
                            console.error(`❌ [PACKAGES] Error al descargar PDF de remito ${fileUrl}:`, error.message);
+                         }
+                       } else if (isImage(fileUrl)) {
+                         try {
+                           console.log(`📥 [PACKAGES] Descargando imagen de remito desde: ${fileUrl}`);
+                           const imageBuffer = await downloadFile(fileUrl);
+                           const pdfBuffer = await imageToPdf(imageBuffer, fileUrl);
+                           invoiceData.remitos.push({ 
+                             buffer: pdfBuffer, 
+                             name: `remito_${remito.number}`,
+                             buildingAddress: service.building?.address || 'N/A',
+                             remito: remito
+                           });
+                           console.log(`✅ [PACKAGES] Imagen de remito convertida a PDF: ${remito.number}`);
+                         } catch (error) {
+                           console.error(`❌ [PACKAGES] Error al convertir imagen de remito ${fileUrl}:`, error.message);
                          }
                        }
                      }
@@ -864,7 +925,7 @@ const getPackages = async (req, res) => {
                console.log(`🔍 [PACKAGES] Remito tiene ${remito.receiptImages?.length || 0} archivos`);
                if (remito.receiptImages && remito.receiptImages.length > 0) {
                  for (const fileUrl of remito.receiptImages) {
-                   console.log(`🔍 [PACKAGES] Archivo de pago: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}`);
+                   console.log(`🔍 [PACKAGES] Archivo de pago: ${fileUrl}, ¿Es PDF?: ${isPDF(fileUrl)}, ¿Es imagen?: ${isImage(fileUrl)}`);
                    if (isPDF(fileUrl)) {
                      try {
                        console.log(`📥 [PACKAGES] Descargando PDF de remito de pago desde: ${fileUrl}`);
@@ -873,6 +934,16 @@ const getPackages = async (req, res) => {
                        console.log(`✅ [PACKAGES] PDF de remito de pago descargado: ${remito.number}`);
                      } catch (error) {
                        console.error(`❌ [PACKAGES] Error al descargar PDF de remito de pago ${fileUrl}:`, error.message);
+                     }
+                   } else if (isImage(fileUrl)) {
+                     try {
+                       console.log(`📥 [PACKAGES] Descargando imagen de remito de pago desde: ${fileUrl}`);
+                       const imageBuffer = await downloadFile(fileUrl);
+                       const pdfBuffer = await imageToPdf(imageBuffer, fileUrl);
+                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
+                       console.log(`✅ [PACKAGES] Imagen de remito de pago convertida a PDF: ${remito.number}`);
+                     } catch (error) {
+                       console.error(`❌ [PACKAGES] Error al convertir imagen de remito de pago ${fileUrl}:`, error.message);
                      }
                    }
                  }
@@ -1018,6 +1089,9 @@ const getPackages = async (req, res) => {
             packagePages.forEach((page) => mergedPdf.addPage(page));
             console.log(`✅ [PACKAGES] Paquete agregado: ${packagePages.length} páginas`);
             
+            // Variable hoisted para uso en modo split
+            let paymentPdfBuffer = null;
+
             // Agregar PDF del método de pago (DESPUÉS del resumen, ANTES de las facturas)
             if (selectedPaymentMethod) {
               try {
@@ -1103,7 +1177,7 @@ const getPackages = async (req, res) => {
                       align: 'center',
                       width: 512
                     })
-                    .text('Whatsapp: 1138341046', 50, msgBoxTop + 58, { 
+                    .text('Whatsapp: 1138341046 | 1148408121', 50, msgBoxTop + 58, { 
                       align: 'center',
                       width: 512
                     });
@@ -1118,7 +1192,7 @@ const getPackages = async (req, res) => {
                   paymentDoc.end();
                 });
                 
-                const paymentPdfBuffer = Buffer.concat(paymentChunks);
+                paymentPdfBuffer = Buffer.concat(paymentChunks);
                 console.log(`💳 [PACKAGES] PDF de método de pago generado: ${paymentPdfBuffer.length} bytes`);
                 
                 // Agregar al merged PDF
@@ -1187,14 +1261,82 @@ const getPackages = async (req, res) => {
             }
             
             // Guardar y enviar
-            console.log(`📦 [PACKAGES] Guardando PDF final...`);
-            const mergedPdfBytes = await mergedPdf.save();
-            
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
-            res.send(Buffer.from(mergedPdfBytes));
-            
-            console.log(`✅ [PACKAGES] Paquete enviado exitosamente`);
+            console.log(`📦 [PACKAGES] Guardando PDF final... (modo: ${splitMode ? 'separado' : 'único'})`);
+
+            if (splitMode) {
+              // ===== MODO SEPARADO: generar ZIP con archivos individuales =====
+              const safeAdminName = administrator.name.replace(/[^a-zA-Z0-9\-_]/g, '_');
+              const dateStr = new Date().toISOString().split('T')[0];
+
+              res.setHeader('Content-Type', 'application/zip');
+              res.setHeader('Content-Disposition', `attachment; filename=paquete-${safeAdminName}-separado-${dateStr}.zip`);
+
+              const archive = archiver('zip', { zlib: { level: 6 } });
+              archive.pipe(res);
+
+              // Archivo 1: resumen + datos bancarios
+              const resumenDoc = await PDFLib.create();
+              const resumenPkgDoc = await PDFLib.load(packagePdfBuffer);
+              const resumenPkgPages = await resumenDoc.copyPages(resumenPkgDoc, resumenPkgDoc.getPageIndices());
+              resumenPkgPages.forEach(p => resumenDoc.addPage(p));
+              if (paymentPdfBuffer) {
+                const resumenPmDoc = await PDFLib.load(paymentPdfBuffer);
+                const resumenPmPages = await resumenDoc.copyPages(resumenPmDoc, resumenPmDoc.getPageIndices());
+                resumenPmPages.forEach(p => resumenDoc.addPage(p));
+              }
+              const resumenBytes = await resumenDoc.save();
+              archive.append(Buffer.from(resumenBytes), { name: '01_resumen_datos_bancarios.pdf' });
+              console.log(`✅ [PACKAGES SPLIT] Archivo resumen creado`);
+
+              // Archivos N: 1 por factura (factura + sus remitos)
+              for (let idx = 0; idx < processedInvoices.length; idx++) {
+                const invData = processedInvoices[idx];
+                try {
+                  const invDoc = await PDFLib.create();
+
+                  const facturaDoc = await PDFLib.load(invData.buffer);
+                  const facturaPages = await invDoc.copyPages(facturaDoc, facturaDoc.getPageIndices());
+                  facturaPages.forEach(p => invDoc.addPage(p));
+
+                  for (const remito of invData.remitos) {
+                    try {
+                      const remitoDoc = await PDFLib.load(remito.buffer);
+                      const remitoPages = await invDoc.copyPages(remitoDoc, remitoDoc.getPageIndices());
+                      remitoPages.forEach(p => invDoc.addPage(p));
+                    } catch (e) {
+                      console.error(`❌ [PACKAGES SPLIT] Error agregando remito ${remito.name}:`, e.message);
+                    }
+                  }
+
+                  const invBytes = await invDoc.save();
+                  const buildingLabel = invData.remitos[0]?.buildingAddress || invData.name;
+                  const safeLabel = buildingLabel.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').slice(0, 50);
+                  const fileNum = String(idx + 2).padStart(2, '0');
+                  archive.append(Buffer.from(invBytes), { name: `${fileNum}_${safeLabel}.pdf` });
+                  console.log(`✅ [PACKAGES SPLIT] Archivo edificio ${idx + 1} creado: ${safeLabel}`);
+                } catch (e) {
+                  console.error(`❌ [PACKAGES SPLIT] Error creando archivo para factura ${invData.name}:`, e.message);
+                }
+              }
+
+              // Remitos huérfanos
+              for (let idx = 0; idx < decryptedOrphanRemitos.length; idx++) {
+                const remito = decryptedOrphanRemitos[idx];
+                const safeName = remito.name.replace(/[^a-zA-Z0-9\-_]/g, '_');
+                archive.append(Buffer.from(remito.buffer), { name: `cobro_${idx + 1}_${safeName}.pdf` });
+              }
+
+              await archive.finalize();
+              console.log(`✅ [PACKAGES SPLIT] ZIP separado enviado exitosamente`);
+
+            } else {
+              // ===== MODO ÚNICO: enviar un solo PDF combinado =====
+              const mergedPdfBytes = await mergedPdf.save();
+              res.setHeader('Content-Type', 'application/pdf');
+              res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
+              res.send(Buffer.from(mergedPdfBytes));
+              console.log(`✅ [PACKAGES] Paquete único enviado exitosamente`);
+            }
             
           } finally {
             // Limpiar archivos temporales
@@ -1275,8 +1417,11 @@ const getPackages = async (req, res) => {
       const building = invoice.services?.[0]?.building;
       // Solo mostramos la dirección
       const address = building ? (building.address || building.name || 'N/A') : 'N/A';
-      const fecha = invoice.date ? new Date(invoice.date).toLocaleDateString('es-AR') : 'N/A';
-      const numero = invoice.number || 'N/A';
+      // Fecha del servicio: remito date > visitDate > invoice date
+      const service0 = invoice.services?.[0];
+      const serviceDate = service0?.remitos?.[0]?.date || service0?.visitDate || invoice.date;
+      const fecha = serviceDate ? new Date(serviceDate).toLocaleDateString('es-AR') : 'N/A';
+      const numero = invoice.number || invoice.id.substring(0, 8) || 'N/A';
       const importe = `$${(invoice.montoAcordado || invoice.amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
       
       const startY = doc.y;

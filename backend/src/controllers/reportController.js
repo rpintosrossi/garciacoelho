@@ -100,12 +100,15 @@ const getAdminDebtReport = async (req, res) => {
           const montoPendiente = montoAcordado - totalPagado;
           if (montoPendiente > 0) {
             buildingDebt += montoPendiente;
+            const invService = services.find(s => s.invoice?.id === inv.id);
+            const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
+            const invoiceLabel = inv.number ? `Nº ${inv.number}` : inv.id.slice(0, 8);
             pendingDocuments.push({
               id: inv.id,
               type: 'FACTURA',
               amount: montoPendiente,
-              date: inv.createdAt,
-              description: services.find(s => s.invoice?.id === inv.id)?.description || 'Factura'
+              date: serviceDate,
+              description: `${invoiceLabel} - ${invService?.description || 'Factura'}`
             });
           }
         }
@@ -240,12 +243,15 @@ const getBuildingDebtReport = async (req, res) => {
         const montoPendiente = montoAcordado - totalPagado;
         if (montoPendiente > 0) {
           totalDebt += montoPendiente;
+          const invService = services.find(s => s.invoice?.id === inv.id);
+          const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
+          const invoiceLabel = inv.number ? `Nº ${inv.number}` : inv.id.slice(0, 8);
           pendingDocuments.push({
             id: inv.id,
             type: 'FACTURA',
             amount: montoPendiente,
-            date: inv.createdAt,
-            description: services.find(s => s.invoice?.id === inv.id)?.description || 'Factura'
+            date: serviceDate,
+            description: `${invoiceLabel} - ${invService?.description || 'Factura'}`
           });
         }
       }
@@ -364,10 +370,12 @@ const getAdminDebtPDF = async (req, res) => {
         const montoPendiente = montoAcordado - totalPagado;
 
         if (montoPendiente > 0.1) { // Error de redondeo
+          const invService = services.find(s => s.invoice?.id === inv.id);
+          const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
           pendingItems.push({
             buildingName: building.name,
             address: building.address || building.name,
-            date: inv.date,
+            date: serviceDate,
             number: inv.number || 'N/A',
             amount: montoPendiente,
             type: 'Factura'

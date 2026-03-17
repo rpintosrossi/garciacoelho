@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { getFileUrl } = require('../utils/fileUtils');
 
 const prisma = new PrismaClient();
 
@@ -120,6 +121,15 @@ const updateInvoice = async (req, res) => {
   try {
     const { id } = req.params;
     const { amount, status } = req.body;
+    let fileUrl;
+
+    if (req.file) {
+      if (req.file.location) {
+        fileUrl = req.file.location;
+      } else {
+        fileUrl = getFileUrl(req.file.filename);
+      }
+    }
 
     // Obtener la factura actual para calcular diferencias si es necesario
     const currentInvoice = await prisma.invoice.findUnique({
@@ -142,7 +152,8 @@ const updateInvoice = async (req, res) => {
       where: { id },
       data: {
         ...(amount !== undefined && { amount: parseFloat(amount) }),
-        ...(status !== undefined && { status })
+        ...(status !== undefined && { status }),
+        ...(fileUrl && { fileUrl })
       },
       include: {
         services: {

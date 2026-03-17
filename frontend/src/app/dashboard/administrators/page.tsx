@@ -37,6 +37,7 @@ interface Administrator {
   administratorName?: string;
   email: string;
   phone: string;
+  cuit?: string;
   phones?: string[];
   phoneNames?: string[];
   emails?: string[];
@@ -231,6 +232,7 @@ const AdministratorsPage = () => {
               <TableCell>Nombre</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Teléfono</TableCell>
+              <TableCell>CUIT</TableCell>
               <TableCell>Saldo</TableCell>
               <TableCell>Acciones</TableCell>
             </TableRow>
@@ -241,6 +243,7 @@ const AdministratorsPage = () => {
                 <TableCell>{administrator.name}</TableCell>
                 <TableCell>{administrator.email}</TableCell>
                 <TableCell>{administrator.phone || '-'}</TableCell>
+                <TableCell>{administrator.cuit || '-'}</TableCell>
                 <TableCell>{formatCurrency(administrator.saldoTotal)}</TableCell>
                 <TableCell>
                   <IconButton color="primary" onClick={() => handleOpen(administrator)}>
@@ -257,7 +260,7 @@ const AdministratorsPage = () => {
             ))}
             {/* Fila de total */}
             <TableRow sx={{ backgroundColor: 'grey.100', fontWeight: 'bold' }}>
-              <TableCell colSpan={3} align="right" sx={{ fontWeight: 'bold' }}>
+              <TableCell colSpan={4} align="right" sx={{ fontWeight: 'bold' }}>
                 <Typography variant="subtitle1" fontWeight="bold">
                   SALDO TOTAL:
                 </Typography>

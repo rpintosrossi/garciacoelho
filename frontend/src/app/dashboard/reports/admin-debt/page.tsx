@@ -21,7 +21,9 @@ import {
   Button,
   Stack,
   IconButton,
-  Tooltip
+  Tooltip,
+  Pagination,
+  InputAdornment
 } from '@mui/material';
 import {
   Assignment as AssignmentIcon,
@@ -60,6 +62,8 @@ export default function AdminDebtReport() {
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     fetchReport();
@@ -76,6 +80,7 @@ export default function AdminDebtReport() {
 
       const response = await api.get('/reports/admin-debt', { params });
       setReports(response.data);
+      setPage(1);
     } catch (err) {
       setError('Error al cargar el reporte de deuda de administradores');
     } finally {
@@ -118,6 +123,9 @@ export default function AdminDebtReport() {
   const getTotalBuildings = () => {
     return reports.reduce((sum, report) => sum + report.buildings.length, 0);
   };
+
+  const totalPages = Math.max(1, Math.ceil(reports.length / PAGE_SIZE));
+  const paginated = reports.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   if (loading) {
     return (
@@ -183,8 +191,8 @@ export default function AdminDebtReport() {
                 setStartDate('');
                 setEndDate('');
                 setSearchQuery('');
-                // El efecto se encargará de recargar si cambian las fechas
-                if (!startDate && !endDate) fetchReport(); // Si solo era texto, forzar recarga
+                setPage(1);
+                if (!startDate && !endDate) fetchReport();
               }}
             >
               Limpiar
@@ -247,6 +255,7 @@ export default function AdminDebtReport() {
           No hay administradores con deuda pendiente.
         </Alert>
       ) : (
+        <>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -260,7 +269,7 @@ export default function AdminDebtReport() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {reports.map((report) => (
+              {paginated.map((report) => (
                 <TableRow key={report.administratorId}>
                   <TableCell>
                     <Typography variant="subtitle2" fontWeight="bold">
@@ -319,6 +328,21 @@ export default function AdminDebtReport() {
             </TableBody>
           </Table>
         </TableContainer>
+        {totalPages > 1 && (
+          <Box display="flex" justifyContent="center" alignItems="center" mt={2} gap={2}>
+            <Typography variant="body2" color="text.secondary">
+              {reports.length} resultado{reports.length !== 1 ? 's' : ''} — Página {page} de {totalPages}
+            </Typography>
+            <Pagination
+              count={totalPages}
+              page={page}
+              onChange={(_, v) => setPage(v)}
+              color="primary"
+              size="small"
+            />
+          </Box>
+        )}
+        </>
       )}
     </Box>
   );

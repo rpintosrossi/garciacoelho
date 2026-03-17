@@ -13,11 +13,13 @@ const {
   getAvailableLocalities,
   getBuildingAccountDetails,
   createBuildingPayment,
-  getBuildingServiceHistory
+  getBuildingServiceHistory,
+  searchBuildingsAutocomplete
 } = require('../controllers/buildingController');
 
 // Rutas protegidas con autenticación y roles
 router.get('/', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildings);
+router.get('/search/autocomplete', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), searchBuildingsAutocomplete);
 router.get('/localities/available', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getAvailableLocalities);
 router.get('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingById);
 router.get('/:id/service-history', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingServiceHistory);

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const upload = require('../middleware/upload');
 const { 
   getAllInvoices, 
   getInvoiceById, 
@@ -22,7 +23,7 @@ router.get('/:id', roleMiddleware(['ADMIN', 'OPERADOR']), getInvoiceById);
 router.post('/', roleMiddleware(['ADMIN', 'OPERADOR']), createInvoice);
 
 // Actualizar factura (solo ADMIN u OPERADOR)
-router.put('/:id', roleMiddleware(['ADMIN', 'OPERADOR']), updateInvoice);
+router.put('/:id', roleMiddleware(['ADMIN', 'OPERADOR']), upload.single('file'), updateInvoice);
 
 // Eliminar factura (solo ADMIN)
 router.delete('/:id', roleMiddleware(['ADMIN']), deleteInvoice);

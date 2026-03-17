@@ -21,6 +21,7 @@ interface Administrator {
   administratorName?: string;
   email: string;
   phone: string;
+  cuit?: string;
   phones?: string[];
   phoneNames?: string[];
   emails?: string[];
@@ -42,6 +43,7 @@ const validationSchema = Yup.object({
   administratorName: Yup.string(),
   email: Yup.string().email("Email inválido").required("El email es obligatorio"),
   phone: Yup.string().required("El teléfono es obligatorio"),
+  cuit: Yup.string(),
   phones: Yup.array().of(Yup.string()),
   phoneNames: Yup.array().of(Yup.string()),
   emails: Yup.array().of(Yup.string().email("Email inválido")),
@@ -63,6 +65,7 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
       administratorName: "",
       email: "",
       phone: "",
+      cuit: "",
       phones: [],
       phoneNames: [],
       emails: [],
@@ -109,6 +112,7 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
           administratorName: editing.administratorName || "",
           email: editing.email || "",
           phone: editing.phone || "",
+          cuit: editing.cuit || "",
           phones: editing.phones || [],
           phoneNames: editing.phoneNames || [],
           emails: editing.emails || [],
@@ -187,6 +191,16 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
             onChange={formik.handleChange}
             error={formik.touched.phone && Boolean(formik.errors.phone)}
             helperText={formik.touched.phone && formik.errors.phone}
+          />
+          <TextField
+            margin="dense"
+            label="CUIT"
+            name="cuit"
+            fullWidth
+            value={formik.values.cuit}
+            onChange={formik.handleChange}
+            error={formik.touched.cuit && Boolean(formik.errors.cuit)}
+            helperText={formik.touched.cuit && formik.errors.cuit}
           />
           <TextField
             margin="dense"

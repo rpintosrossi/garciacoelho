@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -25,8 +25,14 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
+  TextField,
+  InputAdornment,
+  Pagination,
 } from '@mui/material';
-import { ExpandMore, PictureAsPdf } from '@mui/icons-material';
+import { ExpandMore, PictureAsPdf, Search as SearchIcon } from '@mui/icons-material';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
@@ -34,12 +40,15 @@ import { useCommonData } from '@/contexts/CommonDataContext';
 interface Transaction {
   type: 'invoice' | 'payment' | 'remito_sin_factura';
   id: string;
+  number?: string;
+  date?: string;
   amount: number;
   status: string;
   createdAt: string;
   service?: {
     id: string;
     description: string;
+    visitDate?: string;
     building: {
       name: string;
       address: string;
@@ -120,6 +129,22 @@ export default function PackagePage() {
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [downloadMode, setDownloadMode] = useState<'single' | 'split'>('single');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  const filteredPackages = useMemo(() => {
+    if (!search.trim()) return packages;
+    const q = search.trim().toLowerCase();
+    return packages.filter(pkg =>
+      pkg.administrator.name.toLowerCase().includes(q) ||
+      pkg.administrator.email.toLowerCase().includes(q)
+    );
+  }, [packages, search]);
+
+  const totalPages = Math.ceil(filteredPackages.length / PAGE_SIZE);
+  const paginatedPackages = filteredPackages.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   useEffect(() => {
     fetchPackages();
@@ -246,22 +271,77 @@ export default function PackagePage() {
     try {
       setDownloading(selectedAdminId);
       setShowPaymentMethodModal(false);
-      
-      const response = await cachedApi.get(`/packages/${selectedAdminId}/download`, {
-        params: { paymentMethodId: selectedPaymentMethod },
-        responseType: 'blob'
-      });
 
-      // Crear URL del blob y descargar
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `paquete-${selectedAdminId}-${new Date().toISOString().split('T')[0]}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      const adminData = packages.find(p => p.administrator.id === selectedAdminId);
+      const adminName = adminData?.administrator.name?.replace(/\s+/g, '_') || selectedAdminId;
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      if (downloadMode === 'split') {
+        // Descargar como ZIP con archivos separados
+        const response = await cachedApi.get(`/packages/${selectedAdminId}/download`, {
+          params: { paymentMethodId: selectedPaymentMethod, mode: 'split' },
+          responseType: 'blob'
+        });
+
+        const blob = new Blob([response.data], { type: 'application/zip' });
+        const suggestedName = `paquete-${adminName}-separado-${dateStr}.zip`;
+
+        if ('showSaveFilePicker' in window) {
+          try {
+            const fileHandle = await (window as any).showSaveFilePicker({
+              suggestedName,
+              types: [{ description: 'Archivo ZIP', accept: { 'application/zip': ['.zip'] } }],
+            });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } catch (pickerErr: any) {
+            if (pickerErr?.name !== 'AbortError') throw pickerErr;
+          }
+        } else {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = suggestedName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        }
+
+      } else {
+        // Descargar como un solo PDF (comportamiento anterior)
+        const response = await cachedApi.get(`/packages/${selectedAdminId}/download`, {
+          params: { paymentMethodId: selectedPaymentMethod },
+          responseType: 'blob'
+        });
+
+        const blob = new Blob([response.data], { type: 'application/pdf' });
+        const suggestedName = `paquete-${adminName}-${dateStr}.pdf`;
+
+        if ('showSaveFilePicker' in window) {
+          try {
+            const fileHandle = await (window as any).showSaveFilePicker({
+              suggestedName,
+              types: [{ description: 'Archivo PDF', accept: { 'application/pdf': ['.pdf'] } }],
+            });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } catch (pickerErr: any) {
+            if (pickerErr?.name !== 'AbortError') throw pickerErr;
+          }
+        } else {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = suggestedName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        }
+      }
     } catch (err) {
       console.error('Error downloading package:', err);
       setError('Error al descargar el paquete');
@@ -292,6 +372,22 @@ export default function PackagePage() {
       <Typography variant="h4" gutterBottom>
         Paquetes de Facturación
       </Typography>
+
+      <Box sx={{ mb: 3 }}>
+        <TextField
+          fullWidth
+          placeholder="Buscar por nombre o email del administrador..."
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Box>
       
       {packages.length === 0 ? (
         <Paper sx={{ p: 3, textAlign: 'center' }}>
@@ -302,9 +398,16 @@ export default function PackagePage() {
             Las facturas aparecerán aquí una vez que se creen
           </Typography>
         </Paper>
+      ) : filteredPackages.length === 0 ? (
+        <Paper sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary">
+            No se encontraron resultados para "{search}"
+          </Typography>
+        </Paper>
       ) : (
-        <Stack spacing={2}>
-          {packages.map((pkg) => (
+        <>
+          <Stack spacing={2}>
+            {paginatedPackages.map((pkg) => (
             <Accordion key={pkg.administrator.id}>
               <AccordionSummary expandIcon={<ExpandMore />}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
@@ -388,8 +491,8 @@ export default function PackagePage() {
                                 {transaction.building?.address || transaction.service?.building?.address || 'Sin dirección'}
                               </Typography>
                               <Typography component="span" variant="body2" color="text.secondary" display="block">
-                                {transaction.type === 'invoice' ? 'Factura' : 'Comprobante'}: {transaction.type === 'invoice' ? transaction.id.slice(0, 8) : transaction.comprobante} | 
-                                Fecha: {new Date(transaction.createdAt).toLocaleDateString()} |
+                                {transaction.type === 'invoice' ? 'Factura' : 'Comprobante'}: {transaction.type === 'invoice' ? (transaction.number || transaction.id.slice(0, 8)) : transaction.comprobante} | 
+                                Fecha: {new Date(transaction.remitos?.[0]?.date || transaction.service?.remitos?.[0]?.date || transaction.service?.visitDate || transaction.date || transaction.createdAt).toLocaleDateString('es-AR')} |
                                 Técnico: {transaction.technician?.name || transaction.service?.technician?.name || 'No asignado'}
                               </Typography>
                               {transaction.remitos && transaction.remitos.length > 0 && (
@@ -430,6 +533,18 @@ export default function PackagePage() {
             </Accordion>
           ))}
         </Stack>
+
+          {totalPages > 1 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              <Pagination
+                count={totalPages}
+                page={page}
+                onChange={(_, value) => setPage(value)}
+                color="primary"
+              />
+            </Box>
+          )}
+        </>
       )}
 
       {/* Modal para seleccionar método de pago */}
@@ -454,6 +569,34 @@ export default function PackagePage() {
                 ))}
               </Select>
             </FormControl>
+
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Formato de descarga:
+              </Typography>
+              <RadioGroup
+                value={downloadMode}
+                onChange={(e) => setDownloadMode(e.target.value as 'single' | 'split')}
+              >
+                <FormControlLabel
+                  value="single"
+                  control={<Radio />}
+                  label="PDF único (todo en un archivo)"
+                />
+                <FormControlLabel
+                  value="split"
+                  control={<Radio />}
+                  label={
+                    <Box>
+                      <Typography variant="body2">Archivos separados (ZIP)</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        1 archivo con resumen + datos bancarios, y 1 archivo por cada edificio (factura + remito)
+                      </Typography>
+                    </Box>
+                  }
+                />
+              </RadioGroup>
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

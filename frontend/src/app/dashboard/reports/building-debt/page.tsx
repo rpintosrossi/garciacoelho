@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -15,16 +15,21 @@ import {
   Alert,
   Chip,
   Card,
-  CardContent
+  CardContent,
+  TextField,
+  Pagination,
+  InputAdornment
 } from '@mui/material';
 import {
   Business as BuildingIcon,
   Person as PersonIcon,
-  AttachMoney as MoneyIcon
+  AttachMoney as MoneyIcon,
+  Search as SearchIcon
 } from '@mui/icons-material';
-import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { cachedApi } from '@/lib/axios';
+
+const PAGE_SIZE = 10;
 
 interface BuildingDebtReport {
   buildingId: string;
@@ -46,6 +51,8 @@ export default function BuildingDebtReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reports, setReports] = useState<BuildingDebtReport[]>([]);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     fetchReport();
@@ -64,17 +71,27 @@ export default function BuildingDebtReport() {
     }
   };
 
-  const getTotalDebt = () => {
-    return reports.reduce((sum, report) => sum + report.totalDebt, 0);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return reports;
+    return reports.filter(r =>
+      r.buildingName.toLowerCase().includes(q) ||
+      r.buildingAddress.toLowerCase().includes(q) ||
+      r.administratorName.toLowerCase().includes(q)
+    );
+  }, [reports, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setPage(1);
   };
 
-  const getTotalBuildings = () => {
-    return reports.length;
-  };
-
-  const getTotalDocuments = () => {
-    return reports.reduce((sum, report) => sum + report.pendingDocuments.length, 0);
-  };
+  const getTotalDebt = () => reports.reduce((sum, r) => sum + r.totalDebt, 0);
+  const getTotalBuildings = () => reports.length;
+  const getTotalDocuments = () => reports.reduce((sum, r) => sum + r.pendingDocuments.length, 0);
 
   if (loading) {
     return (
@@ -147,11 +164,34 @@ export default function BuildingDebtReport() {
         </Card>
       </Box>
 
+      {/* Buscador */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Buscar por edificio, dirección o administrador..."
+          value={search}
+          onChange={(e) => handleSearch(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            )
+          }}
+        />
+      </Paper>
+
       {reports.length === 0 ? (
         <Alert severity="info">
           No hay edificios con deuda pendiente.
         </Alert>
+      ) : filtered.length === 0 ? (
+        <Alert severity="info">
+          No se encontraron resultados para "{search}".
+        </Alert>
       ) : (
+        <>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -164,7 +204,7 @@ export default function BuildingDebtReport() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {reports.map((report) => (
+              {paginated.map((report) => (
                 <TableRow key={report.buildingId}>
                   <TableCell>
                     <Typography variant="subtitle2" fontWeight="bold">
@@ -212,6 +252,21 @@ export default function BuildingDebtReport() {
             </TableBody>
           </Table>
         </TableContainer>
+        {totalPages > 1 && (
+          <Box display="flex" justifyContent="center" alignItems="center" mt={2} gap={2}>
+            <Typography variant="body2" color="text.secondary">
+              {filtered.length} resultado{filtered.length !== 1 ? 's' : ''} — Página {page} de {totalPages}
+            </Typography>
+            <Pagination
+              count={totalPages}
+              page={page}
+              onChange={(_, v) => setPage(v)}
+              color="primary"
+              size="small"
+            />
+          </Box>
+        )}
+        </>
       )}
     </Box>
   );

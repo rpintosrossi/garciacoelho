@@ -14,7 +14,8 @@ const getAdministrators = async (req, res) => {
         whereClause = {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
-            { email: { contains: search, mode: 'insensitive' } }
+            { email: { contains: search, mode: 'insensitive' } },
+            { cuit: { contains: search, mode: 'insensitive' } }
           ]
         };
       }
@@ -27,6 +28,7 @@ const getAdministrators = async (req, res) => {
           name: true,
           email: true,
           phone: true,
+          cuit: true,
           phones: true,
           phoneNames: true,
           emails: true,
@@ -51,7 +53,8 @@ const getAdministrators = async (req, res) => {
       whereClause = {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } }
+          { email: { contains: search, mode: 'insensitive' } },
+          { cuit: { contains: search, mode: 'insensitive' } }
         ]
       };
     }
@@ -230,7 +233,7 @@ const getAdministratorById = async (req, res) => {
 // Crear un nuevo administrador
 const createAdministrator = async (req, res) => {
   try {
-    const { name, administratorName, email, phone, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
+    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: { email }
@@ -246,6 +249,7 @@ const createAdministrator = async (req, res) => {
         administratorName: administratorName || null,
         email,
         phone,
+        cuit: cuit || null,
         phones: phones || [],
         phoneNames: phoneNames || [],
         emails: emails || [],
@@ -265,7 +269,7 @@ const createAdministrator = async (req, res) => {
 const updateAdministrator = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, administratorName, email, phone, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
+    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: {
@@ -287,6 +291,7 @@ const updateAdministrator = async (req, res) => {
         administratorName,
         email,
         phone,
+        cuit: cuit || null,
         phones,
         phoneNames,
         emails,

@@ -178,10 +178,10 @@ export default function PaymentsPage() {
     setLoadingBuildingSearch(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await api.get(`/buildings?search=${searchTerm}`, {
+      const res = await api.get(`/buildings/search/autocomplete?search=${encodeURIComponent(searchTerm)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setBuildings(res.data.buildings || res.data);
+      setBuildings(res.data || []);
     } catch (err) {
       console.error('Error al buscar edificios:', err);
     } finally {
@@ -584,7 +584,8 @@ export default function PaymentsPage() {
           <Box sx={{ pt: 2 }}>
             <Autocomplete
               options={buildings}
-              getOptionLabel={(option) => `${option.name} - ${option.cuit}`}
+              filterOptions={(x) => x}
+              getOptionLabel={(option) => `${option.name} - ${option.cuit}${option.administrator ? ' - ' + option.administrator.name : ''}`}
               loading={loadingBuildingSearch}
               onInputChange={(_, value) => {
                 setBuildingSearchInput(value);
@@ -598,7 +599,7 @@ export default function PaymentsPage() {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Buscar por nombre o CUIT"
+                  label="Buscar por nombre, CUIT de edificio o administrador"
                   placeholder="Escribe al menos 2 caracteres..."
                   InputProps={{
                     ...params.InputProps,
@@ -622,6 +623,11 @@ export default function PaymentsPage() {
                       <Typography variant="caption" color="text.secondary">
                         CUIT: {option.cuit} | {option.address}
                       </Typography>
+                      {option.administrator && (
+                        <Typography variant="caption" color="text.secondary" display="block">
+                          Administrador: {option.administrator.name}
+                        </Typography>
+                      )}
                     </Box>
                   </Box>
                 );

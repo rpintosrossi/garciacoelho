@@ -330,7 +330,12 @@ const deleteService = async (req, res) => {
     // Verificar si el servicio existe
     const service = await prisma.service.findUnique({
       where: { id },
-      include: { invoice: true }
+      include: { 
+        invoice: true,
+        remitos: {
+          include: { paymentDocuments: true }
+        }
+      }
     });
 
     if (!service) {
@@ -339,10 +344,10 @@ const deleteService = async (req, res) => {
       });
     }
 
-    // Solo permitir eliminación si el servicio está en estado PENDIENTE
-    if (service.status !== 'PENDIENTE') {
+    // Permitir eliminación si está en PENDIENTE o CON_REMITO (pendiente de facturación)
+    if (service.status !== 'PENDIENTE' && service.status !== 'CON_REMITO') {
       return res.status(400).json({ 
-        message: 'Solo se pueden eliminar servicios en estado de Asignación (pendientes de técnico)' 
+        message: 'Solo se pueden eliminar servicios en estado Pendiente o con Remito pendiente de facturación' 
       });
     }
 
@@ -353,8 +358,23 @@ const deleteService = async (req, res) => {
       });
     }
 
-    await prisma.service.delete({
-      where: { id }
+    // Eliminar en transacción: PaymentDocuments de remitos → Remitos → Servicio
+    await prisma.$transaction(async (tx) => {
+      for (const remito of service.remitos) {
+        if (remito.paymentDocuments.length > 0) {
+          await tx.paymentDocument.deleteMany({
+            where: { remitoId: remito.id }
+          });
+        }
+      }
+      if (service.remitos.length > 0) {
+        await tx.remito.deleteMany({
+          where: { serviceId: id }
+        });
+      }
+      await tx.service.delete({
+        where: { id }
+      });
     });
 
     res.json({ message: 'Servicio eliminado correctamente' });
@@ -1187,7 +1207,9 @@ const createInvoice = async (req, res) => {
       prisma.invoice.create({
         data: {
           serviceId: id,
+          number: invoiceNumber ? String(invoiceNumber).trim() : null,
           amount: parseFloat(invoiceAmount),
+          date: invoiceDate ? new Date(invoiceDate) : new Date(),
           status: 'EMITIDA'
         }
       }),

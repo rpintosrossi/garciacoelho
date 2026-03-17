@@ -41,7 +41,8 @@ import {
   HourglassEmpty,
   Build,
   Download,
-  Edit
+  Edit,
+  Delete
 } from "@mui/icons-material";
 
 interface Payment {
@@ -138,10 +139,16 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   
+  // Delete Service State
+  const [deleteServiceOpen, setDeleteServiceOpen] = useState(false);
+  const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
+  const [deletingService, setDeletingService] = useState(false);
+
   // Edit Invoice State
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<{id: string, amount: number} | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [errorEdit, setErrorEdit] = useState<string | null>(null);
 
@@ -278,9 +285,38 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     doc.save(`Historial_${data.building.name.replace(/\s+/g, '_')}.pdf`);
   };
 
+  const handleDeleteServiceClick = (serviceId: string) => {
+    setDeletingServiceId(serviceId);
+    setDeleteServiceOpen(true);
+  };
+
+  const handleDeleteServiceClose = () => {
+    setDeleteServiceOpen(false);
+    setDeletingServiceId(null);
+  };
+
+  const handleConfirmDeleteService = async () => {
+    if (!deletingServiceId) return;
+    setDeletingService(true);
+    try {
+      const token = localStorage.getItem('token');
+      await api.delete(`/services/${deletingServiceId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      await fetchHistory();
+      handleDeleteServiceClose();
+    } catch (err: any) {
+      console.error('Error eliminando servicio:', err);
+      alert(err?.response?.data?.message || 'Error al eliminar el servicio');
+    } finally {
+      setDeletingService(false);
+    }
+  };
+
   const handleEditClick = (invoice: {id: string, amount: number}) => {
     setSelectedInvoice(invoice);
     setEditAmount(invoice.amount.toString());
+    setInvoiceFile(null);
     setEditInvoiceOpen(true);
     setErrorEdit(null);
   };
@@ -289,6 +325,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     setEditInvoiceOpen(false);
     setSelectedInvoice(null);
     setEditAmount('');
+    setInvoiceFile(null);
     setErrorEdit(null);
   };
 
@@ -306,10 +343,18 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
     try {
       const token = localStorage.getItem("token");
-      await api.put(`/invoices/${selectedInvoice.id}`, {
-        amount: amount
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
+      
+      const formData = new FormData();
+      formData.append('amount', amount.toString());
+      if (invoiceFile) {
+        formData.append('file', invoiceFile);
+      }
+      
+      await api.put(`/invoices/${selectedInvoice.id}`, formData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
       });
       
       // Update local state or refetch
@@ -526,7 +571,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                 </IconButton>
                               )}
                             </TableCell>
-                            <TableCell>{formatDate(service.createdAt)}</TableCell>
+                            <TableCell>{formatDate(service.remitos?.[0]?.date || service.visitDate || service.createdAt)}</TableCell>
                             <TableCell>
                               <Typography variant="body2" fontWeight="medium">
                                 {service.name}
@@ -547,7 +592,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                               {totalService > 0 ? formatCurrency(totalService) : '-'}
                             </TableCell>
                             <TableCell>
-                              <Box display="flex" gap={0.5}>
+                              <Box display="flex" gap={0.5} alignItems="center">
                                 {service.invoice && (
                                   <Chip
                                     icon={<Description />}
@@ -563,6 +608,16 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                     size="small"
                                     color="warning"
                                   />
+                                )}
+                                {service.status === 'CON_REMITO' && !service.invoice && (
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    title="Eliminar servicio"
+                                    onClick={() => handleDeleteServiceClick(service.id)}
+                                  >
+                                    <Delete fontSize="small" sx={{ fontSize: '1rem' }} />
+                                  </IconButton>
                                 )}
                               </Box>
                             </TableCell>
@@ -816,6 +871,28 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       </DialogActions>
     </Dialog>
 
+    <Dialog open={deleteServiceOpen} onClose={handleDeleteServiceClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Eliminar Servicio</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            ¿Estás seguro que querés eliminar este servicio? Se eliminarán también todos sus remitos asociados. Esta acción no se puede deshacer.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteServiceClose} disabled={deletingService}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleConfirmDeleteService}
+            variant="contained"
+            color="error"
+            disabled={deletingService}
+          >
+            {deletingService ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     <Dialog open={editInvoiceOpen} onClose={handleEditClose} maxWidth="sm" fullWidth>
         <DialogTitle>Editar Monto de Factura</DialogTitle>
         <DialogContent>
@@ -836,6 +913,38 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                 startAdornment: <InputAdornment position="start">$</InputAdornment>,
               }}
             />
+            
+            <Box mt={2} mb={1}>
+              <Typography variant="subtitle2" gutterBottom>
+                Actualizar archivo de factura
+              </Typography>
+              <input
+                accept="application/pdf,image/*"
+                style={{ display: 'none' }}
+                id="invoice-file-upload"
+                type="file"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    setInvoiceFile(e.target.files[0]);
+                  }
+                }}
+              />
+              <label htmlFor="invoice-file-upload">
+                <Button variant="outlined" component="span" fullWidth>
+                  {invoiceFile ? invoiceFile.name : 'Seleccionar Archivo'}
+                </Button>
+              </label>
+              {invoiceFile && (
+                <Button 
+                  size="small" 
+                  color="warning" 
+                  onClick={() => setInvoiceFile(null)}
+                  sx={{ mt: 1 }}
+                >
+                  Quitar archivo seleccionado
+                </Button>
+              )}
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

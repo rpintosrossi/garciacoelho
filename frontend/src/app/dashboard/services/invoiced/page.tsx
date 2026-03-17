@@ -28,11 +28,13 @@ import {
   Select,
   MenuItem,
   Checkbox,
-  Chip
+  Chip,
+  IconButton
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import axios from '@/lib/axios';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
@@ -88,6 +90,40 @@ export default function InvoicedServices() {
   const router = useRouter();
   const [openRemito, setOpenRemito] = useState(false);
   const [remitoService, setRemitoService] = useState<Service | null>(null);
+
+  // Delete service state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [serviceToDelete, setServiceToDelete] = useState<string | null>(null);
+  const [deletingService, setDeletingService] = useState(false);
+
+  const handleDeleteClick = (serviceId: string) => {
+    setServiceToDelete(serviceId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteClose = () => {
+    setDeleteDialogOpen(false);
+    setServiceToDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!serviceToDelete) return;
+    setDeletingService(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`/services/${serviceToDelete}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      handleDeleteClose();
+      cachedApi.clearCacheFor('/services');
+      await fetchServices();
+    } catch (err: any) {
+      console.error('Error eliminando servicio:', err);
+      alert(err?.response?.data?.message || 'Error al eliminar el servicio');
+    } finally {
+      setDeletingService(false);
+    }
+  };
   const [remitoAmount, setRemitoAmount] = useState('');
   const [remitoDate, setRemitoDate] = useState<Date | null>(new Date());
   const [remitoPaymentMethod, setRemitoPaymentMethod] = useState('CUENTA_CORRIENTE');
@@ -144,8 +180,26 @@ export default function InvoicedServices() {
   };
 
   useEffect(() => {
+    // Limpiar caché al entrar a la página para siempre obtener datos frescos
+    cachedApi.clearCacheFor('/services');
+  }, []);
+
+  useEffect(() => {
     fetchServices();
   }, [pagination.page, selectedAdmin, selectedBuilding]);
+
+  // Escuchar eventos de actualización de servicios (ej: cuando se sube un remito desde otra vista)
+  useEffect(() => {
+    const handleServicesChanged = () => {
+      cachedApi.clearCacheFor('/services');
+      fetchServices();
+    };
+
+    window.addEventListener('servicesChanged', handleServicesChanged);
+    return () => {
+      window.removeEventListener('servicesChanged', handleServicesChanged);
+    };
+  }, []);
 
   const handleAdminChange = (_: any, newValue: any) => {
     setSelectedAdmin(newValue);
@@ -746,6 +800,13 @@ export default function InvoicedServices() {
                       >
                         Ver Detalles
                       </Button>
+                      <IconButton
+                        color="error"
+                        title="Eliminar servicio"
+                        onClick={() => handleDeleteClick(service.id)}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
                     </Stack>
                   </Box>
                 </TableCell>
@@ -765,6 +826,21 @@ export default function InvoicedServices() {
           />
         </Box>
       )}
+      <Dialog open={deleteDialogOpen} onClose={handleDeleteClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Eliminar Servicio</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            ¿Estás seguro que querés eliminar este servicio? Se eliminarán también todos sus remitos asociados. Esta acción no se puede deshacer.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteClose} disabled={deletingService}>Cancelar</Button>
+          <Button onClick={handleConfirmDelete} variant="contained" color="error" disabled={deletingService}>
+            {deletingService ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={openRemito} onClose={handleCloseRemito} fullWidth maxWidth="sm">
         <DialogTitle>Cobro sin Factura</DialogTitle>
         <DialogContent>

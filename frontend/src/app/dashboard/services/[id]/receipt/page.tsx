@@ -15,6 +15,7 @@ import {
   Stack,
 } from '@mui/material';
 import api from '@/lib/axios';
+import { cachedApi } from '@/lib/axios';
 
 interface Building {
   id: string;
@@ -107,6 +108,8 @@ export default function ReceiptPage() {
           'Content-Type': 'multipart/form-data',
         },
       });
+      cachedApi.clearCacheFor('/services');
+      window.dispatchEvent(new Event('servicesChanged'));
       router.push('/dashboard/services/invoiced');
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || 'Error al subir el remito';
