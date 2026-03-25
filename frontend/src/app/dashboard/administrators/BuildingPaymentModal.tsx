@@ -28,6 +28,7 @@ interface PendingDocument {
   date: string;
   description: string;
   buildingName: string;
+  number?: string | null;
 }
 
 interface PaymentMethod {
@@ -59,6 +60,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
   const [discountType, setDiscountType] = useState<'manual' | 'percentage'>('manual');
   const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   const [discountReason, setDiscountReason] = useState("");
+  const [comment, setComment] = useState("");
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -87,6 +89,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
       setDiscountType('manual');
       setDiscountPercentage(0);
       setDiscountReason("");
+      setComment("");
       setPaymentMethod(null);
       setPaymentDate(new Date().toISOString().slice(0, 10));
     }
@@ -298,6 +301,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
         date: paymentDate,
         paymentMethodId: paymentMethod?.id,
         comprobante: `PAGO-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`,
+        comment: comment || null,
         documents: []
       };
 
@@ -345,8 +349,9 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
               options={pendingDocs}
               getOptionLabel={option => {
                 const tipo = option.type === 'REMITO' ? 'Remito' : 'Factura';
+                const numero = option.number ? ` #${option.number}` : '';
                 const fecha = option.date ? new Date(option.date).toLocaleDateString() : '-';
-                return `${tipo} - ${fecha} - ${formatCurrency(option.amount)}`;
+                return `${tipo}${numero} - ${fecha} - ${formatCurrency(option.amount)}`;
               }}
               value={selectedDocs}
               onChange={(_, value) => setSelectedDocs(value)}
@@ -356,7 +361,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                 <li {...props} key={option.id}>
                   <Box>
                     <Typography variant="body2">
-                      {option.type === 'REMITO' ? 'Remito' : 'Factura'} - {option.date ? new Date(option.date).toLocaleDateString() : '-'} - {formatCurrency(option.amount)}
+                      {option.type === 'REMITO' ? 'Remito' : 'Factura'}{option.number ? ` #${option.number}` : ''} - {option.date ? new Date(option.date).toLocaleDateString() : '-'} - {formatCurrency(option.amount)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {option.description}
@@ -454,6 +459,19 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                   </Typography>
                 </Box>
               )}
+            </Box>
+
+            {/* Comentario */}
+            <Box mt={2}>
+              <TextField
+                label="Comentario (opcional)"
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+                fullWidth
+                multiline
+                rows={2}
+                placeholder="Notas internas sobre este pago..."
+              />
             </Box>
 
             {/* Monto final */}

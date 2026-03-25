@@ -149,7 +149,7 @@ export default function PackagePage() {
   useEffect(() => {
     fetchPackages();
     fetchPaymentMethods();
-  }, [administrators]); // Agregar administrators como dependencia
+  }, []); // Solo al montar — el administrador viene directo de la API
 
   // Escuchar cambios en paquetes para actualizar automáticamente
   useEffect(() => {
@@ -224,10 +224,11 @@ export default function PackagePage() {
         console.log('🔍 [FRONTEND] Administrador de la transacción:', transaction.administrator);
         
         if (!packagesByAdmin[adminId]) {
-          const admin = administrators.find(a => a.id === adminId);
-          console.log('🔍 [FRONTEND] Administrador encontrado en contexto:', admin);
+          // Usar el administrador directamente del API response (ya viene incluido)
+          const adminFromApi = transaction.administrator;
+          const adminFromCtx = administrators.find(a => a.id === adminId);
           packagesByAdmin[adminId] = {
-            administrator: admin || {
+            administrator: adminFromApi || adminFromCtx || {
               id: adminId,
               name: 'Administrador no encontrado',
               email: '',

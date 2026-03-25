@@ -169,6 +169,7 @@ model Payment {
   discount        Float             @default(0)
   discountReason  String?
   originalAmount  Float?
+  comment         String?
   paymentMethod   PaymentMethod?    @relation(fields: [paymentMethodId], references: [id])
   documents       PaymentDocument[]
 

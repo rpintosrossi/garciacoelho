@@ -529,7 +529,7 @@ const createAdminMassivePayment = async (req, res) => {
     console.log('💰 [MASSIVE PAYMENT] Iniciando pago masivo...');
     console.log('💰 [MASSIVE PAYMENT] Body recibido:', req.body);
     
-    const { amount, date, paymentMethodId, docsToAssociate, originalAmount, discount, discountReason } = req.body;
+    const { amount, date, paymentMethodId, docsToAssociate, originalAmount, discount, discountReason, comment } = req.body;
     if (!amount || !date || !paymentMethodId || !docsToAssociate || docsToAssociate.length === 0) {
       console.log('❌ [MASSIVE PAYMENT] Faltan datos obligatorios');
       return res.status(400).json({ message: 'Faltan datos obligatorios' });
@@ -569,6 +569,7 @@ const createAdminMassivePayment = async (req, res) => {
         originalAmount: montoOriginal,
         discount: montoDescuento,
         discountReason: discountReason || null,
+        comment: comment || null,
         date: paymentDate,
         paymentMethodId,
         comprobante,

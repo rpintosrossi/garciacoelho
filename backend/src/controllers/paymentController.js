@@ -14,7 +14,8 @@ const createPayment = async (req, res) => {
       docsToAssociate, 
       originalAmount, 
       discount, 
-      discountReason 
+      discountReason,
+      comment
     } = req.body;
     
     if (!amount || !date || !paymentMethodId) {
@@ -77,6 +78,7 @@ const createPayment = async (req, res) => {
         paymentMethodId,
         comprobante,
         method: '',
+        comment: comment || null,
       }
     });
     
@@ -203,11 +205,19 @@ const getBuildingPayments = async (req, res) => {
     // Primero buscar edificios que coincidan con el filtro
     let buildingIds = [];
     if (search) {
+      // Buscar administradores que coincidan con el nombre
+      const matchingAdmins = await prisma.administrator.findMany({
+        where: { name: { contains: search, mode: 'insensitive' } },
+        select: { id: true }
+      });
+      const adminIds = matchingAdmins.map(a => a.id);
+
       const buildings = await prisma.building.findMany({
         where: {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
-            { cuit: { contains: search, mode: 'insensitive' } }
+            { cuit: { contains: search, mode: 'insensitive' } },
+            ...(adminIds.length > 0 ? [{ administratorId: { in: adminIds } }] : [])
           ]
         },
         select: { id: true }
@@ -319,6 +329,7 @@ const getBuildingPayments = async (req, res) => {
         discountReason: payment.discountReason,
         date: payment.date,
         comprobante: payment.comprobante,
+        comment: payment.comment || null,
         paymentMethod: payment.paymentMethod,
         building: building ? {
           id: building.id,
@@ -334,6 +345,7 @@ const getBuildingPayments = async (req, res) => {
           invoiceId: doc.invoiceId,
           remitoId: doc.remitoId,
           invoiceNumber: doc.invoice?.number,
+          invoiceFileUrl: doc.invoice?.fileUrl,
           remitoNumber: doc.remito?.number
         })),
         hasDiscount: payment.discount > 0
@@ -510,9 +522,22 @@ const getAdministratorPayments = async (req, res) => {
         }
       });
 
-      // Obtener administrador del primer edificio
-      const firstBuilding = payment.documents[0]?.invoice?.service?.building || 
-                           payment.documents[0]?.remito?.service?.building;
+      // Obtener administrador buscando en todos los documentos hasta encontrar uno válido
+      let firstBuilding = null;
+      for (const doc of payment.documents) {
+        // Buscar en todos los servicios del invoice (no solo el primero)
+        const bldgFromInvoice = doc.invoice?.services?.find(s => s.building?.administrator)?.building
+          || doc.invoice?.services?.[0]?.building;
+        const bldgFromRemito = doc.remito?.service?.building;
+        const bldg = bldgFromInvoice || bldgFromRemito;
+        if (bldg?.administrator) {
+          firstBuilding = bldg;
+          break;
+        }
+        if (bldg && !firstBuilding) {
+          firstBuilding = bldg;
+        }
+      }
       
       return {
         id: payment.id,
@@ -530,7 +555,8 @@ const getAdministratorPayments = async (req, res) => {
         } : null,
         buildings: Array.from(buildingMap.values()),
         buildingCount: buildingMap.size,
-        hasDiscount: payment.discount > 0
+        hasDiscount: payment.discount > 0,
+        comment: payment.comment || null
       };
     });
 
@@ -551,9 +577,33 @@ const getAdministratorPayments = async (req, res) => {
   }
 };
 
+// Actualizar comentario de un pago
+const updatePaymentComment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comment } = req.body;
+
+    const payment = await prisma.payment.findUnique({ where: { id } });
+    if (!payment) {
+      return res.status(404).json({ message: 'Pago no encontrado' });
+    }
+
+    const updated = await prisma.payment.update({
+      where: { id },
+      data: { comment: comment || null }
+    });
+
+    res.json({ id: updated.id, comment: updated.comment });
+  } catch (error) {
+    console.error('Error al actualizar comentario:', error);
+    res.status(500).json({ message: 'Error al actualizar comentario' });
+  }
+};
+
 module.exports = { 
   createPayment, 
   getPayments,
   getBuildingPayments,
-  getAdministratorPayments
+  getAdministratorPayments,
+  updatePaymentComment
 }; 

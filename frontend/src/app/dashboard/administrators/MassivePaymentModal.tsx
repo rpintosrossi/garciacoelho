@@ -36,6 +36,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
   const [discountType, setDiscountType] = useState<'manual' | 'percentage'>('manual');
   const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   const [discountReason, setDiscountReason] = useState("");
+  const [comment, setComment] = useState("");
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [paymentMethod, setPaymentMethod] = useState<any>(null);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
@@ -65,6 +66,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       setDiscountType('manual');
       setDiscountPercentage(0);
       setDiscountReason("");
+      setComment("");
       setPaymentMethod(null);
       setPaymentDate(new Date().toISOString().slice(0, 10));
     }
@@ -265,6 +267,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         originalAmount: originalAmount,
         discount: discountAmount,
         discountReason: discountReason || null,
+        comment: comment || null,
         date: paymentDate,
         paymentMethodId: paymentMethod?.id,
         docsToAssociate
@@ -420,6 +423,19 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                   </Typography>
                 </Box>
               )}
+            </Box>
+
+            {/* Comentario */}
+            <Box mt={2}>
+              <TextField
+                label="Comentario (opcional)"
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+                fullWidth
+                multiline
+                rows={2}
+                placeholder="Notas internas sobre este pago..."
+              />
             </Box>
 
             {/* Monto final */}

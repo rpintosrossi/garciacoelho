@@ -13,6 +13,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Chip,
   IconButton,
   CircularProgress,
@@ -29,7 +30,11 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from "@mui/material";
 import {
   Search as SearchIcon,
@@ -40,7 +45,9 @@ import {
   People as PeopleIcon,
   Receipt as ReceiptIcon,
   Description as DescriptionIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  Download as DownloadIcon,
+  Edit as EditIcon
 } from "@mui/icons-material";
 import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
@@ -97,6 +104,89 @@ export default function PaymentsPage() {
   const [loadingAdminSearch, setLoadingAdminSearch] = useState(false);
   const [buildingSearchInput, setBuildingSearchInput] = useState("");
   const [adminSearchInput, setAdminSearchInput] = useState("");
+
+  // Sorting state
+  type SortDirection = 'asc' | 'desc';
+  const [buildingSortField, setBuildingSortField] = useState<string>('date');
+  const [buildingSortDir, setBuildingSortDir] = useState<SortDirection>('desc');
+  const [adminSortField, setAdminSortField] = useState<string>('date');
+  const [adminSortDir, setAdminSortDir] = useState<SortDirection>('desc');
+
+  const handleBuildingSort = (field: string) => {
+    if (buildingSortField === field) {
+      setBuildingSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setBuildingSortField(field);
+      setBuildingSortDir('asc');
+    }
+  };
+
+  const handleAdminSort = (field: string) => {
+    if (adminSortField === field) {
+      setAdminSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setAdminSortField(field);
+      setAdminSortDir('asc');
+    }
+  };
+
+  const sortPayments = (payments: any[], field: string, dir: SortDirection) => {
+    return [...payments].sort((a, b) => {
+      let aVal: any;
+      let bVal: any;
+      switch (field) {
+        case 'date':       aVal = new Date(a.date).getTime(); bVal = new Date(b.date).getTime(); break;
+        case 'building':   aVal = a.building?.name?.toLowerCase() ?? ''; bVal = b.building?.name?.toLowerCase() ?? ''; break;
+        case 'cuit':       aVal = a.building?.cuit?.toLowerCase() ?? ''; bVal = b.building?.cuit?.toLowerCase() ?? ''; break;
+        case 'admin':      aVal = a.building?.administrator?.name?.toLowerCase() ?? ''; bVal = b.building?.administrator?.name?.toLowerCase() ?? ''; break;
+        case 'amount':     aVal = a.amount; bVal = b.amount; break;
+        case 'method':     aVal = a.paymentMethod?.name?.toLowerCase() ?? ''; bVal = b.paymentMethod?.name?.toLowerCase() ?? ''; break;
+        case 'adminName':  aVal = a.administrator?.name?.toLowerCase() ?? ''; bVal = b.administrator?.name?.toLowerCase() ?? ''; break;
+        case 'buildings':  aVal = a.buildingCount ?? 0; bVal = b.buildingCount ?? 0; break;
+        default:           return 0;
+      }
+      if (aVal < bVal) return dir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
+  const sortedBuildingPayments = sortPayments(buildingPayments, buildingSortField, buildingSortDir);
+  const sortedAdminPayments = sortPayments(adminPayments, adminSortField, adminSortDir);
+
+  // Estado para editar comentario
+  const [editCommentOpen, setEditCommentOpen] = useState(false);
+  const [editCommentPaymentId, setEditCommentPaymentId] = useState<string>('');
+  const [editCommentValue, setEditCommentValue] = useState<string>('');
+  const [savingComment, setSavingComment] = useState(false);
+
+  const handleOpenEditComment = (paymentId: string, currentComment: string | null) => {
+    setEditCommentPaymentId(paymentId);
+    setEditCommentValue(currentComment || '');
+    setEditCommentOpen(true);
+  };
+
+  const handleSaveComment = async () => {
+    setSavingComment(true);
+    try {
+      const token = localStorage.getItem('token');
+      await api.patch(`/payments/${editCommentPaymentId}/comment`, 
+        { comment: editCommentValue },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      // Actualizar localmente sin refetch
+      const update = (list: any[]) => list.map(p =>
+        p.id === editCommentPaymentId ? { ...p, comment: editCommentValue || null } : p
+      );
+      setBuildingPayments(prev => update(prev));
+      setAdminPayments(prev => update(prev));
+      setEditCommentOpen(false);
+    } catch (err: any) {
+      console.error('Error al guardar comentario', err);
+    } finally {
+      setSavingComment(false);
+    }
+  };
 
   const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -289,7 +379,7 @@ export default function PaymentsPage() {
           <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
             <TextField
               fullWidth
-              placeholder="Buscar por CUIT o nombre del edificio..."
+              placeholder="Buscar por nombre de edificio, CUIT o nombre del administrador..."
               value={buildingSearch}
               onChange={(e) => {
                 setBuildingSearch(e.target.value);
@@ -324,18 +414,30 @@ export default function PaymentsPage() {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Fecha</TableCell>
-                      <TableCell>Edificio</TableCell>
-                      <TableCell>CUIT</TableCell>
-                      <TableCell>Administrador</TableCell>
-                      <TableCell>Monto</TableCell>
-                      <TableCell>Método de Pago</TableCell>
-                      <TableCell>Comprobante</TableCell>
-                      <TableCell>Documentos</TableCell>
+                      {([
+                        { field: 'date',     label: 'Fecha' },
+                        { field: 'building', label: 'Edificio' },
+                        { field: 'cuit',     label: 'CUIT' },
+                        { field: 'admin',    label: 'Administrador' },
+                        { field: 'amount',   label: 'Monto' },
+                        { field: 'method',   label: 'Método de Pago' },
+                      ] as { field: string; label: string }[]).map(col => (
+                        <TableCell key={col.field} sortDirection={buildingSortField === col.field ? buildingSortDir : false}>
+                          <TableSortLabel
+                            active={buildingSortField === col.field}
+                            direction={buildingSortField === col.field ? buildingSortDir : 'asc'}
+                            onClick={() => handleBuildingSort(col.field)}
+                          >
+                            {col.label}
+                          </TableSortLabel>
+                        </TableCell>
+                      ))}
+                      <TableCell>Facturas / Remitos</TableCell>
+                      <TableCell padding="checkbox" />
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {buildingPayments.map((payment) => (
+                    {sortedBuildingPayments.map((payment) => (
                       <TableRow key={payment.id} hover>
                         <TableCell>{formatDate(payment.date)}</TableCell>
                         <TableCell>
@@ -363,21 +465,49 @@ export default function PaymentsPage() {
                                 sx={{ mt: 0.5 }}
                               />
                             )}
+                            {payment.comment && (
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
+                                💬 {payment.comment}
+                              </Typography>
+                            )}
                           </Box>
                         </TableCell>
                         <TableCell>{payment.paymentMethod?.name || 'N/A'}</TableCell>
                         <TableCell>
-                          <Chip label={payment.comprobante} size="small" variant="outlined" />
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                            {payment.documents.map((doc: any) => {
+                              const label = doc.type === 'FACTURA'
+                                ? `Factura ${doc.invoiceNumber || 'S/N'}`
+                                : `Remito ${doc.remitoNumber || 'S/N'}`;
+                              return (
+                                <Box key={doc.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Chip
+                                    icon={doc.type === 'FACTURA' ? <DescriptionIcon /> : <ReceiptIcon />}
+                                    label={label}
+                                    size="small"
+                                    color={doc.type === 'FACTURA' ? 'primary' : 'default'}
+                                    variant="outlined"
+                                  />
+                                  {doc.type === 'FACTURA' && doc.invoiceFileUrl && (
+                                    <Tooltip title="Descargar factura">
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => window.open(doc.invoiceFileUrl, '_blank')}
+                                      >
+                                        <DownloadIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                </Box>
+                              );
+                            })}
+                          </Box>
                         </TableCell>
-                        <TableCell>
-                          <Tooltip title="Ver documentos asociados">
-                            <Chip 
-                              icon={<ReceiptIcon />}
-                              label={`${payment.documents.length} doc(s)`}
-                              size="small"
-                              color="primary"
-                              variant="outlined"
-                            />
+                        <TableCell padding="checkbox">
+                          <Tooltip title={payment.comment ? 'Editar comentario' : 'Agregar comentario'}>
+                            <IconButton size="small" onClick={() => handleOpenEditComment(payment.id, payment.comment)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
                           </Tooltip>
                         </TableCell>
                       </TableRow>
@@ -436,7 +566,33 @@ export default function PaymentsPage() {
             <Alert severity="info">No se encontraron pagos masivos para administradores</Alert>
           ) : (
             <>
-              {adminPayments.map((payment) => (
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center' }}>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel>Ordenar por</InputLabel>
+                  <Select
+                    label="Ordenar por"
+                    value={adminSortField}
+                    onChange={e => { setAdminSortField(e.target.value); }}
+                  >
+                    <MenuItem value="date">Fecha</MenuItem>
+                    <MenuItem value="adminName">Administrador</MenuItem>
+                    <MenuItem value="amount">Monto</MenuItem>
+                    <MenuItem value="buildings">Cant. Edificios</MenuItem>
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 140 }}>
+                  <InputLabel>Dirección</InputLabel>
+                  <Select
+                    label="Dirección"
+                    value={adminSortDir}
+                    onChange={e => setAdminSortDir(e.target.value as 'asc' | 'desc')}
+                  >
+                    <MenuItem value="asc">Ascendente</MenuItem>
+                    <MenuItem value="desc">Descendente</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+              {sortedAdminPayments.map((payment) => (
                 <Accordion key={payment.id} sx={{ mb: 2 }}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Box sx={{ display: 'flex', width: '100%', alignItems: 'center', gap: 2 }}>
@@ -447,7 +603,17 @@ export default function PaymentsPage() {
                         <Typography variant="caption" color="text.secondary">
                           Fecha: {formatDate(payment.date)} | Comprobante: {payment.comprobante}
                         </Typography>
+                        {payment.comment && (
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ fontStyle: 'italic' }}>
+                            💬 {payment.comment}
+                          </Typography>
+                        )}
                       </Box>
+                      <Tooltip title={payment.comment ? 'Editar comentario' : 'Agregar comentario'}>
+                        <IconButton size="small" onClick={e => { e.stopPropagation(); handleOpenEditComment(payment.id, payment.comment); }}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Chip 
                         icon={<BusinessIcon />}
                         label={`${payment.buildingCount} edificio(s)`}
@@ -724,6 +890,35 @@ export default function PaymentsPage() {
             setAdministrators([]);
           }}>
             Cancelar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para editar/agregar comentario */}
+      <Dialog open={editCommentOpen} onClose={() => setEditCommentOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Comentario del pago</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <TextField
+              label="Comentario"
+              value={editCommentValue}
+              onChange={e => setEditCommentValue(e.target.value)}
+              fullWidth
+              multiline
+              rows={3}
+              placeholder="Notas internas sobre este pago..."
+              autoFocus
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditCommentOpen(false)}>Cancelar</Button>
+          <Button
+            onClick={handleSaveComment}
+            variant="contained"
+            disabled={savingComment}
+          >
+            {savingComment ? 'Guardando...' : 'Guardar'}
           </Button>
         </DialogActions>
       </Dialog>

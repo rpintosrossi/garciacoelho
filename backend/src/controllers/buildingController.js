@@ -769,6 +769,7 @@ const getPendingInvoices = async (req, res) => {
             id: service.invoice.id,
             type: 'FACTURA',
             serviceId: service.id,
+            number: service.invoice.number || null,
             description: service.description,
             amount: montoPendiente,
             date: service.invoice.createdAt
@@ -807,6 +808,7 @@ const getPendingInvoices = async (req, res) => {
             id: remito.id,
             type: 'REMITO',
             serviceId: service.id,
+            number: remito.number || null,
             description: service.description,
             amount: montoPendiente,
             date: remito.date
@@ -1057,6 +1059,7 @@ const createBuildingPayment = async (req, res) => {
       comprobante,
       discount,
       discountReason,
+      comment,
       documents
     } = req.body;
 
@@ -1175,6 +1178,7 @@ const createBuildingPayment = async (req, res) => {
         comprobante: comprobante,
         discount: discount,
         discountReason: discountReason,
+        comment: comment || null,
         method: '' // Campo requerido por el modelo Payment
       }
     });
