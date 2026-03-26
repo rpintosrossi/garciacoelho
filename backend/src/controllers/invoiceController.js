@@ -202,14 +202,58 @@ const deleteInvoice = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await prisma.invoice.delete({
-      where: { id }
+    // Verificar que la factura existe e incluir sus servicios y documentos de pago
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: {
+        paymentDocuments: true,
+        services: {
+          include: {
+            remitos: true
+          }
+        }
+      }
     });
 
-    res.json({ message: 'Factura eliminada correctamente' });
+    if (!invoice) {
+      return res.status(404).json({ message: 'Factura no encontrada' });
+    }
+
+    // Bloquear si ya tiene pagos registrados
+    if (invoice.paymentDocuments.length > 0) {
+      return res.status(400).json({
+        message: 'No se puede revertir la factura porque ya tiene pagos registrados. Para anularla, comuníquese con el administrador.'
+      });
+    }
+
+    // Determinar el estado de rollback para cada servicio
+    const determineRollbackStatus = (service) => {
+      if (service.remitos && service.remitos.length > 0) return 'CON_REMITO';
+      if (service.technicianId) return 'ASIGNADO';
+      return 'PENDIENTE';
+    };
+
+    // Transacción: desasociar servicios + eliminar factura
+    await prisma.$transaction(async (tx) => {
+      // Resetear cada servicio: quitar invoiceId y revertir estado
+      for (const service of invoice.services) {
+        await tx.service.update({
+          where: { id: service.id },
+          data: {
+            invoiceId: null,
+            status: determineRollbackStatus(service)
+          }
+        });
+      }
+
+      // Eliminar la factura
+      await tx.invoice.delete({ where: { id } });
+    });
+
+    res.json({ message: 'Factura revertida correctamente. Los servicios volvieron a su estado anterior.' });
   } catch (error) {
-    console.error('Error al eliminar factura:', error);
-    res.status(500).json({ message: 'Error al eliminar factura' });
+    console.error('Error al eliminar/revertir factura:', error);
+    res.status(500).json({ message: 'Error al revertir la factura' });
   }
 };
 

@@ -12,6 +12,7 @@ import {
   ListItem,
   ListItemText,
   Button,
+  IconButton,
   CircularProgress,
   Alert,
   Stack,
@@ -31,10 +32,11 @@ import {
   TextField,
   InputAdornment,
   Pagination,
+  Tooltip,
 } from '@mui/material';
-import { ExpandMore, PictureAsPdf, Search as SearchIcon } from '@mui/icons-material';
+import { ExpandMore, PictureAsPdf, Search as SearchIcon, Undo as UndoIcon } from '@mui/icons-material';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { cachedApi } from '@/lib/axios';
+import api, { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 
 interface Transaction {
@@ -129,7 +131,13 @@ export default function PackagePage() {
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [downloadMode, setDownloadMode] = useState<'single' | 'split'>('single');
+  const [downloadMode, setDownloadMode] = useState<'single' | 'split' | 'individual'>('single');
+
+  // Estado para revertir factura
+  const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const [revertInvoiceId, setRevertInvoiceId] = useState<string | null>(null);
+  const [revertInvoiceLabel, setRevertInvoiceLabel] = useState('');
+  const [reverting, setReverting] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
@@ -260,6 +268,34 @@ export default function PackagePage() {
     }
   };
 
+  const handleOpenRevert = (invoiceId: string, label: string) => {
+    setRevertInvoiceId(invoiceId);
+    setRevertInvoiceLabel(label);
+    setRevertConfirmOpen(true);
+  };
+
+  const handleConfirmRevert = async () => {
+    if (!revertInvoiceId) return;
+    setReverting(true);
+    try {
+      const token = localStorage.getItem('token');
+      await api.delete(`/invoices/${revertInvoiceId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setRevertConfirmOpen(false);
+      setRevertInvoiceId(null);
+      // Limpiar caché y refrescar paquetes
+      cachedApi.clearCacheFor('/packages');
+      await fetchPackages();
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || 'Error al revertir la factura';
+      setError(msg);
+      setRevertConfirmOpen(false);
+    } finally {
+      setReverting(false);
+    }
+  };
+
   const handleDownloadPackage = async (adminId: string) => {
     // Mostrar modal para seleccionar método de pago
     setSelectedAdminId(adminId);
@@ -268,7 +304,24 @@ export default function PackagePage() {
 
   const handleConfirmDownload = async () => {
     if (!selectedAdminId) return;
-    
+
+    // Para modo 'individual', capturar el directorio ANTES de cualquier await
+    // (mientras el navegador todavía tiene el contexto de gesto de usuario)
+    let dirHandle: any = null;
+    if (downloadMode === 'individual') {
+      if (!('showDirectoryPicker' in window)) {
+        setError('Tu navegador no soporta la selección de carpeta. Usá la opción ZIP.');
+        return;
+      }
+      try {
+        dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return; // Usuario canceló
+        setError('Error al seleccionar la carpeta de destino');
+        return;
+      }
+    }
+
     try {
       setDownloading(selectedAdminId);
       setShowPaymentMethodModal(false);
@@ -277,7 +330,27 @@ export default function PackagePage() {
       const adminName = adminData?.administrator.name?.replace(/\s+/g, '_') || selectedAdminId;
       const dateStr = new Date().toISOString().split('T')[0];
 
-      if (downloadMode === 'split') {
+      if (downloadMode === 'individual' && dirHandle) {
+        // Descargar ZIP del backend, descomprimirlo y guardar cada archivo individualmente
+        const response = await cachedApi.get(`/packages/${selectedAdminId}/download`, {
+          params: { paymentMethodId: selectedPaymentMethod, mode: 'split' },
+          responseType: 'blob'
+        });
+
+        const JSZip = (await import('jszip')).default;
+        const zip = await JSZip.loadAsync(response.data);
+
+        for (const [filename, file] of Object.entries(zip.files)) {
+          if (!(file as any).dir) {
+            const content = await (file as any).async('arraybuffer');
+            const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(content);
+            await writable.close();
+          }
+        }
+
+      } else if (downloadMode === 'split') {
         // Descargar como ZIP con archivos separados
         const response = await cachedApi.get(`/packages/${selectedAdminId}/download`, {
           params: { paymentMethodId: selectedPaymentMethod, mode: 'split' },
@@ -287,28 +360,14 @@ export default function PackagePage() {
         const blob = new Blob([response.data], { type: 'application/zip' });
         const suggestedName = `paquete-${adminName}-separado-${dateStr}.zip`;
 
-        if ('showSaveFilePicker' in window) {
-          try {
-            const fileHandle = await (window as any).showSaveFilePicker({
-              suggestedName,
-              types: [{ description: 'Archivo ZIP', accept: { 'application/zip': ['.zip'] } }],
-            });
-            const writable = await fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-          } catch (pickerErr: any) {
-            if (pickerErr?.name !== 'AbortError') throw pickerErr;
-          }
-        } else {
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = suggestedName;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(url);
-        }
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = suggestedName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
 
       } else {
         // Descargar como un solo PDF (comportamiento anterior)
@@ -320,28 +379,14 @@ export default function PackagePage() {
         const blob = new Blob([response.data], { type: 'application/pdf' });
         const suggestedName = `paquete-${adminName}-${dateStr}.pdf`;
 
-        if ('showSaveFilePicker' in window) {
-          try {
-            const fileHandle = await (window as any).showSaveFilePicker({
-              suggestedName,
-              types: [{ description: 'Archivo PDF', accept: { 'application/pdf': ['.pdf'] } }],
-            });
-            const writable = await fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-          } catch (pickerErr: any) {
-            if (pickerErr?.name !== 'AbortError') throw pickerErr;
-          }
-        } else {
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = suggestedName;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(url);
-        }
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = suggestedName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
       }
     } catch (err) {
       console.error('Error downloading package:', err);
@@ -483,6 +528,20 @@ export default function PackagePage() {
                                 <Typography variant="h6" color="primary">
                                   {formatCurrency(transaction.amount)}
                                 </Typography>
+                                {transaction.type === 'invoice' && (
+                                  <Tooltip title="Revertir factura (vuelve a facturación)">
+                                    <IconButton
+                                      size="small"
+                                      color="warning"
+                                      onClick={() => handleOpenRevert(
+                                        transaction.id,
+                                        `Factura ${transaction.number || transaction.id.slice(0, 8)} - ${transaction.building?.name || ''}`
+                                      )}
+                                    >
+                                      <UndoIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
                               </Box>
                             </Box>
                           }
@@ -577,7 +636,7 @@ export default function PackagePage() {
               </Typography>
               <RadioGroup
                 value={downloadMode}
-                onChange={(e) => setDownloadMode(e.target.value as 'single' | 'split')}
+                onChange={(e) => setDownloadMode(e.target.value as 'single' | 'split' | 'individual')}
               >
                 <FormControlLabel
                   value="single"
@@ -596,6 +655,18 @@ export default function PackagePage() {
                     </Box>
                   }
                 />
+                <FormControlLabel
+                  value="individual"
+                  control={<Radio />}
+                  label={
+                    <Box>
+                      <Typography variant="body2">Archivos separados (elegir carpeta)</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Elegís una carpeta y se guardan todos los archivos sueltos directamente ahí
+                      </Typography>
+                    </Box>
+                  }
+                />
               </RadioGroup>
             </Box>
           </Box>
@@ -608,6 +679,34 @@ export default function PackagePage() {
             disabled={downloading === selectedAdminId}
           >
             {downloading === selectedAdminId ? <CircularProgress size={20} /> : 'Descargar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo de confirmación para revertir factura */}
+      <Dialog open={revertConfirmOpen} onClose={() => !reverting && setRevertConfirmOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Revertir factura</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            ¿Estás seguro que querés revertir la siguiente factura?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, mb: 2 }}>
+            {revertInvoiceLabel}
+          </Typography>
+          <Alert severity="warning">
+            Los servicios asociados volverán a su estado anterior y podrán ser facturados nuevamente. Esta acción solo es posible si la factura no tiene pagos registrados.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRevertConfirmOpen(false)} disabled={reverting}>Cancelar</Button>
+          <Button
+            onClick={handleConfirmRevert}
+            color="warning"
+            variant="contained"
+            disabled={reverting}
+            startIcon={reverting ? <CircularProgress size={16} /> : <UndoIcon />}
+          >
+            {reverting ? 'Revirtiendo...' : 'Revertir factura'}
           </Button>
         </DialogActions>
       </Dialog>
