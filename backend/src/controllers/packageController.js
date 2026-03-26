@@ -1035,6 +1035,7 @@ const getPackages = async (req, res) => {
                 
                 processedInvoices.push({
                   name: invoiceData.name,
+                  invoice: invoiceData.invoice,
                   buffer: Buffer.from(singlePageBytes),
                   remitos: decryptedRemitos
                 });
@@ -1044,6 +1045,7 @@ const getPackages = async (req, res) => {
                 // Si falla, intentar usar el buffer original (con las 3 páginas)
                 processedInvoices.push({
                   name: invoiceData.name,
+                  invoice: invoiceData.invoice,
                   buffer: invoiceData.pdfBuffer,
                   remitos: invoiceData.remitos
                 });
@@ -1285,7 +1287,7 @@ const getPackages = async (req, res) => {
                 resumenPmPages.forEach(p => resumenDoc.addPage(p));
               }
               const resumenBytes = await resumenDoc.save();
-              archive.append(Buffer.from(resumenBytes), { name: '01_resumen_datos_bancarios.pdf' });
+              archive.append(Buffer.from(resumenBytes), { name: 'DETALLE Y CBU.pdf' });
               console.log(`✅ [PACKAGES SPLIT] Archivo resumen creado`);
 
               // Archivos N: 1 por factura (factura + sus remitos)
@@ -1309,7 +1311,13 @@ const getPackages = async (req, res) => {
                   }
 
                   const invBytes = await invDoc.save();
-                  const buildingLabel = invData.remitos[0]?.buildingAddress || invData.name;
+                  // Para facturas "prov" (sin número de factura), usar el número del remito
+                  const invoiceNumber = invData.invoice?.number;
+                  const firstRemitoNumber = invData.remitos[0]?.remito?.number || invData.remitos[0]?.name;
+                  const docLabel = invoiceNumber
+                    ? invoiceNumber
+                    : (firstRemitoNumber ? `prov_${firstRemitoNumber}` : (invData.remitos[0]?.buildingAddress || invData.name));
+                  const buildingLabel = invData.remitos[0]?.buildingAddress || docLabel;
                   const safeLabel = buildingLabel.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').slice(0, 50);
                   const fileNum = String(idx + 2).padStart(2, '0');
                   archive.append(Buffer.from(invBytes), { name: `${fileNum}_${safeLabel}.pdf` });

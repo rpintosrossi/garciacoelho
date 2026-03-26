@@ -528,14 +528,14 @@ export default function PackagePage() {
                                 <Typography variant="h6" color="primary">
                                   {formatCurrency(transaction.amount)}
                                 </Typography>
-                                {transaction.type === 'invoice' && (
-                                  <Tooltip title="Revertir factura (vuelve a facturación)">
+                                {(transaction.type === 'invoice' || transaction.type === 'remito_sin_factura') && (
+                                  <Tooltip title="Revertir (vuelve a facturación)">
                                     <IconButton
                                       size="small"
                                       color="warning"
                                       onClick={() => handleOpenRevert(
                                         transaction.id,
-                                        `Factura ${transaction.number || transaction.id.slice(0, 8)} - ${transaction.building?.name || ''}`
+                                        `${transaction.type === 'remito_sin_factura' ? 'Prov' : 'Factura'} ${transaction.number || transaction.id.slice(0, 8)} - ${transaction.building?.name || ''}`
                                       )}
                                     >
                                       <UndoIcon fontSize="small" />
