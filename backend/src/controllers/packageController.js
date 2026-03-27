@@ -1274,6 +1274,14 @@ const getPackages = async (req, res) => {
               res.setHeader('Content-Disposition', `attachment; filename=paquete-${safeAdminName}-separado-${dateStr}.zip`);
 
               const archive = archiver('zip', { zlib: { level: 6 } });
+              archive.on('error', (archiveErr) => {
+                console.error('❌ [PACKAGES SPLIT] Error en archive stream:', archiveErr.message);
+                if (!res.headersSent) {
+                  res.status(500).json({ message: 'Error al generar el ZIP' });
+                } else {
+                  res.end();
+                }
+              });
               archive.pipe(res);
 
               // Archivo 1: resumen + datos bancarios
@@ -1372,15 +1380,24 @@ const getPackages = async (req, res) => {
         } catch (error) {
           console.error('❌ [PACKAGES] Error al combinar PDFs:', error);
           console.error(error.stack);
-          // Si falla, enviar solo el PDF del paquete
-          res.setHeader('Content-Type', 'application/pdf');
-          res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
-          res.send(packagePdfBuffer);
+          if (!res.headersSent) {
+            // Si aún no enviamos nada, enviar el PDF básico como fallback
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=paquete-${administrator.name}-${new Date().toISOString().split('T')[0]}.pdf`);
+            res.send(packagePdfBuffer);
+          } else {
+            // Headers ya enviados (stream activo): terminar la respuesta
+            res.end();
+          }
         }
         
       } catch (error) {
         console.error('❌ [PACKAGES] Error general al generar paquete:', error);
-        res.status(500).json({ message: 'Error al generar paquete', error: error.message });
+        if (!res.headersSent) {
+          res.status(500).json({ message: 'Error al generar paquete', error: error.message });
+        } else {
+          res.end();
+        }
       }
     });
 
