@@ -194,36 +194,35 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
       const hasOverdueDebt = saldo > 0;
 
       if (hasOverdueDebt) {
-        // Obtener IDs únicos de facturas y remitos
+        // Obtener IDs únicos de facturas pendientes
         const uniqueInvoiceIds = [...new Set(building.services
           .map(s => s.invoice?.id)
           .filter(Boolean))];
-        const uniqueRemitoIds = [...new Set(building.services
-          .flatMap(s => s.remitos.map(r => r.id)))];
 
-        // Calcular días de atraso usando la fecha más antigua
+        // Calcular días de atraso usando la fecha más antigua de las facturas pendientes
         let oldestDate = null;
         
         if (uniqueInvoiceIds.length > 0) {
           const invoices = await prisma.invoice.findMany({
             where: { id: { in: uniqueInvoiceIds } },
-            select: { date: true }
-          });
-          for (const invoice of invoices) {
-            if (invoice.date && (!oldestDate || invoice.date < oldestDate)) {
-              oldestDate = invoice.date;
+            select: {
+              id: true,
+              date: true,
+              createdAt: true,
+              amount: true,
+              paymentDocuments: { select: { amount: true } }
             }
-          }
-        }
-        
-        if (uniqueRemitoIds.length > 0) {
-          const remitos = await prisma.remito.findMany({
-            where: { id: { in: uniqueRemitoIds } },
-            select: { date: true }
           });
-          for (const remito of remitos) {
-            if (!oldestDate || remito.date < oldestDate) {
-              oldestDate = remito.date;
+
+          for (const invoice of invoices) {
+            const totalPaid = invoice.paymentDocuments.reduce((sum, pd) => sum + pd.amount, 0);
+            const hasPendingBalance = totalPaid < invoice.amount;
+            if (!hasPendingBalance) continue;
+
+            // Usar date si existe, sino createdAt
+            const invoiceDate = invoice.date || invoice.createdAt;
+            if (invoiceDate && (!oldestDate || invoiceDate < oldestDate)) {
+              oldestDate = invoiceDate;
             }
           }
         }
