@@ -206,83 +206,125 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     setPage(0);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!data || !data.services.length) return;
 
     const doc = new jsPDF();
-    const logoUrl = '/logo.png'; // Asegúrate de que esta ruta sea correcta
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    const companyEmail = 'garciacoelho@hotmail.com';
+    const companyPhone = '11 3834-1046 | 11 4840-8121';
+    const today = new Date().toLocaleDateString('es-AR');
 
-    // Función para dibujar header
-    const drawHeader = () => {
-      // Intentar cargar logo
-      const img = new Image();
-      img.src = logoUrl;
-      // Como img.onload es asíncrono, para simplificar en jsPDF básico sin plugins complejos:
-      // Si el logo es importante, deberíamos precargarlo o usar base64. 
-      // Asumiremos texto si falla o usaremos una lógica simple.
-      // Pero jsPDF addImage requiere base64 o URL accesible. 
-      // Simplemente pondremos el nombre de la empresa por ahora para asegurar funcionalidad inmediata.
-      
-      doc.setFontSize(18);
-      doc.text("García Coelho", 14, 20);
-      doc.setFontSize(12);
-      doc.text(`Historial de Servicios - ${data.building.name}`, 14, 30);
-      doc.text(`Fecha de emisión: ${new Date().toLocaleDateString()}`, 14, 38);
-      
-      if (dateFrom || dateTo) {
-        doc.text(`Período: ${dateFrom || 'Inicio'} - ${dateTo || 'Actualidad'}`, 14, 46);
+    // Cargar logo
+    let logoImg: HTMLImageElement | null = null;
+    try {
+      const imgEl = new Image();
+      imgEl.src = '/logo.png';
+      await new Promise<void>((resolve) => {
+        imgEl.onload = () => { logoImg = imgEl; resolve(); };
+        imgEl.onerror = () => resolve();
+      });
+    } catch (_) { /* logo no crítico */ }
+
+    const buildingName = data.building.name;
+    const buildingAddress = data.building.address;
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Calcula y inicial tras el header de primera página
+    const drawFirstPageHeader = (): number => {
+      let y = 10;
+
+      // Logo centrado y grande
+      if (logoImg) {
+        const logoW = 55;
+        const logoH = logoImg.naturalWidth > 0
+          ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoW
+          : 22;
+        const logoX = (pageW - logoW) / 2;
+        doc.addImage(logoImg, 'PNG', logoX, y, logoW, logoH);
+        y += logoH + 6;
+      } else {
+        y += 10;
       }
+
+      // Email y teléfono a la izquierda; fecha a la derecha, misma altura
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text(companyEmail, margin, y);
+      doc.text(today, pageW - margin, y, { align: 'right' });
+      y += 5;
+      doc.text(companyPhone, margin, y);
+      y += 9;
+
+      // Título con dirección del edificio
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Historial de Servicios - ${buildingAddress}`, pageW / 2, y, { align: 'center' });
+      y += 6;
+
+      if (dateFrom || dateTo) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Período: ${dateFrom || 'Inicio'} - ${dateTo || 'Actualidad'}`, pageW / 2, y, { align: 'center' });
+        y += 6;
+      }
+
+      y += 3;
+      return y;
     };
 
-    drawHeader();
-    
-    let y = 60;
-    
-    // Encabezados de tabla
-    doc.setFontSize(10);
-    doc.setFillColor(240, 240, 240);
-    doc.rect(14, y - 5, 180, 8, 'F');
-    doc.font = "helvetica";
-    doc.setFont("helvetica", "bold");
-    doc.text("Fecha", 16, y);
-    doc.text("Descripción", 50, y);
-    doc.text("Monto", 160, y);
-    
-    y += 10;
-    doc.setFont("helvetica", "normal");
-    
+    const drawTableHeader = (y: number): number => {
+      doc.setFontSize(9);
+      doc.setFillColor(240, 240, 240);
+      doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.text('Fecha', margin + 1, y + 5);
+      doc.text('Descripción', margin + 34, y + 5);
+      return y + 10;
+    };
+
+    let y = drawFirstPageHeader();
+    y = drawTableHeader(y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+
     data.services.forEach((service) => {
-      if (y > 270) {
+      if (y > 272) {
         doc.addPage();
-        y = 30;
-        // Reprint header headers
-        doc.setFont("helvetica", "bold"); 
-        doc.text("Fecha", 16, y);
-        doc.text("Descripción", 50, y);
-        doc.text("Monto", 160, y);
-        y += 10;
-        doc.setFont("helvetica", "normal"); 
+        y = 14;
+        y = drawTableHeader(y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
       }
-      
-      const date = new Date(service.createdAt).toLocaleDateString();
-      const desc = doc.splitTextToSize(service.name + (service.description ? ` - ${service.description}` : ''), 100);
-      const total = (service.invoice?.amount || 0) + service.remitos.reduce((acc, r) => acc + r.amount, 0);
-      const amount = total > 0 ? `$ ${total.toLocaleString()}` : '-';
-      
-      doc.text(date, 16, y);
-      doc.text(desc, 50, y);
-      doc.text(amount, 160, y);
-      
-      // Calculate height based on description lines
-      const height = desc.length * 5;
-      y += Math.max(10, height + 5);
-      
-      // Linea separadora ligera
+
+      const date = new Date(service.createdAt).toLocaleDateString('es-AR');
+
+      // Descripción: sólo lo realizado — sin "Servicio", sin nombre ni dirección del edificio
+      let rawDesc = service.description || service.name || '';
+      rawDesc = rawDesc
+        .replace(/^servicio[:\s\-]*/i, '')
+        .replace(/\bservicio\b/gi, '')
+        .replace(new RegExp(escapeRegex(buildingName), 'gi'), '')
+        .replace(new RegExp(escapeRegex(buildingAddress), 'gi'), '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[\s\-]+|[\s\-]+$/g, '')
+        .trim();
+
+      const descLines = doc.splitTextToSize(rawDesc || '-', pageW - margin * 2 - 36);
+
+      doc.text(date, margin + 1, y);
+      doc.text(descLines, margin + 34, y);
+
+      const lineHeight = descLines.length * 5;
+      y += Math.max(8, lineHeight + 4);
+
       doc.setDrawColor(220, 220, 220);
-      doc.line(14, y - 2, 194, y - 2);
+      doc.line(margin, y - 2, pageW - margin, y - 2);
     });
-    
-    doc.save(`Historial_${data.building.name.replace(/\s+/g, '_')}.pdf`);
+
+    doc.save(`Historial_${buildingAddress.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleDeleteServiceClick = (serviceId: string) => {

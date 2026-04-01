@@ -1402,18 +1402,32 @@ const getPackages = async (req, res) => {
     });
 
     // ============ PÁGINA 1: RESUMEN DEL PAQUETE ============
-    // Logo (si existe)
+    // Logo (si existe) — centrado y más grande
     const logoPath = path.join(__dirname, '../../public/logo.png');
+    const pageWidth = 595.276;
+    const margin = 50;
+    const logoWidth = 160;
+
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, 50, 45, { width: 80 });
+      const logoX = (pageWidth - logoWidth) / 2;
+      doc.image(logoPath, logoX, 25, { width: logoWidth });
     }
 
-    // Título y datos del administrador
-    // doc.fontSize(20).text('FACTURACIÓN', 50, 50, { align: 'center' }); // REMOVED
-    doc.moveDown(5); // Bajamos un poco el contenido como se pidio
-    doc.fontSize(14).text(`Administrador: ${administrator.name}`, { align: 'center' });
-    doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, { align: 'center' });
     doc.moveDown(2);
+
+    // ADM. y TEL. alineados a la izquierda; fecha alineada a la derecha a la misma altura
+    const adminY = doc.y;
+    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
+    doc.fontSize(11).text(`TEL.: ${administrator.phone || 'N/A'}`, margin, adminY + 18);
+    doc.fontSize(11).text(
+      new Date().toLocaleDateString('es-AR'),
+      margin,
+      adminY,
+      { width: pageWidth - margin * 2, align: 'right', lineBreak: false }
+    );
+
+    // Avanzar explícitamente por debajo de las dos líneas TEL/ADM y agregar espacio
+    doc.y = adminY + 70;
 
     // Tabla de facturas
     doc.fontSize(14).text('Facturas Incluidas', 50);

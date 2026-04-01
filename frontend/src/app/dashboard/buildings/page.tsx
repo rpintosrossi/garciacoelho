@@ -1,5 +1,6 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useSearchParams } from 'next/navigation';
 import api from '@/lib/axios';
 import {
   Box,
@@ -97,6 +98,7 @@ const taxConditionLabels: Record<string, string> = {
 };
 
 const BuildingsPage = () => {
+  const searchParams = useSearchParams();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [availableLocalities, setAvailableLocalities] = useState<string[]>([]);
   const [administrators, setAdministrators] = useState<any[]>([]);
@@ -170,6 +172,30 @@ const BuildingsPage = () => {
     fetchAdministrators();
     fetchAvailableLocalities();
   }, []);
+
+  const autoOpenHandled = useRef(false);
+
+  // Auto-open account modal when navigating from dashboard overdue alerts
+  useEffect(() => {
+    const accountId = searchParams.get('accountId');
+    if (!accountId || loading || autoOpenHandled.current) return;
+    const match = buildings.find(b => b.id === accountId);
+    if (match) {
+      autoOpenHandled.current = true;
+      setSelectedBuilding(match);
+      setOpenAccount(true);
+    } else if (buildings.length > 0) {
+      // Building not in current page — fetch it directly
+      autoOpenHandled.current = true;
+      const token = localStorage.getItem('token');
+      api.get(`/buildings/${accountId}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => {
+          setSelectedBuilding(res.data);
+          setOpenAccount(true);
+        })
+        .catch(() => {});
+    }
+  }, [searchParams, buildings, loading]);
 
 
 

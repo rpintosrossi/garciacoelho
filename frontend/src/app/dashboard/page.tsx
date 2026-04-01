@@ -294,10 +294,10 @@ export default function DashboardPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Tooltip title="Ver detalles del edificio">
+                        <Tooltip title="Ver estado de cuenta del edificio">
                           <IconButton
                             size="small"
-                            onClick={() => router.push(`/dashboard/buildings/${building.id}`)}
+                            onClick={() => router.push(`/dashboard/buildings?accountId=${building.id}`)}
                             color="primary"
                           >
                             <VisibilityIcon />
