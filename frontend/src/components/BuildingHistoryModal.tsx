@@ -213,7 +213,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     const pageW = doc.internal.pageSize.getWidth();
     const margin = 14;
     const companyEmail = 'garciacoelho@hotmail.com';
-    const companyPhone = '11 3834-1046 | 11 4840-8121';
+    const companyPhone = '11 3834-1046';
     const today = new Date().toLocaleDateString('es-AR');
 
     // Cargar logo
