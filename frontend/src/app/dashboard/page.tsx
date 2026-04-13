@@ -43,12 +43,14 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  Legend
+  Legend,
+  Cell
 } from 'recharts';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
 import StockAlerts from '@/components/StockAlerts';
+import { useAuth } from '@/contexts/AuthContext';
 
 const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => {
   const content = (
@@ -94,11 +96,14 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [trabajosPorMes, setTrabajosPorMes] = useState<any[]>([]);
   const [paymentsByMethod, setPaymentsByMethod] = useState<{ data: any[], methods: string[] }>({ data: [], methods: [] });
+  const [invoicedVsCollected, setInvoicedVsCollected] = useState<any[]>([]);
+  const [fastPaymentAdmins, setFastPaymentAdmins] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overdueDebts, setOverdueDebts] = useState<any>(null);
   const theme = useTheme();
   const router = useRouter();
+  const { user } = useAuth();
 
   // Función para convertir "2025-11" a "Noviembre 2025"
   const formatMonthYear = (monthStr: string) => {
@@ -116,11 +121,13 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [quickStatsRes, serviceStatsRes, overdueDebtsRes, paymentsByMethodRes] = await Promise.all([
+        const [quickStatsRes, serviceStatsRes, overdueDebtsRes, paymentsByMethodRes, invoicedVsCollectedRes, fastPaymentAdminsRes] = await Promise.all([
           cachedApi.get('/dashboard/quick-stats'),
           cachedApi.get('/services/stats'),
           cachedApi.get('/dashboard/overdue-debts'),
-          cachedApi.get('/dashboard/payments-by-method')
+          cachedApi.get('/dashboard/payments-by-method'),
+          cachedApi.get('/dashboard/invoiced-vs-collected'),
+          cachedApi.get('/dashboard/fast-payment-admins')
         ]);
         setStats(quickStatsRes.data);
         // Formatear datos para el gráfico
@@ -132,6 +139,8 @@ export default function DashboardPage() {
         setTrabajosPorMes(chartData);
         setOverdueDebts(overdueDebtsRes.data);
         setPaymentsByMethod(paymentsByMethodRes.data);
+        setInvoicedVsCollected(invoicedVsCollectedRes.data.data || []);
+        setFastPaymentAdmins(fastPaymentAdminsRes.data.data || []);
       } catch (err: any) {
         setError(err.response?.data?.message || 'Error al cargar estadísticas');
       } finally {
@@ -153,7 +162,10 @@ export default function DashboardPage() {
     return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
   }  return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+          Bienvenido, {user?.name || 'Usuario'} 👋
+        </Typography>
         <Button 
           variant="outlined" 
           size="small"
@@ -209,7 +221,7 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 3, width: '100%', margin: 0 }}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Typography variant="h6" gutterBottom>
@@ -243,6 +255,45 @@ export default function DashboardPage() {
                   return <Line key={method} type="monotone" dataKey={method} stroke={colors[i % colors.length]} strokeWidth={2} dot={{ r: 3 }} />;
                 })}
               </LineChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Facturado vs Cobrado por mes
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={invoicedVsCollected} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" />
+                <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
+                <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
+                <Legend />
+                <Bar dataKey="Facturado" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Top administradores con pagos más rápidos
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart layout="vertical" data={fastPaymentAdmins} margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" unit=" días" />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+                <RechartsTooltip formatter={(value: number) => [`${value} días promedio`]} />
+                <Bar dataKey="promedioDias" radius={[0, 4, 4, 0]}>
+                  {fastPaymentAdmins.map((_, i) => {
+                    const colors = ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#f0fdf4', '#f7fef9'];
+                    return <Cell key={i} fill={colors[i] || '#10b981'} />;
+                  })}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </Paper>
         </Grid>

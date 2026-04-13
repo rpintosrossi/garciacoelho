@@ -166,31 +166,35 @@ const getPaymentsByMethod = async (req, res) => {
     const now = new Date();
     const since = new Date(now.getFullYear(), now.getMonth() - 11, 1);
 
-    const payments = await prisma.payment.findMany({
-      where: { date: { gte: since } },
-      select: { amount: true, method: true, date: true }
-    });
+    // Agregar a nivel DB; usa el nombre del PaymentMethod relacionado o el campo method como fallback
+    const rows = await prisma.$queryRaw`
+      SELECT
+        TO_CHAR(p.date AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key,
+        COALESCE(pm.name, p.method) AS method_name,
+        SUM(p.amount) AS total
+      FROM "Payment" p
+      LEFT JOIN "PaymentMethod" pm ON p."paymentMethodId" = pm.id
+      WHERE p.date >= ${since}
+      GROUP BY month_key, method_name
+      ORDER BY month_key
+    `;
 
-    // Agrupar por mes y método
-    const map = {}; // { 'YYYY-MM': { metodo: total } }
-    for (const p of payments) {
-      const d = new Date(p.date);
-      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const map = {};
+    const methodSet = new Set();
+    for (const row of rows) {
+      const key = row.month_key;
+      const method = row.method_name;
       if (!map[key]) map[key] = {};
-      map[key][p.method] = (map[key][p.method] || 0) + p.amount;
+      map[key][method] = Number(row.total);
+      methodSet.add(method);
     }
 
-    // Obtener todos los métodos distintos
-    const allMethods = [...new Set(payments.map(p => p.method))].sort();
-
-    // Convertir a array ordenado por mes
+    const allMethods = [...methodSet].sort();
     const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
     const data = Object.keys(map).sort().map(mesKey => {
       const [y, m] = mesKey.split('-');
       const row = { mes: `${monthNames[+m - 1]} ${y}` };
-      for (const method of allMethods) {
-        row[method] = map[mesKey][method] || 0;
-      }
+      for (const method of allMethods) row[method] = map[mesKey][method] || 0;
       return row;
     });
 
@@ -201,103 +205,188 @@ const getPaymentsByMethod = async (req, res) => {
   }
 };
 
-// Obtener empresas con deudas que superen el umbral de tolerancia
-const getBuildingsWithOverdueDebts = async (req, res) => {
+// Facturado vs Cobrado por mes (últimos 12 meses)
+const getInvoicedVsCollected = async (req, res) => {
   try {
-    // Obtener todos los edificios con su umbral de deuda configurado
-    const buildings = await prisma.building.findMany({
+    const now = new Date();
+    const since = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    // Agregar a nivel DB para evitar cargar todos los registros en memoria
+    const [invoiceRows, remitoRows, paymentRows] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key, SUM(amount) AS total
+        FROM "Invoice" WHERE "createdAt" >= ${since} GROUP BY month_key
+      `,
+      prisma.$queryRaw`
+        SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key, SUM(amount) AS total
+        FROM "Remito" WHERE date >= ${since} GROUP BY month_key
+      `,
+      prisma.$queryRaw`
+        SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key, SUM(amount) AS total
+        FROM "Payment" WHERE date >= ${since} GROUP BY month_key
+      `
+    ]);
+
+    const facturado = {};
+    const cobrado = {};
+
+    for (const row of invoiceRows) facturado[row.month_key] = (facturado[row.month_key] || 0) + Number(row.total);
+    for (const row of remitoRows) facturado[row.month_key] = (facturado[row.month_key] || 0) + Number(row.total);
+    for (const row of paymentRows) cobrado[row.month_key] = Number(row.total);
+
+    const allKeys = [...new Set([...Object.keys(facturado), ...Object.keys(cobrado)])].sort();
+    const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+    const data = allKeys.map(key => {
+      const [y, m] = key.split('-');
+      return {
+        mes: `${monthNames[+m - 1]} ${y}`,
+        Facturado: Math.round(facturado[key] || 0),
+        Cobrado: Math.round(cobrado[key] || 0)
+      };
+    });
+
+    res.json({ data });
+  } catch (error) {
+    console.error('Error al obtener facturado vs cobrado:', error);
+    res.status(500).json({ message: 'Error al obtener facturado vs cobrado' });
+  }
+};
+
+// Top administradores con pagos más rápidos
+const getFastPaymentAdmins = async (req, res) => {
+  try {
+    // Obtener pagos con su documento → factura → servicio → edificio → administrador
+    const paymentDocs = await prisma.paymentDocument.findMany({
+      where: { invoiceId: { not: null } },
       include: {
-        administrator: {
+        payment: { select: { date: true, amount: true } },
+        invoice: {
           select: {
-            name: true,
-            email: true,
-            phone: true
-          }
-        },
-        account: true,
-        services: {
-          include: {
-            invoice: true,
-            remitos: true
+            createdAt: true,
+            services: {
+              select: {
+                building: {
+                  select: {
+                    administrator: { select: { id: true, name: true } }
+                  }
+                }
+              }
+            }
           }
         }
       }
     });
 
-    const buildingsWithDebts = [];
+    const adminMap = {}; // { adminId: { name, days: [], totalAmount } }
 
-    for (const building of buildings) {
-      // Usar directamente el saldo de la cuenta en lugar de recalcular
-      const saldo = building.account?.balance || 0;
+    for (const pd of paymentDocs) {
+      if (!pd.payment || !pd.invoice) continue;
+      const admin = pd.invoice.services?.[0]?.building?.administrator;
+      if (!admin) continue;
 
-      // Verificar si la deuda supera el umbral configurado
-      const debtThreshold = building.debtThreshold || 30; // días por defecto
-      const hasOverdueDebt = saldo > 0;
+      const invoiceDate = new Date(pd.invoice.createdAt);
+      const paymentDate = new Date(pd.payment.date);
+      const days = Math.max(0, Math.round((paymentDate - invoiceDate) / (1000 * 60 * 60 * 24)));
 
-      if (hasOverdueDebt) {
-        // Obtener IDs únicos de facturas pendientes
-        const uniqueInvoiceIds = [...new Set(building.services
-          .map(s => s.invoice?.id)
-          .filter(Boolean))];
-
-        // Calcular días de atraso usando la fecha más antigua de las facturas pendientes
-        let oldestDate = null;
-        
-        if (uniqueInvoiceIds.length > 0) {
-          const invoices = await prisma.invoice.findMany({
-            where: { id: { in: uniqueInvoiceIds } },
-            select: {
-              id: true,
-              date: true,
-              createdAt: true,
-              amount: true,
-              paymentDocuments: { select: { amount: true } }
-            }
-          });
-
-          for (const invoice of invoices) {
-            const totalPaid = invoice.paymentDocuments.reduce((sum, pd) => sum + pd.amount, 0);
-            const hasPendingBalance = totalPaid < invoice.amount;
-            if (!hasPendingBalance) continue;
-
-            // Usar date si existe, sino createdAt
-            const invoiceDate = invoice.date || invoice.createdAt;
-            if (invoiceDate && (!oldestDate || invoiceDate < oldestDate)) {
-              oldestDate = invoiceDate;
-            }
-          }
-        }
-
-        let daysOverdue = 0;
-        if (oldestDate) {
-          const now = new Date();
-          const diffTime = Math.abs(now - oldestDate);
-          daysOverdue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        }
-
-        buildingsWithDebts.push({
-          id: building.id,
-          name: building.name,
-          cuit: building.cuit,
-          address: building.address,
-          locality: building.locality,
-          debtThreshold,
-          currentDebt: saldo,
-          daysOverdue,
-          isOverThreshold: daysOverdue > debtThreshold,
-          administrator: building.administrator,
-          lastInvoiceDate: oldestDate
-        });
-      }
+      if (!adminMap[admin.id]) adminMap[admin.id] = { name: admin.name, days: [], totalAmount: 0 };
+      adminMap[admin.id].days.push(days);
+      adminMap[admin.id].totalAmount += pd.payment.amount;
     }
 
+    const result = Object.values(adminMap)
+      .map(a => ({
+        name: a.name,
+        promedioDias: Math.round(a.days.reduce((s, d) => s + d, 0) / a.days.length),
+        cantidadPagos: a.days.length
+      }))
+      .filter(a => a.cantidadPagos >= 1)
+      .sort((a, b) => a.promedioDias - b.promedioDias)
+      .slice(0, 8);
+
+    res.json({ data: result });
+  } catch (error) {
+    console.error('Error al obtener top admins:', error);
+    res.status(500).json({ message: 'Error al obtener top admins' });
+  }
+};
+
+// Obtener empresas con deudas que superen el umbral de tolerancia
+const getBuildingsWithOverdueDebts = async (req, res) => {
+  try {
+    const now = new Date();
+
+    // Una sola query con CTEs reemplaza el patrón N+1 anterior:
+    // 1 CTE calcula la factura impaga más antigua por edificio a nivel DB
+    // 1 JOIN final trae todo junto: edificio + cuenta + administrador + fecha más antigua
+    const rows = await prisma.$queryRaw`
+      WITH unpaid_invoices AS (
+        SELECT
+          s."buildingId",
+          MIN(COALESCE(i.date, i."createdAt")) AS oldest_date
+        FROM "Service" s
+        JOIN "Invoice" i ON s."invoiceId" = i.id
+        LEFT JOIN "PaymentDocument" pd ON pd."invoiceId" = i.id
+        GROUP BY s."buildingId", i.id, i.amount
+        HAVING COALESCE(SUM(pd.amount), 0) < i.amount
+      ),
+      oldest_per_building AS (
+        SELECT "buildingId", MIN(oldest_date) AS oldest_date
+        FROM unpaid_invoices
+        GROUP BY "buildingId"
+      )
+      SELECT
+        b.id,
+        b.name,
+        b.cuit,
+        b.address,
+        b.locality,
+        COALESCE(b."debtThreshold", 30) AS debt_threshold,
+        a.balance AS saldo,
+        adm.name AS admin_name,
+        adm.email AS admin_email,
+        adm.phone AS admin_phone,
+        opb.oldest_date
+      FROM "Building" b
+      JOIN "Account" a ON a."buildingId" = b.id
+      LEFT JOIN "Administrator" adm ON b."administratorId" = adm.id
+      LEFT JOIN oldest_per_building opb ON opb."buildingId" = b.id
+      WHERE a.balance > 0
+    `;
+
+    const buildings = rows.map(row => {
+      const oldestDate = row.oldest_date ? new Date(row.oldest_date) : null;
+      const daysOverdue = oldestDate
+        ? Math.ceil(Math.abs(now - oldestDate) / (1000 * 60 * 60 * 24))
+        : 0;
+      const debtThreshold = Number(row.debt_threshold);
+
+      return {
+        id: row.id,
+        name: row.name,
+        cuit: row.cuit,
+        address: row.address,
+        locality: row.locality,
+        debtThreshold,
+        currentDebt: Number(row.saldo),
+        daysOverdue,
+        isOverThreshold: daysOverdue > debtThreshold,
+        administrator: {
+          name: row.admin_name,
+          email: row.admin_email,
+          phone: row.admin_phone
+        },
+        lastInvoiceDate: row.oldest_date
+      };
+    });
+
     // Ordenar por días de atraso (mayor a menor)
-    buildingsWithDebts.sort((a, b) => b.daysOverdue - a.daysOverdue);
+    buildings.sort((a, b) => b.daysOverdue - a.daysOverdue);
 
     res.json({
-      totalBuildingsWithDebts: buildingsWithDebts.length,
-      buildingsOverThreshold: buildingsWithDebts.filter(b => b.isOverThreshold).length,
-      buildings: buildingsWithDebts
+      totalBuildingsWithDebts: buildings.length,
+      buildingsOverThreshold: buildings.filter(b => b.isOverThreshold).length,
+      buildings
     });
 
   } catch (error) {
@@ -309,5 +398,7 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
 module.exports = {
   getQuickStats,
   getBuildingsWithOverdueDebts,
-  getPaymentsByMethod
+  getPaymentsByMethod,
+  getInvoicedVsCollected,
+  getFastPaymentAdmins
 }; 
