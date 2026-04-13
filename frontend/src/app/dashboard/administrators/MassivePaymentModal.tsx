@@ -18,6 +18,7 @@ import {
 } from "@mui/material";
 import api from '@/lib/axios';
 import { formatCurrency } from "@/utils/formatCurrency";
+import { formatDate } from '@/utils/formatDate';
 
 interface MassivePaymentModalProps {
   open: boolean;
@@ -300,20 +301,33 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         ) : (
           <>
             <Autocomplete
-              options={Array.from(new Set(pendingDocs.map(doc => doc.buildingName)))}
-              getOptionLabel={option => option}
-              value={buildingFilter}
-              onChange={(_, value) => setBuildingFilter(value || '')}
+              options={Array.from(new Map(pendingDocs.map(doc => [doc.buildingId, doc])).values())}
+              getOptionLabel={option => `${option.buildingName} - ${option.buildingAddress || ''}`}
+              value={pendingDocs.find(doc => doc.buildingId === buildingFilter) || null}
+              onChange={(_, value) => setBuildingFilter(value?.buildingId || '')}
               renderInput={params => <TextField {...params} label="Filtrar por edificio" fullWidth />}
+              renderOption={(props, option) => {
+                const { key, ...otherProps } = props;
+                return (
+                  <Box component="li" key={key} {...otherProps}>
+                    <Box>
+                      <Typography variant="body2" fontWeight="bold">{option.buildingName}</Typography>
+                      {option.buildingAddress && (
+                        <Typography variant="caption" color="text.secondary">{option.buildingAddress}</Typography>
+                      )}
+                    </Box>
+                  </Box>
+                );
+              }}
               sx={{ mb: 2 }}
             />
             <Autocomplete
               multiple
-              options={pendingDocs.filter(doc => !buildingFilter || doc.buildingName === buildingFilter)}
+              options={pendingDocs.filter(doc => !buildingFilter || doc.buildingId === buildingFilter)}
               groupBy={option => option.buildingName}
               getOptionLabel={option => {
                 const tipo = option.type === 'REMITO' ? 'Remito' : 'Factura';
-                const fecha = option.date ? new Date(option.date).toLocaleDateString() : '-';
+                const fecha = option.date ? formatDate(option.date) : '-';
                 return `${tipo} - ${fecha} - ${formatCurrency(option.amount)}`;
               }}
               value={selectedDocs}
@@ -324,7 +338,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                 <li {...props} key={option.id}>
                   <Box>
                     <Typography variant="body2">
-                      {option.type === 'REMITO' ? 'Remito' : 'Factura'} - {option.date ? new Date(option.date).toLocaleDateString() : '-'} - {formatCurrency(option.amount)}
+                      {option.type === 'REMITO' ? 'Remito' : 'Factura'} - {option.date ? formatDate(option.date) : '-'} - {formatCurrency(option.amount)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {option.buildingName} - {option.description}
@@ -472,7 +486,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                         <Box display="flex" justifyContent="space-between" alignItems="center">
                           <Box>
                             <Typography variant="body2" fontWeight="bold">
-                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {new Date(item.doc.date).toLocaleDateString()}
+                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {formatDate(item.doc.date)}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
                               {item.doc.buildingName} - {item.doc.description}

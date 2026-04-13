@@ -51,6 +51,7 @@ import {
 } from "@mui/icons-material";
 import api from '@/lib/axios';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { formatDate } from '@/utils/formatDate';
 import BuildingPaymentModal from '../administrators/BuildingPaymentModal';
 import MassivePaymentModal from '../administrators/MassivePaymentModal';
 
@@ -336,13 +337,7 @@ export default function PaymentsPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('es-AR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
+
 
   return (
     <Box sx={{ p: 3 }}>
@@ -787,7 +782,7 @@ export default function PaymentsPage() {
                         {option.name}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        CUIT: {option.cuit} | {option.address}
+                        CUIT: {option.cuit} | <strong>{option.address}</strong>
                       </Typography>
                       {option.administrator && (
                         <Typography variant="caption" color="text.secondary" display="block">
@@ -833,7 +828,8 @@ export default function PaymentsPage() {
           <Box sx={{ pt: 2 }}>
             <Autocomplete
               options={administrators}
-              getOptionLabel={(option) => option.name}
+              getOptionLabel={(option) => `${option.name} ${option.cuit || ''} ${(option.cuits || []).join(' ')}`}
+              filterOptions={(x) => x}
               loading={loadingAdminSearch}
               onInputChange={(_, value) => {
                 setAdminSearchInput(value);
@@ -847,7 +843,7 @@ export default function PaymentsPage() {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Buscar por nombre"
+                  label="Buscar por nombre o CUIT"
                   placeholder="Escribe al menos 2 caracteres..."
                   InputProps={{
                     ...params.InputProps,
@@ -869,7 +865,8 @@ export default function PaymentsPage() {
                         {option.name}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {option.email} | {option.phone}
+                        {option.email} | {option.phone}{option.cuit ? ` | CUIT: ${option.cuit}` : ''}
+                        {option.cuits?.length > 0 && ` | CUITs: ${option.cuits.join(', ')}`}
                       </Typography>
                     </Box>
                   </Box>

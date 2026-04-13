@@ -28,9 +28,11 @@ import {
   Divider,
   TextField,
   InputAdornment,
-  Stack
+  Stack,
+  TableSortLabel
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
+import { formatDate } from '@/utils/formatDate';
 import {
   KeyboardArrowDown,
   KeyboardArrowUp,
@@ -139,10 +141,42 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   
+  // Sort state
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
   // Delete Service State
   const [deleteServiceOpen, setDeleteServiceOpen] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
   const [deletingService, setDeletingService] = useState(false);
+
+  // Edit Remito Date State
+  const [editingRemitoId, setEditingRemitoId] = useState<string | null>(null);
+  const [editingRemitoDate, setEditingRemitoDate] = useState<string>('');
+  const [savingRemitoDate, setSavingRemitoDate] = useState(false);
+
+  const handleEditRemitoDate = (remitoId: string, currentDate: string) => {
+    // currentDate is ISO string, extract YYYY-MM-DD for input
+    const match = currentDate.match(/^(\d{4}-\d{2}-\d{2})/);
+    setEditingRemitoDate(match ? match[1] : '');
+    setEditingRemitoId(remitoId);
+  };
+
+  const handleSaveRemitoDate = async (remitoId: string) => {
+    if (!editingRemitoDate) return;
+    setSavingRemitoDate(true);
+    try {
+      const token = localStorage.getItem('token');
+      await api.patch(`/remitos/${remitoId}`, { date: editingRemitoDate }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEditingRemitoId(null);
+      fetchHistory();
+    } catch (err) {
+      console.error('Error al actualizar fecha:', err);
+    } finally {
+      setSavingRemitoDate(false);
+    }
+  };
 
   // Edit Invoice State
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
@@ -214,7 +248,8 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     const margin = 14;
     const companyEmail = 'garciacoelho@hotmail.com';
     const companyPhone = '11 3834-1046';
-    const today = new Date().toLocaleDateString('es-AR');
+    const todayIso = new Date().toISOString();
+    const today = formatDate(todayIso);
 
     // Cargar logo
     let logoImg: HTMLImageElement | null = null;
@@ -299,7 +334,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
         doc.setFontSize(9);
       }
 
-      const date = new Date(service.createdAt).toLocaleDateString('es-AR');
+      const date = service.remitos?.[0]?.date ? formatDate(service.remitos[0].date) : '-';
 
       // Descripción: sólo lo realizado — sin "Servicio", sin nombre ni dirección del edificio
       let rawDesc = service.description || service.name || '';
@@ -432,10 +467,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     return statusMap[status] || 'default';
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('es-AR');
-  };
+
 
   // Determine modal content
   let modalContent = null;
@@ -586,7 +618,15 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                   <TableHead>
                     <TableRow>
                       <TableCell width={50}></TableCell>
-                      <TableCell>Fecha</TableCell>
+                      <TableCell sortDirection={sortOrder}>
+                        <TableSortLabel
+                          active
+                          direction={sortOrder}
+                          onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                        >
+                          Fecha
+                        </TableSortLabel>
+                      </TableCell>
                       <TableCell>Descripción</TableCell>
                       <TableCell>Técnico</TableCell>
                       <TableCell>Estado</TableCell>
@@ -595,7 +635,11 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {data.services.map((service) => {
+                    {[...data.services].sort((a, b) => {
+                      const dateA = a.remitos?.[0]?.date ? new Date(a.remitos[0].date).getTime() : 0;
+                      const dateB = b.remitos?.[0]?.date ? new Date(b.remitos[0].date).getTime() : 0;
+                      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+                    }).map((service) => {
                       const isExpanded = expandedServices.has(service.id);
                       const totalService = service.invoice?.amount || 0 + service.remitos.reduce((sum, r) => sum + r.amount, 0);
                       const hasDocuments = service.invoice || service.remitos.length > 0;
@@ -613,10 +657,39 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                 </IconButton>
                               )}
                             </TableCell>
-                            <TableCell>{formatDate(service.remitos?.[0]?.date || service.visitDate || service.createdAt)}</TableCell>
+                            <TableCell sx={{ minWidth: 140 }}>
+                              {service.remitos?.[0]?.date ? (
+                                editingRemitoId === service.remitos[0].id ? (
+                                  <Box display="flex" alignItems="center" gap={0.5}>
+                                    <TextField
+                                      type="date"
+                                      size="small"
+                                      value={editingRemitoDate}
+                                      onChange={e => setEditingRemitoDate(e.target.value)}
+                                      disabled={savingRemitoDate}
+                                      sx={{ width: 140 }}
+                                      inputProps={{ style: { fontSize: 13, padding: '4px 6px' } }}
+                                    />
+                                    <IconButton size="small" color="success" disabled={savingRemitoDate} onClick={() => handleSaveRemitoDate(service.remitos[0].id)}>
+                                      <CheckCircle fontSize="small" />
+                                    </IconButton>
+                                    <IconButton size="small" disabled={savingRemitoDate} onClick={() => setEditingRemitoId(null)}>
+                                      <Delete fontSize="small" />
+                                    </IconButton>
+                                  </Box>
+                                ) : (
+                                  <Box display="flex" alignItems="center" gap={0.5}>
+                                    <Typography variant="body2">{formatDate(service.remitos[0].date)}</Typography>
+                                    <IconButton size="small" onClick={() => handleEditRemitoDate(service.remitos[0].id, service.remitos[0].date)}>
+                                      <Edit fontSize="small" />
+                                    </IconButton>
+                                  </Box>
+                                )
+                              ) : '-'}
+                            </TableCell>
                             <TableCell>
                               <Typography variant="body2" fontWeight="medium">
-                                {service.name}
+                                {service.name} - {data.building.address}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {service.description}
@@ -902,7 +975,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
         <DialogTitle>
           <Typography variant="h5" component="div">
-            Historial de Servicios
+            Historial de Servicios{data?.building?.address ? ` - ${data.building.address}` : ''}
           </Typography>
         </DialogTitle>
         <DialogContent>

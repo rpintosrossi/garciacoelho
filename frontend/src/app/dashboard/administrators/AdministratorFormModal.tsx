@@ -26,6 +26,8 @@ interface Administrator {
   phoneNames?: string[];
   emails?: string[];
   emailNames?: string[];
+  cuits?: string[];
+  cuitNames?: string[];
   officeAddress?: string;
 }
 
@@ -48,6 +50,8 @@ const validationSchema = Yup.object({
   phoneNames: Yup.array().of(Yup.string()),
   emails: Yup.array().of(Yup.string().email("Email inválido")),
   emailNames: Yup.array().of(Yup.string()),
+  cuits: Yup.array().of(Yup.string()),
+  cuitNames: Yup.array().of(Yup.string()),
   officeAddress: Yup.string(),
 });
 
@@ -70,6 +74,8 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
       phoneNames: [],
       emails: [],
       emailNames: [],
+      cuits: [],
+      cuitNames: [],
       officeAddress: "",
     },
     validationSchema,
@@ -117,6 +123,8 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
           phoneNames: editing.phoneNames || [],
           emails: editing.emails || [],
           emailNames: editing.emailNames || [],
+          cuits: editing.cuits || [],
+          cuitNames: editing.cuitNames || [],
           officeAddress: editing.officeAddress || "",
         });
       } else {
@@ -316,6 +324,58 @@ const AdministratorFormModal: React.FC<AdministratorFormModalProps> = ({
             sx={{ mt: 1 }}
           >
             + Agregar Email
+          </Button>
+
+          {/* CUITs adicionales */}
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>CUITs Adicionales</Typography>
+          {formik.values.cuits && formik.values.cuits.map((cuit, index) => (
+            <Box key={index} display="flex" gap={2} sx={{ mb: 1 }}>
+              <TextField
+                label={`CUIT ${index + 1}`}
+                value={cuit}
+                onChange={(e) => {
+                  const newCuits = [...(formik.values.cuits || [])];
+                  newCuits[index] = e.target.value;
+                  formik.setFieldValue('cuits', newCuits);
+                }}
+                sx={{ flex: 1 }}
+                size="small"
+              />
+              <TextField
+                label={`Nombre ${index + 1}`}
+                value={formik.values.cuitNames?.[index] || ''}
+                onChange={(e) => {
+                  const newCuitNames = [...(formik.values.cuitNames || [])];
+                  newCuitNames[index] = e.target.value;
+                  formik.setFieldValue('cuitNames', newCuitNames);
+                }}
+                sx={{ flex: 1 }}
+                size="small"
+              />
+              <IconButton
+                color="error"
+                onClick={() => {
+                  const newCuits = (formik.values.cuits || []).filter((_, i) => i !== index);
+                  const newCuitNames = (formik.values.cuitNames || []).filter((_, i) => i !== index);
+                  formik.setFieldValue('cuits', newCuits);
+                  formik.setFieldValue('cuitNames', newCuitNames);
+                }}
+                size="small"
+              >
+                <Delete />
+              </IconButton>
+            </Box>
+          ))}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              formik.setFieldValue('cuits', [...(formik.values.cuits || []), '']);
+              formik.setFieldValue('cuitNames', [...(formik.values.cuitNames || []), '']);
+            }}
+            sx={{ mt: 1 }}
+          >
+            + Agregar CUIT
           </Button>
         </DialogContent>
         <DialogActions>

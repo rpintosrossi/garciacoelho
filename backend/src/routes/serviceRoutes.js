@@ -19,7 +19,8 @@ const {
   getServiceCounts,
   getServiceStats,
   getAssignedServicesForTechnician,
-  cancelService
+  cancelService,
+  markServiceNoCharge
 } = require('../controllers/serviceController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -93,6 +94,9 @@ router.post('/:id/receipt', (req, res, next) => {
 
 // Ruta para anular servicio (solo TECNICO asignado)
 router.post('/:id/cancel', roleMiddleware(['TECNICO', 'ADMIN', 'OPERADOR']), cancelService);
+
+// Ruta para marcar servicio sin cobro económico (solo ADMIN u OPERADOR)
+router.patch('/:id/no-charge', roleMiddleware(['ADMIN', 'OPERADOR']), markServiceNoCharge);
 
 // Ruta para crear factura (solo ADMIN u OPERADOR)
 router.post('/:id/invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInvoice);

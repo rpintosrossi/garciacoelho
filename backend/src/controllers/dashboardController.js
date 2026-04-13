@@ -160,6 +160,47 @@ const getQuickStats = async (req, res) => {
   }
 };
 
+// Obtener pagos agrupados por método de pago y mes (últimos 12 meses)
+const getPaymentsByMethod = async (req, res) => {
+  try {
+    const now = new Date();
+    const since = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    const payments = await prisma.payment.findMany({
+      where: { date: { gte: since } },
+      select: { amount: true, method: true, date: true }
+    });
+
+    // Agrupar por mes y método
+    const map = {}; // { 'YYYY-MM': { metodo: total } }
+    for (const p of payments) {
+      const d = new Date(p.date);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      if (!map[key]) map[key] = {};
+      map[key][p.method] = (map[key][p.method] || 0) + p.amount;
+    }
+
+    // Obtener todos los métodos distintos
+    const allMethods = [...new Set(payments.map(p => p.method))].sort();
+
+    // Convertir a array ordenado por mes
+    const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const data = Object.keys(map).sort().map(mesKey => {
+      const [y, m] = mesKey.split('-');
+      const row = { mes: `${monthNames[+m - 1]} ${y}` };
+      for (const method of allMethods) {
+        row[method] = map[mesKey][method] || 0;
+      }
+      return row;
+    });
+
+    res.json({ data, methods: allMethods });
+  } catch (error) {
+    console.error('Error al obtener pagos por método:', error);
+    res.status(500).json({ message: 'Error al obtener pagos por método' });
+  }
+};
+
 // Obtener empresas con deudas que superen el umbral de tolerancia
 const getBuildingsWithOverdueDebts = async (req, res) => {
   try {
@@ -267,5 +308,6 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
 
 module.exports = {
   getQuickStats,
-  getBuildingsWithOverdueDebts
+  getBuildingsWithOverdueDebts,
+  getPaymentsByMethod
 }; 

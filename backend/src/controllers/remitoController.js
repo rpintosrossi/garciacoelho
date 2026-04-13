@@ -35,13 +35,21 @@ const createRemito = async (req, res) => {
       }
     }
 
+    // Parsear fecha como mediodía UTC para evitar desfasaje de zona horaria
+    const parseDateNoon = (d) => {
+      if (!d) return new Date();
+      const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12, 0, 0));
+      return new Date(d);
+    };
+
     // Crear el remito y actualizar el estado del servicio en una transacción
     const [remito, updatedService] = await prisma.$transaction([
       prisma.remito.create({
         data: {
           serviceId,
           amount: parseFloat(amount),
-          date: date ? new Date(date) : new Date(),
+          date: parseDateNoon(date),
           number: remitoNumber
         }
       }),
@@ -58,4 +66,25 @@ const createRemito = async (req, res) => {
   }
 };
 
-module.exports = { createRemito }; 
+// Actualizar fecha de remito
+const updateRemitoDate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date } = req.body;
+    if (!date) return res.status(400).json({ message: 'Fecha requerida' });
+    const remito = await prisma.remito.findUnique({ where: { id } });
+    if (!remito) return res.status(404).json({ message: 'Remito no encontrado' });
+    const m = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const parsedDate = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12, 0, 0)) : new Date(date);
+    const updated = await prisma.remito.update({
+      where: { id },
+      data: { date: parsedDate }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error al actualizar fecha de remito:', error);
+    res.status(500).json({ message: 'Error al actualizar fecha de remito' });
+  }
+};
+
+module.exports = { createRemito, updateRemitoDate };

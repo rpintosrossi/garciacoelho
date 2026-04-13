@@ -36,11 +36,14 @@ import {
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
+  Legend
 } from 'recharts';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
@@ -90,6 +93,7 @@ const QuickAccessCard = ({ title, value, icon: Icon, color, onClick }: any) => {
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [trabajosPorMes, setTrabajosPorMes] = useState<any[]>([]);
+  const [paymentsByMethod, setPaymentsByMethod] = useState<{ data: any[], methods: string[] }>({ data: [], methods: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overdueDebts, setOverdueDebts] = useState<any>(null);
@@ -112,10 +116,11 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [quickStatsRes, serviceStatsRes, overdueDebtsRes] = await Promise.all([
+        const [quickStatsRes, serviceStatsRes, overdueDebtsRes, paymentsByMethodRes] = await Promise.all([
           cachedApi.get('/dashboard/quick-stats'),
           cachedApi.get('/services/stats'),
-          cachedApi.get('/dashboard/overdue-debts')
+          cachedApi.get('/dashboard/overdue-debts'),
+          cachedApi.get('/dashboard/payments-by-method')
         ]);
         setStats(quickStatsRes.data);
         // Formatear datos para el gráfico
@@ -126,6 +131,7 @@ export default function DashboardPage() {
         }));
         setTrabajosPorMes(chartData);
         setOverdueDebts(overdueDebtsRes.data);
+        setPaymentsByMethod(paymentsByMethodRes.data);
       } catch (err: any) {
         setError(err.response?.data?.message || 'Error al cargar estadísticas');
       } finally {
@@ -147,10 +153,7 @@ export default function DashboardPage() {
     return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
   }  return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h4">
-          Dashboard
-        </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
         <Button 
           variant="outlined" 
           size="small"
@@ -160,7 +163,7 @@ export default function DashboardPage() {
           🔄 Actualizar Datos
         </Button>
       </Box>
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 3, justifyContent: 'center' }}>
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Edificios"
@@ -206,20 +209,44 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Servicios creados por mes
-        </Typography>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={trabajosPorMes} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="mes" />
-            <YAxis allowDecimals={false} />
-            <RechartsTooltip />
-            <Bar dataKey="cantidad" fill={theme.palette.primary.main} />
-          </BarChart>
-        </ResponsiveContainer>
-      </Paper>
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Servicios creados por mes
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={trabajosPorMes} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" />
+                <YAxis allowDecimals={false} />
+                <RechartsTooltip />
+                <Bar dataKey="cantidad" fill={theme.palette.primary.main} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Cobros por método de pago (últimos 12 meses)
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={paymentsByMethod.data} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" />
+                <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
+                <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
+                <Legend />
+                {paymentsByMethod.methods.map((method, i) => {
+                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+                  return <Line key={method} type="monotone" dataKey={method} stroke={colors[i % colors.length]} strokeWidth={2} dot={{ r: 3 }} />;
+                })}
+              </LineChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+      </Grid>
 
       {/* Sección de deudas vencidas */}
       {overdueDebts && overdueDebts.buildingsOverThreshold > 0 && (

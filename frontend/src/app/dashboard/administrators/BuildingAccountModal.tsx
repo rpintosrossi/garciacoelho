@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import api from '@/lib/axios';
+import { formatDate } from '@/utils/formatDate';
 import {
   Dialog,
   DialogTitle,
@@ -152,9 +153,7 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('es-AR');
-  };
+
 
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
     // Abrir el archivo en una nueva pestaña o descargarlo
@@ -259,7 +258,7 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                           )}
                         </TableCell>
                         <TableCell>
-                          {formatDate(transaction.createdAt)}
+                          {formatDate(transaction.date || transaction.createdAt)}
                         </TableCell>
                         <TableCell>
                           <Chip 

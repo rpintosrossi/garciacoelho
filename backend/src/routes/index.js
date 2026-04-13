@@ -48,6 +48,7 @@ router.get('/payments/buildings', paymentController.getBuildingPayments);
 router.get('/payments/administrators', paymentController.getAdministratorPayments);
 router.patch('/payments/:id/comment', paymentController.updatePaymentComment);
 router.post('/remitos', remitoController.createRemito);
+router.patch('/remitos/:id', remitoController.updateRemitoDate);
 
 // Endpoint de prueba simple para diagnosticar datos
 router.get('/test-data', async (req, res) => {

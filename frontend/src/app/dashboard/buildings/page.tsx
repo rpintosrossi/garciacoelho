@@ -303,11 +303,13 @@ const BuildingsPage = () => {
   const handleCloseHistory = () => {
     setOpenHistory(false);
     setHistoryBuildingId(null);
+    fetchBuildings();
   };
 
   const handleCloseAccount = () => {
     setOpenAccount(false);
     setSelectedBuilding(null);
+    fetchBuildings();
   };
 
   const handleAdministratorCreated = (newAdmin: any) => {

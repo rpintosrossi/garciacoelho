@@ -36,6 +36,7 @@ import {
 } from '@mui/material';
 import { ExpandMore, PictureAsPdf, Search as SearchIcon, Undo as UndoIcon } from '@mui/icons-material';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { formatDate } from '@/utils/formatDate';
 import api, { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 
@@ -552,7 +553,7 @@ export default function PackagePage() {
                               </Typography>
                               <Typography component="span" variant="body2" color="text.secondary" display="block">
                                 {transaction.type === 'invoice' ? 'Factura' : 'Comprobante'}: {transaction.type === 'invoice' ? (transaction.number || transaction.id.slice(0, 8)) : transaction.comprobante} | 
-                                Fecha: {new Date(transaction.remitos?.[0]?.date || transaction.service?.remitos?.[0]?.date || transaction.service?.visitDate || transaction.date || transaction.createdAt).toLocaleDateString('es-AR')} |
+                                Fecha: {formatDate(transaction.remitos?.[0]?.date || transaction.service?.remitos?.[0]?.date || transaction.service?.visitDate || transaction.date || transaction.createdAt)} |
                                 Técnico: {transaction.technician?.name || transaction.service?.technician?.name || 'No asignado'}
                               </Typography>
                               {transaction.remitos && transaction.remitos.length > 0 && (

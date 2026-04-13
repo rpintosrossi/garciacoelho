@@ -628,12 +628,20 @@ const uploadReceipt = async (req, res) => {
     });
     console.log('URLs de archivos a guardar:', fileUrls);
     
+    // Parsear fecha como mediodía UTC para evitar desfasaje de zona horaria
+    const parseDateNoon = (d) => {
+      if (!d) return new Date();
+      const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12, 0, 0));
+      return new Date(d);
+    };
+
     // Crear el remito en la base de datos
     console.log('Creando remito con datos:', {
       serviceId: id,
       number: finalRemitoNumber,
       amount: 0,
-      date: remitoDate ? new Date(remitoDate) : new Date(),
+      date: parseDateNoon(remitoDate),
       receiptImages: fileUrls
     });
     
@@ -644,7 +652,7 @@ const uploadReceipt = async (req, res) => {
           serviceId: id,
           number: finalRemitoNumber,
           amount: 0, // Se puede actualizar después
-          date: remitoDate ? new Date(remitoDate) : new Date(),
+          date: parseDateNoon(remitoDate),
           receiptImages: fileUrls
         }
       });
@@ -1525,6 +1533,34 @@ const importInvoiceMultiple = async (req, res) => {
   }
 };
 
+const markServiceNoCharge = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const service = await prisma.service.findUnique({
+      where: { id }
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    if (service.status !== 'CON_REMITO') {
+      return res.status(400).json({ message: 'El servicio debe tener estado CON_REMITO para marcarlo sin cobro' });
+    }
+
+    const updated = await prisma.service.update({
+      where: { id },
+      data: { status: 'SIN_COBRO' }
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error al marcar servicio sin cobro:', error);
+    res.status(500).json({ message: 'Error al marcar servicio sin cobro', error: error.message });
+  }
+};
+
 module.exports = {
   getAllServices,
   getServiceById,
@@ -1544,5 +1580,6 @@ module.exports = {
   getServiceCounts,
   getServiceStats,
   getAssignedServicesForTechnician,
-  cancelService
+  cancelService,
+  markServiceNoCharge
 }; 

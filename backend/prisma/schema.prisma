@@ -32,6 +32,8 @@ model Administrator {
   emails            String[]
   phoneNames        String[]
   phones            String[]
+  cuits             String[]
+  cuitNames         String[]
   officeAddress     String?
   buildings         Building[]
 
@@ -301,6 +303,7 @@ enum ServiceStatus {
   ASIGNADO
   CON_REMITO
   FACTURADO
+  SIN_COBRO
 }
 
 enum InvoiceStatus {

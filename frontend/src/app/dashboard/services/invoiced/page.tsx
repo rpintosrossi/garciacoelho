@@ -36,6 +36,7 @@ import axios from '@/lib/axios';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
 import { formatCurrency } from '@/utils/formatCurrency';
@@ -96,6 +97,11 @@ export default function InvoicedServices() {
   const [serviceToDelete, setServiceToDelete] = useState<string | null>(null);
   const [deletingService, setDeletingService] = useState(false);
 
+  // No-charge service state
+  const [noChargeDialogOpen, setNoChargeDialogOpen] = useState(false);
+  const [serviceToNoCharge, setServiceToNoCharge] = useState<string | null>(null);
+  const [markingNoCharge, setMarkingNoCharge] = useState(false);
+
   const handleDeleteClick = (serviceId: string) => {
     setServiceToDelete(serviceId);
     setDeleteDialogOpen(true);
@@ -122,6 +128,35 @@ export default function InvoicedServices() {
       alert(err?.response?.data?.message || 'Error al eliminar el servicio');
     } finally {
       setDeletingService(false);
+    }
+  };
+
+  const handleNoChargeClick = (serviceId: string) => {
+    setServiceToNoCharge(serviceId);
+    setNoChargeDialogOpen(true);
+  };
+
+  const handleNoChargeClose = () => {
+    setNoChargeDialogOpen(false);
+    setServiceToNoCharge(null);
+  };
+
+  const handleConfirmNoCharge = async () => {
+    if (!serviceToNoCharge) return;
+    setMarkingNoCharge(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.patch(`/services/${serviceToNoCharge}/no-charge`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      handleNoChargeClose();
+      cachedApi.clearCacheFor('/services');
+      await fetchServices();
+    } catch (err: any) {
+      console.error('Error marcando servicio sin cobro:', err);
+      alert(err?.response?.data?.message || 'Error al marcar el servicio como sin cobro');
+    } finally {
+      setMarkingNoCharge(false);
     }
   };
   const [remitoAmount, setRemitoAmount] = useState('');
@@ -801,6 +836,14 @@ export default function InvoicedServices() {
                         Ver Detalles
                       </Button>
                       <IconButton
+                        color="success"
+                        title="Sin cobro económico"
+                        onClick={() => handleNoChargeClick(service.id)}
+                        disabled={markingNoCharge}
+                      >
+                        <CheckCircleIcon />
+                      </IconButton>
+                      <IconButton
                         color="error"
                         title="Eliminar servicio"
                         onClick={() => handleDeleteClick(service.id)}
@@ -837,6 +880,21 @@ export default function InvoicedServices() {
           <Button onClick={handleDeleteClose} disabled={deletingService}>Cancelar</Button>
           <Button onClick={handleConfirmDelete} variant="contained" color="error" disabled={deletingService}>
             {deletingService ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={noChargeDialogOpen} onClose={handleNoChargeClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Sin Cobro Económico</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mt: 1 }}>
+            ¿Confirmas que este servicio fue completado sin cobro económico? El servicio quedará registrado en el historial del edificio.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleNoChargeClose} disabled={markingNoCharge}>Cancelar</Button>
+          <Button onClick={handleConfirmNoCharge} variant="contained" color="success" disabled={markingNoCharge}>
+            {markingNoCharge ? 'Guardando...' : 'Confirmar'}
           </Button>
         </DialogActions>
       </Dialog>

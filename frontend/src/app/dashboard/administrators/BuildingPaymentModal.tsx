@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import api from '@/lib/axios';
+import { formatDate } from '@/utils/formatDate';
 import {
   Dialog,
   DialogTitle,
@@ -350,7 +351,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
               getOptionLabel={option => {
                 const tipo = option.type === 'REMITO' ? 'Remito' : 'Factura';
                 const numero = option.number ? ` #${option.number}` : '';
-                const fecha = option.date ? new Date(option.date).toLocaleDateString() : '-';
+                const fecha = option.date ? formatDate(option.date) : '-';
                 return `${tipo}${numero} - ${fecha} - ${formatCurrency(option.amount)}`;
               }}
               value={selectedDocs}
@@ -361,7 +362,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                 <li {...props} key={option.id}>
                   <Box>
                     <Typography variant="body2">
-                      {option.type === 'REMITO' ? 'Remito' : 'Factura'}{option.number ? ` #${option.number}` : ''} - {option.date ? new Date(option.date).toLocaleDateString() : '-'} - {formatCurrency(option.amount)}
+                      {option.type === 'REMITO' ? 'Remito' : 'Factura'}{option.number ? ` #${option.number}` : ''} - {option.date ? formatDate(option.date) : '-'} - {formatCurrency(option.amount)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {option.description}
@@ -508,7 +509,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
                         <Box display="flex" justifyContent="space-between" alignItems="center">
                           <Box>
                             <Typography variant="body2" fontWeight="bold">
-                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {new Date(item.doc.date).toLocaleDateString()}
+                              {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {formatDate(item.doc.date)}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
                               {item.doc.description}

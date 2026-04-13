@@ -1348,38 +1348,35 @@ const getBuildingServiceHistory = async (req, res) => {
 
     // Calcular totales usando servicesForSummary
     const totalServices = servicesForSummary.length;
-    const totalInvoices = servicesForSummary.filter(s => s.invoice).length;
     const totalRemitos = servicesForSummary.reduce((sum, s) => sum + s.remitos.length, 0);
-    
-    // Calcular monto total facturado y pagado
+
+    // Deduplicar facturas (múltiples servicios pueden compartir la misma factura)
+    const invoiceMap = new Map();
+    servicesForSummary.forEach(service => {
+      if (service.invoice && !invoiceMap.has(service.invoice.id)) {
+        invoiceMap.set(service.invoice.id, service.invoice);
+      }
+    });
+    const uniqueInvoices = Array.from(invoiceMap.values());
+    const totalInvoices = uniqueInvoices.length;
+
+    // Calcular saldo usando la misma lógica que account.balance en getBuildings:
+    // sum(facturas) - sum(pagos aplicados) - sum(descuentos)
+    // NO incluir remitos para mantener consistencia con el saldo de la lista
     let totalInvoiced = 0;
     let totalPaid = 0;
 
-    servicesForSummary.forEach(service => {
-      // Sumar facturas
-      if (service.invoice) {
-        totalInvoiced += service.invoice.amount;
-        
-        // Sumar pagos de facturas
-        if (service.invoice.paymentDocuments) {
-          service.invoice.paymentDocuments.forEach(pd => {
-            totalPaid += pd.amount;
-          });
+    for (const inv of uniqueInvoices) {
+      totalInvoiced += inv.amount;
+      if (inv.paymentDocuments) {
+        for (const pd of inv.paymentDocuments) {
+          totalPaid += pd.amount;
+          if (pd.payment?.discount) {
+            totalPaid += pd.payment.discount;
+          }
         }
       }
-
-      // Sumar remitos
-      service.remitos.forEach(remito => {
-        totalInvoiced += remito.amount;
-        
-        // Sumar pagos de remitos
-        if (remito.paymentDocuments) {
-          remito.paymentDocuments.forEach(pd => {
-            totalPaid += pd.amount;
-          });
-        }
-      });
-    });
+    }
 
     res.json({
       building: {

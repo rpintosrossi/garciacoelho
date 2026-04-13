@@ -11,11 +11,25 @@ const getAdministrators = async (req, res) => {
       // Construir filtro de búsqueda para datos básicos
       let whereClause = {};
       if (search) {
+        // Buscar IDs de admins que tengan el search en su array cuits (búsqueda parcial vía SQL raw)
+        let cuitsMatchIds = [];
+        try {
+          const rawResults = await prisma.$queryRaw`
+            SELECT id FROM "Administrator"
+            WHERE EXISTS (
+              SELECT 1 FROM unnest("cuits") AS c
+              WHERE c ILIKE ${'%' + search + '%'}
+            )
+          `;
+          cuitsMatchIds = rawResults.map(r => r.id);
+        } catch (_) {}
+
         whereClause = {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
-            { cuit: { contains: search, mode: 'insensitive' } }
+            { cuit: { contains: search, mode: 'insensitive' } },
+            ...(cuitsMatchIds.length > 0 ? [{ id: { in: cuitsMatchIds } }] : [])
           ]
         };
       }
@@ -32,7 +46,9 @@ const getAdministrators = async (req, res) => {
           phones: true,
           phoneNames: true,
           emails: true,
-          emailNames: true
+          emailNames: true,
+          cuits: true,
+          cuitNames: true
         },
         orderBy: {
           name: 'asc'
@@ -50,11 +66,25 @@ const getAdministrators = async (req, res) => {
     // Construir filtro de búsqueda
     let whereClause = {};
     if (search) {
+      // Buscar IDs de admins que tengan el search en su array cuits (búsqueda parcial vía SQL raw)
+      let cuitsMatchIds = [];
+      try {
+        const rawResults = await prisma.$queryRaw`
+          SELECT id FROM "Administrator"
+          WHERE EXISTS (
+            SELECT 1 FROM unnest("cuits") AS c
+            WHERE c ILIKE ${'%' + search + '%'}
+          )
+        `;
+        cuitsMatchIds = rawResults.map(r => r.id);
+      } catch (_) {}
+
       whereClause = {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
-          { cuit: { contains: search, mode: 'insensitive' } }
+          { cuit: { contains: search, mode: 'insensitive' } },
+          ...(cuitsMatchIds.length > 0 ? [{ id: { in: cuitsMatchIds } }] : [])
         ]
       };
     }
@@ -233,7 +263,7 @@ const getAdministratorById = async (req, res) => {
 // Crear un nuevo administrador
 const createAdministrator = async (req, res) => {
   try {
-    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
+    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, cuits, cuitNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: { email }
@@ -254,6 +284,8 @@ const createAdministrator = async (req, res) => {
         phoneNames: phoneNames || [],
         emails: emails || [],
         emailNames: emailNames || [],
+        cuits: cuits || [],
+        cuitNames: cuitNames || [],
         officeAddress: officeAddress || null
       }
     });
@@ -269,7 +301,7 @@ const createAdministrator = async (req, res) => {
 const updateAdministrator = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, officeAddress } = req.body;
+    const { name, administratorName, email, phone, cuit, phones, phoneNames, emails, emailNames, cuits, cuitNames, officeAddress } = req.body;
 
     const existingAdministrator = await prisma.administrator.findFirst({
       where: {
@@ -296,6 +328,8 @@ const updateAdministrator = async (req, res) => {
         phoneNames,
         emails,
         emailNames,
+        cuits: cuits || [],
+        cuitNames: cuitNames || [],
         officeAddress
       }
     });
@@ -469,6 +503,7 @@ const getPendingInvoicesForAdmin = async (req, res) => {
               serviceId: service.id,
               buildingId: building.id,
               buildingName: building.name,
+              buildingAddress: building.address,
               description: service.description,
               amount: montoPendiente,
               date: service.invoice.createdAt
@@ -508,6 +543,7 @@ const getPendingInvoicesForAdmin = async (req, res) => {
               serviceId: service.id,
               buildingId: building.id,
               buildingName: building.name,
+              buildingAddress: building.address,
               description: service.description,
               amount: montoPendiente,
               date: remito.date
