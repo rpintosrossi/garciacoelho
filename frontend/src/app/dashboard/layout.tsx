@@ -175,6 +175,11 @@ export default function DashboardLayout({
       icon: <BuildingIcon sx={{ color: '#ff5722' }} />,
       path: '/dashboard/reports/building-debt',
     },
+    {
+      text: 'Motivos Sin Cobro',
+      icon: <AssessmentIcon sx={{ color: '#10b981' }} />,
+      path: '/dashboard/reports/no-charge-stats',
+    },
   ];
 
   const drawer = (

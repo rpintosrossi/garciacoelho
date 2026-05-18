@@ -605,7 +605,7 @@ const getPackages = async (req, res) => {
           hasInvoicePDF: invoice.fileUrl && isPDF(invoice.fileUrl),
           // Para facturas informales, agregar campos de remito sin factura
           ...(invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO' && {
-            comprobante: `REMITO-SIN-FACTURA-${invoice.id.slice(0, 8)}`,
+          comprobante: invoice.number || `REMITO-SIN-FACTURA-${invoice.id.slice(0, 8)}`,
             paymentMethod: { name: 'Cuenta Corriente' }
           })
         };
@@ -811,10 +811,18 @@ const getPackages = async (req, res) => {
       return res.status(404).json({ message: 'No hay facturas ni cobros para este administrador' });
     }
 
-    // Calcular totales
-    const totalFacturas = pendingInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
-    const totalProv = payments.reduce((sum, pay) => sum + pay.amount, 0);
-    const netoTotal = totalFacturas - totalProv;
+    // Calcular totales separando facturas formales de provs
+    const formalInvoices = pendingInvoices.filter(inv => {
+      const firstService = inv.services?.[0];
+      return !(inv.status === 'PENDIENTE' && firstService?.status === 'FACTURADO');
+    });
+    const provInvoices = pendingInvoices.filter(inv => {
+      const firstService = inv.services?.[0];
+      return inv.status === 'PENDIENTE' && firstService?.status === 'FACTURADO';
+    });
+    const totalFacturas = formalInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
+    const totalProv = provInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
+    const netoTotal = totalFacturas + totalProv;
 
     // Crear el PDF del paquete
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -930,7 +938,7 @@ const getPackages = async (req, res) => {
                      try {
                        console.log(`📥 [PACKAGES] Descargando PDF de remito de pago desde: ${fileUrl}`);
                        const pdfBuffer = await downloadFile(fileUrl);
-                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
+                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}`, buildingAddress: remito.service?.building?.address || '' });
                        console.log(`✅ [PACKAGES] PDF de remito de pago descargado: ${remito.number}`);
                      } catch (error) {
                        console.error(`❌ [PACKAGES] Error al descargar PDF de remito de pago ${fileUrl}:`, error.message);
@@ -940,7 +948,7 @@ const getPackages = async (req, res) => {
                        console.log(`📥 [PACKAGES] Descargando imagen de remito de pago desde: ${fileUrl}`);
                        const imageBuffer = await downloadFile(fileUrl);
                        const pdfBuffer = await imageToPdf(imageBuffer, fileUrl);
-                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}` });
+                       orphanRemitoPDFs.push({ buffer: pdfBuffer, name: `remito_pago_${remito.number}`, buildingAddress: remito.service?.building?.address || '' });
                        console.log(`✅ [PACKAGES] Imagen de remito de pago convertida a PDF: ${remito.number}`);
                      } catch (error) {
                        console.error(`❌ [PACKAGES] Error al convertir imagen de remito de pago ${fileUrl}:`, error.message);
@@ -1319,16 +1327,15 @@ const getPackages = async (req, res) => {
                   }
 
                   const invBytes = await invDoc.save();
-                  // Para facturas "prov" (sin número de factura), usar el número del remito
+                  // Nombre: {direccionEdificio}_{numeroFactura|numeroRemito}
                   const invoiceNumber = invData.invoice?.number;
-                  const firstRemitoNumber = invData.remitos[0]?.remito?.number || invData.remitos[0]?.name;
-                  const docLabel = invoiceNumber
-                    ? invoiceNumber
-                    : (firstRemitoNumber ? `prov_${firstRemitoNumber}` : (invData.remitos[0]?.buildingAddress || invData.name));
-                  const buildingLabel = invData.remitos[0]?.buildingAddress || docLabel;
-                  const safeLabel = buildingLabel.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').slice(0, 50);
-                  const fileNum = String(idx + 2).padStart(2, '0');
-                  archive.append(Buffer.from(invBytes), { name: `${fileNum}_${safeLabel}.pdf` });
+                  const firstRemitoNumber = invData.remitos[0]?.remito?.number;
+                  const buildingAddress = invData.remitos[0]?.buildingAddress || invData.invoice?.services?.[0]?.building?.address || '';
+                  const docId = invoiceNumber || firstRemitoNumber || invData.name;
+                  const safeAddress = buildingAddress.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim().slice(0, 50);
+                  const safeId = docId.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim();
+                  const fileName = safeAddress ? `${safeAddress}_${safeId}` : safeId;
+                  archive.append(Buffer.from(invBytes), { name: `${fileName}.pdf` });
                   console.log(`✅ [PACKAGES SPLIT] Archivo edificio ${idx + 1} creado: ${safeLabel}`);
                 } catch (e) {
                   console.error(`❌ [PACKAGES SPLIT] Error creando archivo para factura ${invData.name}:`, e.message);
@@ -1338,8 +1345,11 @@ const getPackages = async (req, res) => {
               // Remitos huérfanos
               for (let idx = 0; idx < decryptedOrphanRemitos.length; idx++) {
                 const remito = decryptedOrphanRemitos[idx];
-                const safeName = remito.name.replace(/[^a-zA-Z0-9\-_]/g, '_');
-                archive.append(Buffer.from(remito.buffer), { name: `cobro_${idx + 1}_${safeName}.pdf` });
+                const remitoNum = remito.name.replace('remito_pago_', '');
+                const safeAddress = (remito.buildingAddress || '').replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim().slice(0, 50);
+                const safeNum = remitoNum.replace(/[^a-zA-Z0-9\-_]/g, '_').trim();
+                const orphanFileName = safeAddress ? `${safeAddress}_${safeNum}` : safeNum;
+                archive.append(Buffer.from(remito.buffer), { name: `${orphanFileName}.pdf` });
               }
 
               await archive.finalize();
@@ -1415,10 +1425,12 @@ const getPackages = async (req, res) => {
 
     doc.moveDown(2);
 
-    // ADM. y TEL. alineados a la izquierda; fecha alineada a la derecha a la misma altura
+    // ADM. y EMAIL alineados a la izquierda; fecha alineada a la derecha a la misma altura
     const adminY = doc.y;
     doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
-    doc.fontSize(11).text(`TEL.: ${administrator.phone || 'N/A'}`, margin, adminY + 18);
+    if (administrator.email) {
+      doc.fontSize(11).text(`EMAIL: ${administrator.email}`, margin, adminY + 18);
+    }
     doc.fontSize(11).text(
       new Date().toLocaleDateString('es-AR'),
       margin,
@@ -1426,8 +1438,8 @@ const getPackages = async (req, res) => {
       { width: pageWidth - margin * 2, align: 'right', lineBreak: false }
     );
 
-    // Avanzar explícitamente por debajo de las dos líneas TEL/ADM y agregar espacio
-    doc.y = adminY + 70;
+    // Avanzar explícitamente por debajo de las líneas de datos y agregar espacio
+    doc.y = administrator.email ? adminY + 70 : adminY + 52;
 
     // Tabla de facturas
     doc.fontSize(14).text('Facturas Incluidas', 50);
@@ -1456,10 +1468,10 @@ const getPackages = async (req, res) => {
       const building = invoice.services?.[0]?.building;
       // Solo mostramos la dirección
       const address = building ? (building.address || building.name || 'N/A') : 'N/A';
-      // Fecha del servicio: remito date > visitDate > invoice date
+      // Fecha de la factura, con fallback a fecha del servicio/remito
       const service0 = invoice.services?.[0];
-      const serviceDate = service0?.remitos?.[0]?.date || service0?.visitDate || invoice.date;
-      const fecha = serviceDate ? new Date(serviceDate).toLocaleDateString('es-AR') : 'N/A';
+      const rawDate = invoice.date || service0?.remitos?.[0]?.date || service0?.visitDate || invoice.createdAt;
+      const fecha = rawDate ? new Date(rawDate).toLocaleDateString('es-AR') : 'N/A';
       const numero = invoice.number || invoice.id.substring(0, 8) || 'N/A';
       const importe = `$${(invoice.montoAcordado || invoice.amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
       
@@ -1478,7 +1490,7 @@ const getPackages = async (req, res) => {
     doc.fontSize(11).fillColor('#333');
     doc.text(`Total de Facturas: $${totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
     doc.moveDown(0.5);
-    doc.text(`Total de Prov: -$${totalProv.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.text(`Total de Prov: $${totalProv.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
     doc.moveDown(0.5);
     doc.fontSize(13).fillColor('#000').font('Helvetica-Bold');
     doc.text(`Neto Total: $${netoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });

@@ -101,6 +101,9 @@ export default function InvoicedServices() {
   const [noChargeDialogOpen, setNoChargeDialogOpen] = useState(false);
   const [serviceToNoCharge, setServiceToNoCharge] = useState<string | null>(null);
   const [markingNoCharge, setMarkingNoCharge] = useState(false);
+  const [noChargeReasons, setNoChargeReasons] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [noChargeReasonId, setNoChargeReasonId] = useState<string>('');
+  const [noChargeComment, setNoChargeComment] = useState('');
 
   const handleDeleteClick = (serviceId: string) => {
     setServiceToDelete(serviceId);
@@ -131,14 +134,25 @@ export default function InvoicedServices() {
     }
   };
 
-  const handleNoChargeClick = (serviceId: string) => {
+  const handleNoChargeClick = async (serviceId: string) => {
     setServiceToNoCharge(serviceId);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get('/no-charge-reasons', { headers: { Authorization: `Bearer ${token}` } });
+      setNoChargeReasons(res.data);
+    } catch {
+      setNoChargeReasons([]);
+    }
+    setNoChargeReasonId('');
+    setNoChargeComment('');
     setNoChargeDialogOpen(true);
   };
 
   const handleNoChargeClose = () => {
     setNoChargeDialogOpen(false);
     setServiceToNoCharge(null);
+    setNoChargeReasonId('');
+    setNoChargeComment('');
   };
 
   const handleConfirmNoCharge = async () => {
@@ -146,7 +160,10 @@ export default function InvoicedServices() {
     setMarkingNoCharge(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.patch(`/services/${serviceToNoCharge}/no-charge`, {}, {
+      await axios.patch(`/services/${serviceToNoCharge}/no-charge`, {
+        reasonId: noChargeReasonId || undefined,
+        comment: noChargeComment || undefined
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       handleNoChargeClose();
@@ -162,6 +179,7 @@ export default function InvoicedServices() {
   const [remitoAmount, setRemitoAmount] = useState('');
   const [remitoDate, setRemitoDate] = useState<Date | null>(new Date());
   const [remitoPaymentMethod, setRemitoPaymentMethod] = useState('CUENTA_CORRIENTE');
+  const [remitoProvNumber, setRemitoProvNumber] = useState('');
   const [savingRemito, setSavingRemito] = useState(false);
   
   // Estados para el modal de importar factura
@@ -299,6 +317,7 @@ export default function InvoicedServices() {
     setRemitoAmount('');
     setRemitoDate(new Date());
     setRemitoPaymentMethod('CUENTA_CORRIENTE');
+    setRemitoProvNumber('');
     setOpenRemito(true);
   };
 
@@ -308,6 +327,7 @@ export default function InvoicedServices() {
     setRemitoAmount('');
     setRemitoDate(new Date());
     setRemitoPaymentMethod('CUENTA_CORRIENTE');
+    setRemitoProvNumber('');
   };
 
   const handleSaveRemito = async () => {
@@ -320,7 +340,9 @@ export default function InvoicedServices() {
       
       await axios.post(`/services/${remitoService.id}/informal-invoice`, {
         amount: parseFloat(remitoAmount),
-        paymentMethod: remitoPaymentMethod
+        paymentMethod: remitoPaymentMethod,
+        date: remitoDate?.toISOString(),
+        ...(remitoProvNumber.trim() ? { provNumber: remitoProvNumber.trim() } : {})
       });
       
       console.log('🔍 [FRONTEND] Cobro sin factura creado exitosamente');
@@ -884,12 +906,34 @@ export default function InvoicedServices() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={noChargeDialogOpen} onClose={handleNoChargeClose} maxWidth="xs" fullWidth>
+      <Dialog open={noChargeDialogOpen} onClose={handleNoChargeClose} maxWidth="sm" fullWidth>
         <DialogTitle>Sin Cobro Económico</DialogTitle>
         <DialogContent>
-          <Alert severity="info" sx={{ mt: 1 }}>
+          <Alert severity="info" sx={{ mt: 1, mb: 2 }}>
             ¿Confirmas que este servicio fue completado sin cobro económico? El servicio quedará registrado en el historial del edificio.
           </Alert>
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Motivo (opcional)</InputLabel>
+            <Select
+              value={noChargeReasonId}
+              onChange={(e) => setNoChargeReasonId(e.target.value)}
+              label="Motivo (opcional)"
+            >
+              <MenuItem value=""><em>Sin especificar</em></MenuItem>
+              {noChargeReasons.map((r) => (
+                <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="Comentarios (opcional)"
+            fullWidth
+            multiline
+            rows={3}
+            value={noChargeComment}
+            onChange={(e) => setNoChargeComment(e.target.value)}
+            placeholder="Agregue observaciones adicionales..."
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={handleNoChargeClose} disabled={markingNoCharge}>Cancelar</Button>
@@ -904,6 +948,13 @@ export default function InvoicedServices() {
         <DialogContent>
           <Box display="flex" flexDirection="column" gap={2} mt={1}>
             <TextField label="Servicio" value={remitoService?.description || ''} fullWidth disabled />
+            <TextField
+              label="N° Factura Provisoria"
+              value={remitoProvNumber}
+              onChange={e => setRemitoProvNumber(e.target.value)}
+              fullWidth
+              placeholder="Ej: PROV-001"
+            />
             <TextField label="Monto" type="number" value={remitoAmount} onChange={e => setRemitoAmount(e.target.value)} fullWidth />
             <DatePicker label="Fecha" value={remitoDate} onChange={setRemitoDate} slotProps={{ textField: { fullWidth: true } }} />
             <FormControl fullWidth>

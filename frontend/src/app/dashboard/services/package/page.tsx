@@ -551,19 +551,34 @@ export default function PackagePage() {
                               <Typography component="span" variant="body2" color="text.secondary" display="block">
                                 {transaction.building?.address || transaction.service?.building?.address || 'Sin dirección'}
                               </Typography>
-                              <Typography component="span" variant="body2" color="text.secondary" display="block">
-                                {transaction.type === 'invoice' ? 'Factura' : 'Comprobante'}: {transaction.type === 'invoice' ? (transaction.number || transaction.id.slice(0, 8)) : transaction.comprobante} | 
-                                Fecha: {formatDate(transaction.remitos?.[0]?.date || transaction.service?.remitos?.[0]?.date || transaction.service?.visitDate || transaction.date || transaction.createdAt)} |
-                                Técnico: {transaction.technician?.name || transaction.service?.technician?.name || 'No asignado'}
-                              </Typography>
-                              {transaction.remitos && transaction.remitos.length > 0 && (
-                                <Typography component="span" variant="body2" color="text.secondary" display="block">
-                                  Remitos: {transaction.remitos.map(r => r.number).join(', ')}
-                                </Typography>
+                              {transaction.type === 'invoice' && (
+                                <>
+                                  <Typography component="span" variant="body2" color="text.secondary" display="block">
+                                    N° Factura: {transaction.number || transaction.id.slice(0, 8)} | Fecha de Factura: {formatDate(transaction.date || transaction.createdAt)}
+                                  </Typography>
+                                  {(transaction.remitos?.length ? transaction.remitos : (transaction.service?.remitos || [])).map(r => (
+                                    <Typography key={r.id} component="span" variant="body2" color="text.secondary" display="block">
+                                      N° Remito: {r.number} | Fecha de Remito: {formatDate(r.date)}
+                                    </Typography>
+                                  ))}
+                                </>
                               )}
-                              {transaction.type === 'payment' && transaction.paymentMethod && (
+                              {transaction.type === 'remito_sin_factura' && (
+                                <>
+                                  <Typography component="span" variant="body2" color="text.secondary" display="block">
+                                    N° Prov: {transaction.comprobante || transaction.id.slice(0, 8)} | Fecha de Prov: {formatDate(transaction.date || transaction.createdAt)}
+                                  </Typography>
+                                  {(transaction.remitos?.length ? transaction.remitos : (transaction.service?.remitos || [])).map(r => (
+                                    <Typography key={r.id} component="span" variant="body2" color="text.secondary" display="block">
+                                      N° Remito: {r.number} | Fecha de Remito: {formatDate(r.date)}
+                                    </Typography>
+                                  ))}
+                                </>
+                              )}
+                              {transaction.type === 'payment' && (
                                 <Typography component="span" variant="body2" color="text.secondary" display="block">
-                                  Método: {transaction.paymentMethod.name}
+                                  Comprobante: {transaction.comprobante} | Fecha: {formatDate(transaction.date || transaction.createdAt)}
+                                  {transaction.paymentMethod && ` | Método: ${transaction.paymentMethod.name}`}
                                 </Typography>
                               )}
                             </Box>

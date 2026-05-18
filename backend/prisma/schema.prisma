@@ -85,11 +85,14 @@ model Service {
   receiptImages        String[]
   cancellationReason   String?
   invoiceId            String?
+  noChargeReasonId     String?
+  noChargeComment      String?
   remitos              Remito[]
   workshopRepairs      WorkshopRepair[]
   building             Building           @relation(fields: [buildingId], references: [id])
   technician           Technician?        @relation(fields: [technicianId], references: [id])
   invoice              Invoice?           @relation(fields: [invoiceId], references: [id])
+  noChargeReason       NoChargeReason?    @relation(fields: [noChargeReasonId], references: [id])
 
   @@index([buildingId])
   @@index([buildingId, status])
@@ -290,6 +293,20 @@ model Stock {
 
   @@index([categoryId])
   @@index([name])
+}
+
+model NoChargeReason {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  services    Service[]
+
+  @@index([name])
+  @@index([isActive])
+  @@map("no_charge_reasons")
 }
 
 enum Role {

@@ -20,6 +20,7 @@ const productRoutes = require('./productRoutes');
 const workshopRoutes = require('./workshops');
 const workshopRepairRoutes = require('./workshopRepairs');
 const serviceTypeRoutes = require('./serviceTypeRoutes');
+const noChargeReasonRoutes = require('./noChargeReasonRoutes');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -30,6 +31,7 @@ router.use('/buildings', buildingRoutes);
 router.use('/administrators', administratorRoutes);
 router.use('/payment-methods', paymentMethodRoutes);
 router.use('/service-types', serviceTypeRoutes);
+router.use('/no-charge-reasons', noChargeReasonRoutes);
 router.use('/services', serviceRoutes);
 router.use('/technicians', technicianRoutes);
 router.use('/clients', clientRoutes);

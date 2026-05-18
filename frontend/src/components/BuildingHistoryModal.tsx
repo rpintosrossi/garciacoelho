@@ -88,6 +88,8 @@ interface Service {
   } | null;
   remitos: Remito[];
   invoice: Invoice | null;
+  noChargeReason: { id: string; name: string } | null;
+  noChargeComment: string | null;
 }
 
 interface BuildingHistoryData {
@@ -642,7 +644,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                     }).map((service) => {
                       const isExpanded = expandedServices.has(service.id);
                       const totalService = service.invoice?.amount || 0 + service.remitos.reduce((sum, r) => sum + r.amount, 0);
-                      const hasDocuments = service.invoice || service.remitos.length > 0;
+                      const hasDocuments = service.invoice || service.remitos.length > 0 || (service.status === 'SIN_COBRO' && (service.noChargeReason || service.noChargeComment));
                       
                       return (
                         <React.Fragment key={service.id}>
@@ -941,6 +943,38 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                             )}
                                           </Paper>
                                         ))}
+                                      </Box>
+                                    )}
+
+                                    {/* Sin Cobro Económico */}
+                                    {service.status === 'SIN_COBRO' && (service.noChargeReason || service.noChargeComment) && (
+                                      <Box mt={service.remitos.length > 0 || service.invoice ? 2 : 0}>
+                                        <Typography variant="subtitle2" gutterBottom sx={{ color: 'success.main' }}>
+                                          <CheckCircle fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
+                                          Sin Cobro Económico
+                                        </Typography>
+                                        <Paper sx={{ p: 2, border: '1px solid', borderColor: 'success.light', bgcolor: 'success.50' }}>
+                                          {service.noChargeReason && (
+                                            <Box mb={service.noChargeComment ? 1.5 : 0}>
+                                              <Typography variant="caption" color="text.secondary" display="block">
+                                                Motivo
+                                              </Typography>
+                                              <Typography variant="body2" fontWeight="medium">
+                                                {service.noChargeReason.name}
+                                              </Typography>
+                                            </Box>
+                                          )}
+                                          {service.noChargeComment && (
+                                            <Box>
+                                              <Typography variant="caption" color="text.secondary" display="block">
+                                                Comentarios
+                                              </Typography>
+                                              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                                                {service.noChargeComment}
+                                              </Typography>
+                                            </Box>
+                                          )}
+                                        </Paper>
                                       </Box>
                                     )}
                                   </Box>

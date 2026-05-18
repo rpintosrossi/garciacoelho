@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getAdminDebtReport, getBuildingDebtReport, getAdminDebtPDF } = require('../controllers/reportController');
+const { getAdminDebtReport, getBuildingDebtReport, getAdminDebtPDF, getNoChargeStats } = require('../controllers/reportController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 
 // Rutas protegidas que requieren autenticación
@@ -14,5 +14,8 @@ router.get('/admin-debt/:id/pdf', roleMiddleware(['ADMIN', 'OPERADOR']), getAdmi
 
 // Reporte de deuda de edificios
 router.get('/building-debt', roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingDebtReport);
+
+// Estadísticas por motivos de Sin Cobro Económico
+router.get('/no-charge-stats', roleMiddleware(['ADMIN', 'OPERADOR']), getNoChargeStats);
 
 module.exports = router; 

@@ -487,8 +487,132 @@ const getAdminDebtPDF = async (req, res) => {
   }
 };
 
+// Reporte de estadísticas por motivos de Sin Cobro Económico
+const DETAIL_LIMIT = 50; // máximo de servicios por motivo en la respuesta
+
+const getNoChargeStats = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const where = { status: 'SIN_COBRO' };
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+
+    // 1. Conteos agregados directamente en la BD — sin cargar registros
+    const [total, withReason, grouped] = await Promise.all([
+      prisma.service.count({ where }),
+      prisma.service.count({ where: { ...where, noChargeReasonId: { not: null } } }),
+      prisma.service.groupBy({
+        by: ['noChargeReasonId'],
+        where,
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } }
+      })
+    ]);
+
+    const withoutReason = total - withReason;
+
+    // 2. Traer nombres de motivos en una sola query
+    const reasonIds = grouped.map(g => g.noChargeReasonId).filter(Boolean);
+    const reasonNames = reasonIds.length
+      ? await prisma.noChargeReason.findMany({
+          where: { id: { in: reasonIds } },
+          select: { id: true, name: true }
+        })
+      : [];
+    const reasonNameMap = Object.fromEntries(reasonNames.map(r => [r.id, r.name]));
+
+    // 3. Serie mensual: solo traer createdAt (mínimo de datos) y calcular en un único O(N) pass
+    const dateWhere = {
+      ...where,
+      createdAt: {
+        ...(where.createdAt || {}),
+        gte: where.createdAt?.gte || new Date(new Date().setFullYear(new Date().getFullYear() - 1))
+      }
+    };
+    const dates = await prisma.service.findMany({
+      where: dateWhere,
+      select: { createdAt: true }
+    });
+
+    const now = new Date();
+    const monthBuckets = new Map();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const label = d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' });
+      monthBuckets.set(key, { mes: label, cantidad: 0 });
+    }
+    for (const { createdAt } of dates) {
+      const d = new Date(createdAt);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (monthBuckets.has(key)) monthBuckets.get(key).cantidad++;
+    }
+    const monthlySeries = Array.from(monthBuckets.values());
+
+    // 4. Detalles: cargar como máximo DETAIL_LIMIT servicios por motivo
+    //    Se hacen queries separadas, una por motivo, con LIMIT — evita un único findMany enorme
+    const byReason = await Promise.all(
+      grouped.map(async (g) => {
+        const count = g._count.id;
+        const reasonId = g.noChargeReasonId;
+        const reasonName = reasonId ? (reasonNameMap[reasonId] || 'Motivo eliminado') : 'Sin especificar';
+
+        const services = await prisma.service.findMany({
+          where: { ...where, noChargeReasonId: reasonId },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            createdAt: true,
+            visitDate: true,
+            noChargeComment: true,
+            building: { select: { id: true, name: true, address: true } },
+            technician: { select: { name: true } }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: DETAIL_LIMIT
+        });
+
+        return {
+          reasonId,
+          reasonName,
+          count,
+          hasMore: count > DETAIL_LIMIT,
+          percentage: total > 0 ? parseFloat(((count / total) * 100).toFixed(1)) : 0,
+          services: services.map(s => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            createdAt: s.createdAt,
+            visitDate: s.visitDate,
+            noChargeComment: s.noChargeComment,
+            buildingId: s.building.id,
+            buildingName: s.building.name,
+            buildingAddress: s.building.address,
+            technicianName: s.technician?.name || null
+          }))
+        };
+      })
+    );
+
+    res.json({ total, withReason, withoutReason, byReason, monthlySeries });
+  } catch (error) {
+    console.error('Error al obtener estadísticas de sin cobro:', error);
+    res.status(500).json({ message: 'Error al obtener estadísticas', error: error.message });
+  }
+};
+
 module.exports = {
   getAdminDebtReport,
   getBuildingDebtReport,
-  getAdminDebtPDF
+  getAdminDebtPDF,
+  getNoChargeStats
 }; 

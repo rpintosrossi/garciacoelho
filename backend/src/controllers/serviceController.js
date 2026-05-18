@@ -920,7 +920,7 @@ const createInformalInvoice = async (req, res) => {
     console.log('ID del servicio:', req.params.id);
     
     const { id } = req.params;
-    const { amount, paymentMethod = 'CUENTA_CORRIENTE' } = req.body;
+    const { amount, paymentMethod = 'CUENTA_CORRIENTE', provNumber, date } = req.body;
     
     console.log('Método de pago:', paymentMethod);
 
@@ -963,6 +963,8 @@ const createInformalInvoice = async (req, res) => {
         amount: parseFloat(amount),
         status: 'PENDIENTE',
         paymentMethod: paymentMethod,
+        ...(provNumber ? { number: provNumber } : {}),
+        ...(date ? { date: new Date(date) } : {}),
         services: {
           connect: { id: id }
         }
@@ -1536,6 +1538,7 @@ const importInvoiceMultiple = async (req, res) => {
 const markServiceNoCharge = async (req, res) => {
   try {
     const { id } = req.params;
+    const { reasonId, comment } = req.body;
 
     const service = await prisma.service.findUnique({
       where: { id }
@@ -1549,9 +1552,24 @@ const markServiceNoCharge = async (req, res) => {
       return res.status(400).json({ message: 'El servicio debe tener estado CON_REMITO para marcarlo sin cobro' });
     }
 
+    // Validate reason if provided
+    if (reasonId) {
+      const reason = await prisma.noChargeReason.findUnique({ where: { id: reasonId } });
+      if (!reason) {
+        return res.status(400).json({ message: 'Motivo no encontrado' });
+      }
+    }
+
     const updated = await prisma.service.update({
       where: { id },
-      data: { status: 'SIN_COBRO' }
+      data: {
+        status: 'SIN_COBRO',
+        noChargeReasonId: reasonId || null,
+        noChargeComment: comment?.trim() || null
+      },
+      include: {
+        noChargeReason: true
+      }
     });
 
     res.json(updated);

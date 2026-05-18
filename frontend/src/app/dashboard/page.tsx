@@ -31,6 +31,7 @@ import {
   TrendingUp as TrendingUpIcon,
   Warning as WarningIcon,
   Visibility as VisibilityIcon,
+  VisibilityOff as VisibilityOffIcon,
   Payment as PaymentIcon
 } from '@mui/icons-material';
 import {
@@ -101,9 +102,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overdueDebts, setOverdueDebts] = useState<any>(null);
+  const [hideValues, setHideValues] = useState(false);
   const theme = useTheme();
   const router = useRouter();
   const { user } = useAuth();
+
+  const masked = '••••••';
 
   // Función para convertir "2025-11" a "Noviembre 2025"
   const formatMonthYear = (monthStr: string) => {
@@ -166,20 +170,31 @@ export default function DashboardPage() {
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           Bienvenido, {user?.name || 'Usuario'} 👋
         </Typography>
-        <Button 
-          variant="outlined" 
-          size="small"
-          onClick={handleRefreshData}
-          sx={{ textTransform: 'none' }}
-        >
-          🔄 Actualizar Datos
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Tooltip title={hideValues ? 'Mostrar valores' : 'Ocultar valores'}>
+            <IconButton
+              onClick={() => setHideValues(!hideValues)}
+              size="small"
+              sx={{ border: '1px solid', borderColor: 'divider' }}
+            >
+              {hideValues ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+          <Button 
+            variant="outlined" 
+            size="small"
+            onClick={handleRefreshData}
+            sx={{ textTransform: 'none' }}
+          >
+            🔄 Actualizar Datos
+          </Button>
+        </Box>
       </Box>
       <Grid container spacing={3} sx={{ mb: 3, justifyContent: 'center' }}>
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Edificios"
-            value={stats?.totalBuildings || 0}
+            value={hideValues ? masked : (stats?.totalBuildings || 0)}
             icon={BuildingIcon}
             color={theme.palette.primary.main}
             onClick={() => router.push('/dashboard/buildings')}
@@ -188,7 +203,7 @@ export default function DashboardPage() {
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Administradores"
-            value={stats?.totalAdmins || 0}
+            value={hideValues ? masked : (stats?.totalAdmins || 0)}
             icon={PeopleIcon}
             color={theme.palette.secondary.main}
             onClick={() => router.push('/dashboard/administrators')}
@@ -197,7 +212,7 @@ export default function DashboardPage() {
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Servicios"
-            value={stats?.totalServices || 0}
+            value={hideValues ? masked : (stats?.totalServices || 0)}
             icon={ServiceIcon}
             color={theme.palette.success.main}
           />
@@ -205,7 +220,7 @@ export default function DashboardPage() {
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Facturado este mes"
-            value={stats?.totalFacturadoMes ? `$${stats.totalFacturadoMes.toLocaleString()}` : "$0"}
+            value={hideValues ? masked : (stats?.totalFacturadoMes ? `$${stats.totalFacturadoMes.toLocaleString()}` : "$0")}
             icon={TrendingUpIcon}
             color={theme.palette.warning.main}
             onClick={() => router.push('/dashboard/services/invoiced')}
@@ -214,7 +229,7 @@ export default function DashboardPage() {
         <Grid item xs={12} sm={6} md={3}>
           <QuickAccessCard
             title="Pagos este mes"
-            value={stats?.totalPagosMes ? `$${stats.totalPagosMes.toLocaleString()}` : "$0"}
+            value={hideValues ? masked : (stats?.totalPagosMes ? `$${stats.totalPagosMes.toLocaleString()}` : "$0")}
             icon={PaymentIcon}
             color="#10b981"
             onClick={() => router.push('/dashboard/payments')}
@@ -227,15 +242,17 @@ export default function DashboardPage() {
             <Typography variant="h6" gutterBottom>
               Servicios creados por mes
             </Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trabajosPorMes} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mes" />
-                <YAxis allowDecimals={false} />
-                <RechartsTooltip />
-                <Bar dataKey="cantidad" fill={theme.palette.primary.main} />
-              </BarChart>
-            </ResponsiveContainer>
+            <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={trabajosPorMes} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="mes" />
+                  <YAxis allowDecimals={false} />
+                  <RechartsTooltip />
+                  <Bar dataKey="cantidad" fill={theme.palette.primary.main} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
           </Paper>
         </Grid>
         <Grid item xs={12} md={6}>
@@ -243,19 +260,21 @@ export default function DashboardPage() {
             <Typography variant="h6" gutterBottom>
               Cobros por método de pago (últimos 12 meses)
             </Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={paymentsByMethod.data} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mes" />
-                <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
-                <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
-                <Legend />
-                {paymentsByMethod.methods.map((method, i) => {
-                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-                  return <Line key={method} type="monotone" dataKey={method} stroke={colors[i % colors.length]} strokeWidth={2} dot={{ r: 3 }} />;
-                })}
-              </LineChart>
-            </ResponsiveContainer>
+            <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={paymentsByMethod.data} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="mes" />
+                  <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
+                  <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
+                  <Legend />
+                  {paymentsByMethod.methods.map((method, i) => {
+                    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+                    return <Line key={method} type="monotone" dataKey={method} stroke={colors[i % colors.length]} strokeWidth={2} dot={{ r: 3 }} />;
+                  })}
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
           </Paper>
         </Grid>
         <Grid item xs={12} md={6}>
@@ -263,17 +282,19 @@ export default function DashboardPage() {
             <Typography variant="h6" gutterBottom>
               Facturado vs Cobrado por mes
             </Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={invoicedVsCollected} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mes" />
-                <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
-                <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
-                <Legend />
-                <Bar dataKey="Facturado" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={invoicedVsCollected} margin={{ top: 16, right: 16, left: 20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="mes" />
+                  <YAxis tickFormatter={(v) => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}k`} width={70} />
+                  <RechartsTooltip formatter={(value: number) => `$${value.toLocaleString('es-AR')}`} />
+                  <Legend />
+                  <Bar dataKey="Facturado" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
           </Paper>
         </Grid>
         <Grid item xs={12} md={6}>
@@ -281,6 +302,7 @@ export default function DashboardPage() {
             <Typography variant="h6" gutterBottom>
               Top administradores con pagos más rápidos
             </Typography>
+            <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart layout="vertical" data={fastPaymentAdmins} margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -295,6 +317,7 @@ export default function DashboardPage() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            </Box>
           </Paper>
         </Grid>
       </Grid>
@@ -352,7 +375,7 @@ export default function DashboardPage() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'error.main' }}>
-                          {new Intl.NumberFormat('es-AR', {
+                          {hideValues ? masked : new Intl.NumberFormat('es-AR', {
                             style: 'currency',
                             currency: 'ARS'
                           }).format(building.currentDebt)}

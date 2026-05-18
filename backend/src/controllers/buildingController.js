@@ -1337,6 +1337,9 @@ const getBuildingServiceHistory = async (req, res) => {
               }
             }
           }
+        },
+        noChargeReason: {
+          select: { id: true, name: true }
         }
       },
       orderBy: {
@@ -1408,6 +1411,8 @@ const getBuildingServiceHistory = async (req, res) => {
         createdAt: service.createdAt,
         visitDate: service.visitDate,
         technician: service.technician,
+        noChargeReason: service.noChargeReason || null,
+        noChargeComment: service.noChargeComment || null,
         remitos: service.remitos.map(remito => ({
           id: remito.id,
           number: remito.number,

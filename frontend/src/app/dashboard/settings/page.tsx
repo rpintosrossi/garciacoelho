@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Box, Typography, Tabs, Tab } from '@mui/material';
 import PaymentMethodsManager from '@/components/PaymentMethodsManager';
 import ServiceTypesManager from '@/components/ServiceTypesManager';
+import NoChargeReasonsManager from '@/components/NoChargeReasonsManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -44,6 +45,7 @@ export default function SettingsPage() {
         <Tabs value={value} onChange={handleChange} aria-label="settings tabs">
           <Tab label="Medios de Pago" />
           <Tab label="Tipos de Servicio" />
+          <Tab label="Motivos Sin Cobro" />
         </Tabs>
       </Box>
       <TabPanel value={value} index={0}>
@@ -51,6 +53,9 @@ export default function SettingsPage() {
       </TabPanel>
       <TabPanel value={value} index={1}>
         <ServiceTypesManager />
+      </TabPanel>
+      <TabPanel value={value} index={2}>
+        <NoChargeReasonsManager />
       </TabPanel>
     </Box>
   );
