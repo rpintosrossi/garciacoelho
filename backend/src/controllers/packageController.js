@@ -1412,35 +1412,30 @@ const getPackages = async (req, res) => {
     });
 
     // ============ PÁGINA 1: RESUMEN DEL PAQUETE ============
-    // Logo (si existe) — centrado y más grande
+    // Logo (si existe) — alineado a la derecha
     const logoPath = path.join(__dirname, '../../public/logo.png');
     const pageWidth = 595.276;
     const margin = 50;
-    const logoWidth = 160;
+    const logoWidth = 150;
 
     if (fs.existsSync(logoPath)) {
-      const logoX = (pageWidth - logoWidth) / 2;
-      doc.image(logoPath, logoX, 25, { width: logoWidth });
+      const logoX = pageWidth - margin - logoWidth;
+      doc.image(logoPath, logoX, 20, { width: logoWidth });
     }
 
-    doc.moveDown(2);
-
-    // ADM. y EMAIL alineados a la izquierda; fecha alineada a la derecha a la misma altura
-    // Garantizar que el bloque de texto quede debajo del logo (logo termina cerca de y=95)
-    const adminY = Math.max(doc.y, 105);
-    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
+    // ADM. y EMAIL en la izquierda; fecha debajo; el logo ocupa la derecha
+    // El bloque de texto se limita a la mitad izquierda para no solapar el logo
+    const textMaxWidth = 270;
+    const adminY = 28;
+    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false, width: textMaxWidth });
     if (administrator.email) {
-      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16);
+      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16, { width: textMaxWidth });
     }
-    doc.fontSize(11).text(
-      new Date().toLocaleDateString('es-AR'),
-      margin,
-      adminY,
-      { width: pageWidth - margin * 2, align: 'right', lineBreak: false }
-    );
+    const fechaY = administrator.email ? adminY + 32 : adminY + 16;
+    doc.fontSize(9).text(new Date().toLocaleDateString('es-AR'), margin, fechaY, { lineBreak: false, width: textMaxWidth });
 
-    // Avanzar explícitamente por debajo de las líneas de datos y agregar espacio
-    doc.y = administrator.email ? adminY + 62 : adminY + 46;
+    // Avanzar por debajo del logo/texto (el logo tiene ~90px de alto a 150px de ancho)
+    doc.y = 125;
 
     // Tabla de facturas
     doc.fontSize(14).text('Facturas Incluidas', 50);
