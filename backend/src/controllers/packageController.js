@@ -1426,10 +1426,11 @@ const getPackages = async (req, res) => {
     doc.moveDown(2);
 
     // ADM. y EMAIL alineados a la izquierda; fecha alineada a la derecha a la misma altura
-    const adminY = doc.y;
+    // Garantizar que el bloque de texto quede debajo del logo (logo termina cerca de y=95)
+    const adminY = Math.max(doc.y, 105);
     doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
     if (administrator.email) {
-      doc.fontSize(11).text(`EMAIL: ${administrator.email}`, margin, adminY + 18);
+      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16);
     }
     doc.fontSize(11).text(
       new Date().toLocaleDateString('es-AR'),
@@ -1439,7 +1440,7 @@ const getPackages = async (req, res) => {
     );
 
     // Avanzar explícitamente por debajo de las líneas de datos y agregar espacio
-    doc.y = administrator.email ? adminY + 70 : adminY + 52;
+    doc.y = administrator.email ? adminY + 62 : adminY + 46;
 
     // Tabla de facturas
     doc.fontSize(14).text('Facturas Incluidas', 50);
