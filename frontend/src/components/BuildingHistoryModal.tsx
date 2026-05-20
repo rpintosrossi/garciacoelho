@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import api from '@/lib/axios';
 import { jsPDF } from "jspdf";
 import {
@@ -127,6 +127,30 @@ interface BuildingHistoryModalProps {
   buildingId: string | null;
 }
 
+// Fila memoizada para el editor de descripciones del PDF
+// Evita que toda la lista se re-renderice al escribir en un solo campo
+const PdfDescRow = React.memo(({ serviceId, date, value, onChange }: {
+  serviceId: string;
+  date: string;
+  value: string;
+  onChange: (id: string, value: string) => void;
+}) => (
+  <TableRow>
+    <TableCell>{date}</TableCell>
+    <TableCell>
+      <TextField
+        fullWidth
+        size="small"
+        multiline
+        rows={2}
+        value={value}
+        onChange={(e) => onChange(serviceId, e.target.value)}
+      />
+    </TableCell>
+  </TableRow>
+));
+PdfDescRow.displayName = 'PdfDescRow';
+
 const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   open,
   onClose,
@@ -179,6 +203,18 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       setSavingRemitoDate(false);
     }
   };
+
+  // PDF description editor state
+  const [pdfEditOpen, setPdfEditOpen] = useState(false);
+  const [pdfDescriptions, setPdfDescriptions] = useState<Record<string, string>>({});
+  const [pdfServices, setPdfServices] = useState<Service[]>([]);
+  const [pdfServicesLoading, setPdfServicesLoading] = useState(false);
+  const [pdfPage, setPdfPage] = useState(0);
+  const pdfRowsPerPage = 10;
+
+  const handlePdfDescChange = useCallback((id: string, value: string) => {
+    setPdfDescriptions((prev) => ({ ...prev, [id]: value }));
+  }, []);
 
   // Edit Invoice State
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
@@ -243,7 +279,54 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   };
 
   const handleExportPDF = async () => {
-    if (!data || !data.services.length) return;
+    if (!data || !buildingId) return;
+
+    setPdfServicesLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams();
+      params.append('page', '1');
+      params.append('limit', '1000');
+      if (dateFrom) params.append('startDate', dateFrom);
+      if (dateTo) params.append('endDate', dateTo);
+
+      const response = await api.get(`/buildings/${buildingId}/service-history`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params
+      });
+      const allServices: Service[] = response.data.services;
+      setPdfServices(allServices);
+
+      const buildingName = data.building.name;
+      const buildingAddress = data.building.address;
+      const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const initialDescs: Record<string, string> = {};
+      allServices.forEach((service) => {
+        let rawDesc = service.description || service.name || '';
+        rawDesc = rawDesc
+          .replace(/^servicio[:\s\-]*/i, '')
+          .replace(/\bservicio\b/gi, '')
+          .replace(new RegExp(escapeRegex(buildingName), 'gi'), '')
+          .replace(new RegExp(escapeRegex(buildingAddress), 'gi'), '')
+          .replace(/\s{2,}/g, ' ')
+          .replace(/^[\s\-]+|[\s\-]+$/g, '')
+          .trim();
+        initialDescs[service.id] = rawDesc || '-';
+      });
+
+      setPdfDescriptions(initialDescs);
+      setPdfPage(0);
+      setPdfEditOpen(true);
+    } catch (err) {
+      console.error('Error cargando servicios para PDF:', err);
+    } finally {
+      setPdfServicesLoading(false);
+    }
+  };
+
+  const handleGeneratePDF = async () => {
+    if (!data || !pdfServices.length) return;
 
     const doc = new jsPDF();
     const pageW = doc.internal.pageSize.getWidth();
@@ -266,7 +349,6 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
     const buildingName = data.building.name;
     const buildingAddress = data.building.address;
-    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     // Calcula y inicial tras el header de primera página
     const drawFirstPageHeader = (): number => {
@@ -327,7 +409,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
 
-    data.services.forEach((service) => {
+    pdfServices.forEach((service) => {
       if (y > 272) {
         doc.addPage();
         y = 14;
@@ -338,30 +420,21 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
       const date = service.remitos?.[0]?.date ? formatDate(service.remitos[0].date) : '-';
 
-      // Descripción: sólo lo realizado — sin "Servicio", sin nombre ni dirección del edificio
-      let rawDesc = service.description || service.name || '';
-      rawDesc = rawDesc
-        .replace(/^servicio[:\s\-]*/i, '')
-        .replace(/\bservicio\b/gi, '')
-        .replace(new RegExp(escapeRegex(buildingName), 'gi'), '')
-        .replace(new RegExp(escapeRegex(buildingAddress), 'gi'), '')
-        .replace(/\s{2,}/g, ' ')
-        .replace(/^[\s\-]+|[\s\-]+$/g, '')
-        .trim();
-
-      const descLines = doc.splitTextToSize(rawDesc || '-', pageW - margin * 2 - 36);
+      // Usar la descripción editada para este PDF
+      const descLines = doc.splitTextToSize(pdfDescriptions[service.id] ?? '-', pageW - margin * 2 - 36);
 
       doc.text(date, margin + 1, y);
       doc.text(descLines, margin + 34, y);
 
       const lineHeight = descLines.length * 5;
-      y += Math.max(8, lineHeight + 4);
+      y += Math.max(11, lineHeight + 7);
 
       doc.setDrawColor(220, 220, 220);
-      doc.line(margin, y - 2, pageW - margin, y - 2);
+      doc.line(margin, y - 5, pageW - margin, y - 5);
     });
 
     doc.save(`Historial_${buildingAddress.replace(/\s+/g, '_')}.pdf`);
+    setPdfEditOpen(false);
   };
 
   const handleDeleteServiceClick = (serviceId: string) => {
@@ -604,8 +677,9 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                     color="secondary" 
                     startIcon={<Download />}
                     onClick={handleExportPDF}
+                    disabled={pdfServicesLoading}
                   >
-                    PDF
+                    {pdfServicesLoading ? 'Cargando...' : 'PDF'}
                   </Button>
                 </Stack>
               </Stack>
@@ -1110,6 +1184,61 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+    {/* Diálogo edición de descripciones para PDF */}
+    <Dialog open={pdfEditOpen} onClose={() => setPdfEditOpen(false)} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Typography component="div" variant="h6">Editar descripciones para el PDF</Typography>
+        <Typography component="div" variant="body2" color="text.secondary">
+          Podés modificar el texto de cada servicio. Los cambios solo aplican al PDF que se va a generar.
+        </Typography>
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: 0 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: 110, fontWeight: 'bold' }}>Fecha</TableCell>
+              <TableCell sx={{ fontWeight: 'bold' }}>Descripción (solo para este PDF)</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {[...pdfServices].sort((a, b) => {
+              const dateA = a.remitos?.[0]?.date ? new Date(a.remitos[0].date).getTime() : 0;
+              const dateB = b.remitos?.[0]?.date ? new Date(b.remitos[0].date).getTime() : 0;
+              return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+            }).slice(pdfPage * pdfRowsPerPage, (pdfPage + 1) * pdfRowsPerPage).map((service) => (
+              <PdfDescRow
+                key={service.id}
+                serviceId={service.id}
+                date={service.remitos?.[0]?.date ? formatDate(service.remitos[0].date) : '-'}
+                value={pdfDescriptions[service.id] ?? ''}
+                onChange={handlePdfDescChange}
+              />
+            ))}
+          </TableBody>
+        </Table>
+        <TablePagination
+          component="div"
+          count={pdfServices.length}
+          page={pdfPage}
+          rowsPerPage={pdfRowsPerPage}
+          rowsPerPageOptions={[pdfRowsPerPage]}
+          onPageChange={(_, newPage) => setPdfPage(newPage)}
+          labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setPdfEditOpen(false)}>Cancelar</Button>
+        <Button
+          variant="contained"
+          color="secondary"
+          startIcon={<Download />}
+          onClick={handleGeneratePDF}
+        >
+          Generar PDF
+        </Button>
+      </DialogActions>
+    </Dialog>
     </>
   );
 };

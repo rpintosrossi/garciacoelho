@@ -1257,16 +1257,22 @@ const getBuildingServiceHistory = async (req, res) => {
     };
 
     if (startDate || endDate) {
-      whereClause.createdAt = {};
+      const dateFilter = {};
       if (startDate) {
-        whereClause.createdAt.gte = new Date(startDate);
+        dateFilter.gte = new Date(startDate);
       }
       if (endDate) {
         // Ajustar endDate para incluir todo el día
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
-        whereClause.createdAt.lte = end;
+        dateFilter.lte = end;
       }
+      // Filtrar por fecha del remito (lo que muestra la columna Fecha)
+      // o por visitDate si el servicio no tiene remitos
+      whereClause.OR = [
+        { remitos: { some: { date: dateFilter } } },
+        { remitos: { none: {} }, visitDate: dateFilter }
+      ];
     }
 
     // Obtener total de registros para paginación
