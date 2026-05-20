@@ -1412,30 +1412,32 @@ const getPackages = async (req, res) => {
     });
 
     // ============ PÁGINA 1: RESUMEN DEL PAQUETE ============
-    // Logo (si existe) — alineado a la derecha
+    // Logo centrado arriba; debajo: ADM. a la izquierda, fecha a la derecha; EMAIL debajo del ADM.
     const logoPath = path.join(__dirname, '../../public/logo.png');
     const pageWidth = 595.276;
     const margin = 50;
-    const logoWidth = 150;
+    const logoWidth = 160;
 
     if (fs.existsSync(logoPath)) {
-      const logoX = pageWidth - margin - logoWidth;
+      const logoX = (pageWidth - logoWidth) / 2;
       doc.image(logoPath, logoX, 20, { width: logoWidth });
     }
 
-    // ADM. y EMAIL en la izquierda; fecha debajo; el logo ocupa la derecha
-    // El bloque de texto se limita a la mitad izquierda para no solapar el logo
-    const textMaxWidth = 270;
-    const adminY = 28;
-    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false, width: textMaxWidth });
+    // Bloque de texto debajo del logo (logo ~90px alto + 20px top + padding)
+    const adminY = 125;
+    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
+    doc.fontSize(11).text(
+      new Date().toLocaleDateString('es-AR'),
+      margin,
+      adminY,
+      { width: pageWidth - margin * 2, align: 'right', lineBreak: false }
+    );
     if (administrator.email) {
-      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16, { width: textMaxWidth });
+      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16, { lineBreak: false });
     }
-    const fechaY = administrator.email ? adminY + 32 : adminY + 16;
-    doc.fontSize(9).text(new Date().toLocaleDateString('es-AR'), margin, fechaY, { lineBreak: false, width: textMaxWidth });
 
-    // Avanzar por debajo del logo/texto (el logo tiene ~90px de alto a 150px de ancho)
-    doc.y = 125;
+    // Avanzar por debajo del bloque de texto
+    doc.y = administrator.email ? adminY + 40 : adminY + 24;
 
     // Tabla de facturas
     doc.fontSize(14).text('Facturas Incluidas', 50);
