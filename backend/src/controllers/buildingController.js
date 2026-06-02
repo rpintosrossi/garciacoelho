@@ -1134,131 +1134,51 @@ const createBuildingPayment = async (req, res) => {
 
     console.log('✅ [BUILDING PAYMENT] Monto válido:', amount);
 
-    // Verificar que el monto no excede el saldo pendiente del edificio
+    // Verificar que el monto no excede el saldo pendiente de la factura/remito
     console.log('💰 [BUILDING PAYMENT] Verificando saldo pendiente...');
-    
-    // Paso 1: Determinar qué documentos específicos quiere pagar el usuario
-    let docsEspecificados = [];
-    
-    if (documents && documents.length > 0) {
-      // Si hay documentos especificados, usar esos
-      console.log('💰 [BUILDING PAYMENT] Usando documentos especificados:', documents.length);
-      docsEspecificados = documents;
-    } else if (invoiceId || remitoId) {
-      // Si hay un documento individual, usar ese
-      console.log('💰 [BUILDING PAYMENT] Usando documento individual:', { invoiceId, remitoId });
-      docsEspecificados = [{
-        id: invoiceId || remitoId,
-        type: invoiceId ? 'FACTURA' : 'REMITO'
-      }];
-    }
-    
-    // Paso 2: Calcular saldo pendiente de los documentos específicos (si los hay)
-    let saldoEspecificado = 0;
-    let docBalancesEspecificados = [];
-    
-    if (docsEspecificados.length > 0) {
-      for (const doc of docsEspecificados) {
-        let docAmount = doc.amount;
-        
-        // Si no tienen amount, buscar en BD
-        if (!docAmount) {
-          let docData;
-          if (doc.type === 'FACTURA') {
-            docData = await prisma.invoice.findUnique({
-              where: { id: doc.id }
-            });
-          } else {
-            docData = await prisma.remito.findUnique({
-              where: { id: doc.id }
-            });
-          }
-          docAmount = docData?.amount || 0;
-        }
-        
-        // Calcular pagos previos para este documento
-        const existingPayments = await prisma.paymentDocument.findMany({
-          where: doc.type === 'FACTURA' 
-            ? { invoiceId: doc.id }
-            : { remitoId: doc.id }
-        });
-        
-        const totalPaid = existingPayments.reduce((sum, pd) => sum + pd.amount, 0);
-        const saldoPendiente = docAmount - totalPaid;
-        
-        saldoEspecificado += saldoPendiente;
-        docBalancesEspecificados.push({
-          documentId: doc.id,
-          type: doc.type,
-          montoOriginal: docAmount,
-          totalPagado: totalPaid,
-          saldoPendiente: saldoPendiente
-        });
-      }
-    }
-    
-    // Paso 3: Si el monto no cabe en los documentos específicos, obtener todos los documentos del edificio
-    let docsParaPagar = docsEspecificados.length > 0 ? docsEspecificados : [];
-    let docBalances = docBalancesEspecificados;
-    
-    if (amount > saldoEspecificado) {
-      console.log('💰 [BUILDING PAYMENT] Monto no cabe en documentos específicos, intentando con todos los documentos del edificio...');
-      
-      const allInvoices = await prisma.invoice.findMany({
-        where: { buildingId: buildingId }
-      });
-      
-      const allRemitos = await prisma.remito.findMany({
-        where: { buildingId: buildingId }
-      });
-      
-      docsParaPagar = [
-        ...allInvoices.map(inv => ({ id: inv.id, type: 'FACTURA', amount: inv.amount })),
-        ...allRemitos.map(rem => ({ id: rem.id, type: 'REMITO', amount: rem.amount }))
-      ];
-      
-      // Recalcular saldos para todos los documentos
-      docBalances = [];
-      for (const doc of docsParaPagar) {
-        const docAmount = doc.amount;
-        
-        // Calcular pagos previos para este documento
-        const existingPayments = await prisma.paymentDocument.findMany({
-          where: doc.type === 'FACTURA' 
-            ? { invoiceId: doc.id }
-            : { remitoId: doc.id }
-        });
-        
-        const totalPaid = existingPayments.reduce((sum, pd) => sum + pd.amount, 0);
-        const saldoPendiente = docAmount - totalPaid;
-        
-        if (saldoPendiente > 0) {
-          docBalances.push({
-            documentId: doc.id,
-            type: doc.type,
-            montoOriginal: docAmount,
-            totalPagado: totalPaid,
-            saldoPendiente: saldoPendiente
-          });
-        }
-      }
-    }
-    
-    // Paso 4: Calcular saldo pendiente total y validar
-    const totalSaldoPendiente = docBalances.reduce((sum, doc) => sum + doc.saldoPendiente, 0);
-    
-    console.log('💰 [BUILDING PAYMENT] Saldo calculado:', {
-      documentos: docBalances,
-      totalSaldoPendiente: totalSaldoPendiente,
-      montoPago: amount
-    });
 
-    if (amount > totalSaldoPendiente) {
-      console.log('❌ [BUILDING PAYMENT] Monto excede saldo pendiente total');
-      return res.status(400).json({ 
-        message: `El monto del pago (${formatCurrency(amount)}) excede el saldo pendiente total del edificio (${formatCurrency(totalSaldoPendiente)})`,
-        detalles: docBalances
+    // Determinar si se envían múltiples documentos con distribución ya calculada
+    const hasMultipleDocs = Array.isArray(documents) && documents.length > 0;
+
+    let docsToProcess = [];
+
+    if (hasMultipleDocs) {
+      // El frontend ya calculó la distribución — validar que el total no exceda el saldo del edificio
+      const totalDocsAmount = documents.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0);
+      console.log('💰 [BUILDING PAYMENT] Distribución recibida del frontend:', {
+        cantidadDocumentos: documents.length,
+        totalDistribuido: totalDocsAmount,
+        montoPago: amount,
+        saldoEdificio: building.account.balance
       });
+
+      if (amount > building.account.balance + 0.01) {
+        console.log('❌ [BUILDING PAYMENT] Monto excede saldo del edificio');
+        return res.status(400).json({ message: `El monto del pago (${formatCurrency(amount)}) excede el saldo pendiente (${formatCurrency(building.account.balance)})` });
+      }
+
+      docsToProcess = documents.map(d => ({ id: d.id, type: d.type, amount: parseFloat(d.amount) }));
+    } else {
+      // Solo un documento (invoiceId o remitoId), validar contra ese documento
+      const existingPaymentDocs = await prisma.paymentDocument.findMany({
+        where: invoiceId ? { invoiceId } : { remitoId }
+      });
+      const totalPaid = existingPaymentDocs.reduce((sum, pd) => sum + pd.amount, 0);
+      const remaining = invoiceOrRemito.amount - totalPaid;
+
+      console.log('💰 [BUILDING PAYMENT] Saldo calculado:', {
+        montoOriginal: invoiceOrRemito.amount,
+        totalPagado: totalPaid,
+        saldoPendiente: remaining,
+        montoPago: amount
+      });
+
+      if (amount > remaining + 0.01) {
+        console.log('❌ [BUILDING PAYMENT] Monto excede saldo pendiente');
+        return res.status(400).json({ message: `El monto del pago (${formatCurrency(amount)}) excede el saldo pendiente (${formatCurrency(remaining)})` });
+      }
+
+      docsToProcess = [{ id: invoiceId || remitoId, type: invoiceId ? 'FACTURA' : 'REMITO', amount }];
     }
 
     console.log('✅ [BUILDING PAYMENT] Saldo válido, procediendo con el pago...');
@@ -1284,53 +1204,22 @@ const createBuildingPayment = async (req, res) => {
 
     console.log('✅ [BUILDING PAYMENT] Pago creado:', payment.id);
 
-    // Distribuir el pago entre los documentos
-    console.log('💰 [BUILDING PAYMENT] Distribuyendo pago entre documentos...');
-    
-    let montoPendienteDistribuir = amount;
-    const paymentDocumentsCreated = [];
-    
-    // Ordenar docBalances por saldoPendiente descendente para aplicar pagos completos primero
-    const docsOrdenados = docBalances.sort((a, b) => b.saldoPendiente - a.saldoPendiente);
-    
-    for (const docBalance of docsOrdenados) {
-      if (montoPendienteDistribuir <= 0) break;
-      
-      // Determinar cuánto se aplica a este documento
-      const montoAplicar = Math.min(montoPendienteDistribuir, docBalance.saldoPendiente);
-      
-      if (montoAplicar > 0) {
-        console.log(`💰 [BUILDING PAYMENT] Aplicando ${formatCurrency(montoAplicar)} al documento ${docBalance.documentId}`);
-        
-        const paymentDocument = await prisma.paymentDocument.create({
-          data: {
-            paymentId: payment.id,
-            invoiceId: docBalance.type === 'FACTURA' ? docBalance.documentId : null,
-            remitoId: docBalance.type === 'REMITO' ? docBalance.documentId : null,
-            amount: montoAplicar
-          },
-          include: {
-            payment: true
-          }
-        });
-        
-        console.log('✅ [BUILDING PAYMENT] PaymentDocument creado:', {
-          id: paymentDocument.id,
-          documentId: docBalance.documentId,
-          type: docBalance.type,
-          amount: montoAplicar
-        });
-        
-        paymentDocumentsCreated.push(paymentDocument);
-        montoPendienteDistribuir -= montoAplicar;
-      }
+    // Crear un PaymentDocument por cada documento distribuido
+    console.log('💰 [BUILDING PAYMENT] Creando documentos de pago...');
+    const createdPaymentDocuments = [];
+    for (const doc of docsToProcess) {
+      const pd = await prisma.paymentDocument.create({
+        data: {
+          paymentId: payment.id,
+          invoiceId: doc.type === 'FACTURA' ? doc.id : null,
+          remitoId: doc.type === 'REMITO' ? doc.id : null,
+          amount: doc.amount
+        },
+        include: { payment: true }
+      });
+      createdPaymentDocuments.push(pd);
+      console.log(`✅ [BUILDING PAYMENT] PaymentDocument creado: ${pd.id} - ${formatCurrency(doc.amount)}`);
     }
-
-    console.log('💰 [BUILDING PAYMENT] Distribución completada:', {
-      documentosCreados: paymentDocumentsCreated.length,
-      montoPendienteDistribuir: montoPendienteDistribuir,
-      totalDistribuido: amount - montoPendienteDistribuir
-    });
 
     // Actualizar el saldo de la cuenta del edificio
     console.log('💰 [BUILDING PAYMENT] Actualizando saldo de la cuenta...');
@@ -1347,11 +1236,7 @@ const createBuildingPayment = async (req, res) => {
     });
 
     console.log('✅ [BUILDING PAYMENT] Pago completado exitosamente');
-    res.status(201).json({
-      payment: payment,
-      documents: paymentDocumentsCreated,
-      message: 'Pago registrado exitosamente'
-    });
+    res.status(201).json(createdPaymentDocuments[0]);
   } catch (error) {
     console.error('Error al registrar pago:', error);
     res.status(500).json({ message: 'Error al registrar pago' });

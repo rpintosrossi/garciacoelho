@@ -294,7 +294,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
         return;
       }
 
-      const paymentData = {
+      const paymentData: any = {
         amount: finalAmount,
         originalAmount: originalAmount,
         discount: discountAmount,
@@ -303,10 +303,10 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
         paymentMethodId: paymentMethod?.id,
         comprobante: `PAGO-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`,
         comment: comment || null,
-        documents: []
+        documents: docsToAssociate
       };
 
-      // Agregar invoiceId o remitoId según el tipo de documento
+      // Agregar invoiceId o remitoId del primer documento (referencia principal)
       if (firstDoc.type === 'FACTURA') {
         paymentData.invoiceId = firstDoc.id;
       } else if (firstDoc.type === 'REMITO') {
