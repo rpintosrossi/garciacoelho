@@ -404,7 +404,9 @@ export default function InvoicedServices() {
 
   const handleOpenUploadRemito = (service: Service) => {
     setUploadRemitoService(service);
-    setUploadRemitoNumber('');
+    // Pre-fill number if a remito already exists (has number but no images)
+    const existingRemito = service.remitos && service.remitos.length > 0 ? service.remitos[0] : null;
+    setUploadRemitoNumber(existingRemito?.number || '');
     setUploadRemitoDescription(service.description || '');
     setUploadRemitoFiles([]);
     setOpenUploadRemito(true);
@@ -756,8 +758,11 @@ export default function InvoicedServices() {
           </TableHead>
           <TableBody>
             {services.map((service) => {
-              const hasReceipt = (service.receiptImages && service.receiptImages.length > 0) || (service.remitos && service.remitos.length > 0);
+              const hasRemitoImages = service.remitos && service.remitos.some((r: any) => r.receiptImages && r.receiptImages.length > 0);
+              const hasReceipt = (service.receiptImages && service.receiptImages.length > 0) || hasRemitoImages;
               const remitoNumber = service.remitos && service.remitos.length > 0 ? service.remitos[0].number : '-';
+              // Remito with number but no images yet
+              const pendingRemitoNumber = !hasReceipt && service.remitos && service.remitos.length > 0 ? service.remitos[0].number : null;
               
               return (
               <TableRow key={service.id}>
@@ -794,16 +799,23 @@ export default function InvoicedServices() {
                         </Button>
                       </>
                     ) : (
-                      <Button
-                        variant="contained"
-                        color="success"
-                        size="small"
-                        startIcon={<CloudUploadIcon />}
-                        onClick={() => handleOpenUploadRemito(service)}
-                        sx={{ whiteSpace: 'nowrap' }}
-                      >
-                        Subir
-                      </Button>
+                      <>
+                        {pendingRemitoNumber && (
+                          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                            Nº {pendingRemitoNumber}
+                          </Typography>
+                        )}
+                        <Button
+                          variant="contained"
+                          color="success"
+                          size="small"
+                          startIcon={<CloudUploadIcon />}
+                          onClick={() => handleOpenUploadRemito(service)}
+                          sx={{ whiteSpace: 'nowrap' }}
+                        >
+                          Subir
+                        </Button>
+                      </>
                     )}
                   </Stack>
                 </TableCell>
