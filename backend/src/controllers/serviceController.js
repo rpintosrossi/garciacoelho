@@ -236,17 +236,20 @@ const createPastService = async (req, res) => {
       }
     });
 
-    // Si hay archivos de remito, crear el remito con múltiples imágenes
-    if (remitoFiles && remitoFiles.length > 0) {
-      const imagePaths = remitoFiles.map(file => {
+    // Crear remito si hay archivos O si se proporcionó un número de remito
+    const hasFiles = remitoFiles && remitoFiles.length > 0;
+    const hasNumber = remitoNumber && remitoNumber.trim();
+
+    if (hasFiles || hasNumber) {
+      const imagePaths = hasFiles ? remitoFiles.map(file => {
         if (file.location) return file.location;
         return getFileUrl(file.filename) || file.path;
-      });
+      }) : [];
 
       // Determinar el número de remito (usar el enviado, o el nombre del archivo, o generar uno)
       let finalRemitoNumber = remitoNumber ? remitoNumber.trim() : null;
       
-      if (!finalRemitoNumber && remitoFiles.length > 0) {
+      if (!finalRemitoNumber && hasFiles) {
         // Usar el nombre del primer archivo original como fallback
         finalRemitoNumber = remitoFiles[0].originalname.split('.')[0];
       }
@@ -260,7 +263,7 @@ const createPastService = async (req, res) => {
           serviceId: service.id,
           number: finalRemitoNumber,
           date: visitDate ? new Date(visitDate) : new Date(),
-          amount: 0, // Se puede actualizar después
+          amount: 0,
           receiptImages: imagePaths
         }
       });
