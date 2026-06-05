@@ -598,12 +598,38 @@ const uploadReceipt = async (req, res) => {
         const existingRemito = await prisma.remito.findFirst({
           where: { 
             number: finalRemitoNumber,
-            serviceId: id // Solo verificar para el mismo servicio
+            serviceId: id
           }
         });
 
         if (existingRemito) {
-          console.log('Remito ya existe para este servicio:', existingRemito);
+          // Si ya existe pero no tiene imágenes, actualizar con las nuevas imágenes
+          if (!existingRemito.receiptImages || existingRemito.receiptImages.length === 0) {
+            console.log('Remito existe sin imágenes, actualizando con las nuevas imágenes...');
+            const fileUrls = files.map(file => file.location || getFileUrl(file.filename));
+            const parseDateNoon = (d) => {
+              if (!d) return new Date();
+              const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+              if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12, 0, 0));
+              return new Date(d);
+            };
+            const updatedRemito = await prisma.remito.update({
+              where: { id: existingRemito.id },
+              data: {
+                receiptImages: fileUrls,
+                date: remitoDate ? parseDateNoon(remitoDate) : existingRemito.date
+              }
+            });
+            // Actualizar estado del servicio si corresponde
+            await prisma.service.update({
+              where: { id },
+              data: { status: 'CON_REMITO' }
+            });
+            console.log('Remito actualizado exitosamente:', updatedRemito);
+            return res.json(updatedRemito);
+          }
+
+          console.log('Remito ya existe con imágenes para este servicio:', existingRemito);
           return res.status(400).json({ 
             message: `Ya existe un remito con el número "${finalRemitoNumber}" para este servicio. Por favor, usa un número diferente.` 
           });
