@@ -94,16 +94,16 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
     return original - discountAmount;
   };
 
-  // Calcular monto máximo que se puede pagar (después de descuentos)
-  const calculateMaxPaymentAmount = () => {
+  // Monto de referencia de los documentos (después de descuentos)
+  const calculateDocsReferenceAmount = () => {
     return calculateFinalAmount();
   };
 
-  // Calcular saldo pendiente que quedará después del pago
-  const calculateRemainingBalance = () => {
-    const maxAmount = calculateMaxPaymentAmount();
+  // Excedente del pago que queda como saldo a favor
+  const calculateCreditAmount = () => {
+    const reference = calculateDocsReferenceAmount();
     const paymentAmountNum = parseFloat(paymentAmount) || 0;
-    return maxAmount - paymentAmountNum;
+    return Math.max(0, Math.round((paymentAmountNum - reference) * 100) / 100);
   };
 
   // Calcular distribución del pago entre documentos (para mostrar al usuario)
@@ -116,13 +116,19 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       return dateA - dateB; // Ascendente: más antiguos primero
     });
 
-    const distribution = [];
+    const distribution: Array<{
+      doc: any;
+      amountToPay: number;
+      remaining: number;
+      status: string;
+      credit?: number;
+    }> = [];
     const paymentAmountNum = parseFloat(paymentAmount) || 0;
     const originalAmount = calculateOriginalAmount();
     const discountAmount = calculateDiscount();
 
-    // Si hay descuento, distribuir proporcionalmente
-    if (discountAmount > 0) {
+    // Si hay descuento, distribuir proporcionalmente (incluye excedente si paga de más)
+    if (discountAmount > 0 && originalAmount > 0) {
       const discountFactor = paymentAmountNum / originalAmount;
       
       for (const doc of sortedDocs) {
@@ -132,8 +138,8 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         distribution.push({
           doc,
           amountToPay: adjustedAmount,
-          remaining: 0, // Con descuento, no queda saldo pendiente
-          status: 'full' // Se considera completo porque se paga el monto acordado
+          remaining: 0,
+          status: adjustedAmount > originalDocAmount + 0.01 ? 'credit' : 'full'
         });
       }
     } else {
@@ -168,6 +174,17 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
           remainingPayment = 0;
         }
       }
+
+      // Excedente → saldo a favor (se aplica al último documento pagado)
+      if (remainingPayment > 0.01 && distribution.length > 0) {
+        const target =
+          [...distribution].reverse().find((d) => d.amountToPay > 0) ||
+          distribution[distribution.length - 1];
+        target.amountToPay += remainingPayment;
+        target.remaining = 0;
+        target.status = 'credit';
+        target.credit = remainingPayment;
+      }
     }
 
     return distribution;
@@ -199,10 +216,8 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       const discountAmount = calculateDiscount();
       const finalAmount = parseFloat(paymentAmount); // Usar el monto ingresado por el usuario
 
-      // Validar que el monto no sea mayor al máximo permitido
-      const maxAmount = calculateMaxPaymentAmount();
-      if (finalAmount > maxAmount) {
-        setError(`El monto no puede ser mayor a ${formatCurrency(maxAmount)}`);
+      if (!finalAmount || finalAmount <= 0) {
+        setError('El monto del pago debe ser mayor a cero');
         setSaving(false);
         return;
       }
@@ -214,13 +229,12 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         return dateA - dateB; // Ascendente: más antiguos primero
       });
 
-      // Distribuir el pago priorizando facturas más antiguas
-      const docsToAssociate = [];
+      // Distribuir el pago priorizando facturas más antiguas (excedente = saldo a favor)
+      const docsToAssociate: Array<{ id: string; type: string; amount: number }> = [];
       let remainingPayment = finalAmount;
 
       // Si hay descuento, distribuir proporcionalmente el monto final entre los documentos
-      if (discountAmount > 0) {
-        // Calcular el factor de descuento para aplicar proporcionalmente a cada documento
+      if (discountAmount > 0 && originalAmount > 0) {
         const discountFactor = finalAmount / originalAmount;
         
         for (const doc of sortedDocs) {
@@ -234,17 +248,14 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
           });
         }
       } else {
-        // Sin descuento, usar la lógica de prioridad por antigüedad
         for (const doc of sortedDocs) {
           const originalDocAmount = parseFloat(doc.amount);
           
           if (remainingPayment <= 0) {
-            // Si ya no hay dinero para pagar, no asociar este documento
             break;
           }
           
           if (remainingPayment >= originalDocAmount) {
-            // Si hay suficiente dinero, pagar la factura completa
             docsToAssociate.push({
               id: doc.id,
               type: doc.type,
@@ -252,7 +263,6 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
             });
             remainingPayment -= originalDocAmount;
           } else {
-            // Si no hay suficiente dinero, pagar lo que se pueda de esta factura
             docsToAssociate.push({
               id: doc.id,
               type: doc.type,
@@ -260,6 +270,12 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
             });
             remainingPayment = 0;
           }
+        }
+
+        // Aplicar excedente al último documento para que sume al saldo a favor
+        if (remainingPayment > 0.01 && docsToAssociate.length > 0) {
+          docsToAssociate[docsToAssociate.length - 1].amount += remainingPayment;
+          remainingPayment = 0;
         }
       }
 
@@ -460,10 +476,9 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                 value={paymentAmount}
                 onChange={e => setPaymentAmount(e.target.value)}
                 fullWidth
-                helperText={`Monto máximo: ${formatCurrency(calculateMaxPaymentAmount())}. Puede pagar menos para dejar saldo pendiente.`}
+                helperText={`Referencia de documentos: ${formatCurrency(calculateDocsReferenceAmount())}. Puede pagar menos (saldo pendiente) o más (saldo a favor).`}
                 inputProps={{ 
-                  min: 0, 
-                  max: calculateMaxPaymentAmount(),
+                  min: 0,
                   step: 0.01
                 }}
                 sx={{ 
@@ -473,6 +488,12 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                   }
                 }}
               />
+
+              {calculateCreditAmount() > 0 && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Este pago genera saldo a favor de {formatCurrency(calculateCreditAmount())} en el/los edificio(s).
+                </Alert>
+              )}
               
               {/* Mostrar distribución del pago */}
               {parseFloat(paymentAmount) > 0 && selectedDocs.length > 0 && (
@@ -538,11 +559,30 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                                 Pendiente
                               </Box>
                             )}
+                            {item.status === 'credit' && (
+                              <Box component="span" sx={{ 
+                                display: 'inline-block',
+                                px: 1,
+                                py: 0.5,
+                                bgcolor: 'info.light',
+                                color: 'info.contrastText',
+                                borderRadius: 1,
+                                fontSize: '0.75rem',
+                                fontWeight: 'bold'
+                              }}>
+                                Con saldo a favor
+                              </Box>
+                            )}
                           </Box>
                         </Box>
                         {item.remaining > 0 && (
                           <Typography variant="caption" color="warning.main">
                             Saldo pendiente: {formatCurrency(item.remaining)}
+                          </Typography>
+                        )}
+                        {item.credit && item.credit > 0 && (
+                          <Typography variant="caption" color="info.main" display="block">
+                            Incluye saldo a favor: {formatCurrency(item.credit)}
                           </Typography>
                         )}
                       </Box>

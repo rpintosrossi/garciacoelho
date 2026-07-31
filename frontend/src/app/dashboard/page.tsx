@@ -240,7 +240,7 @@ export default function DashboardPage() {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Typography variant="h6" gutterBottom>
-              Servicios creados por mes
+              Trabajos realizados por mes
             </Typography>
             <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
               <ResponsiveContainer width="100%" height={300}>

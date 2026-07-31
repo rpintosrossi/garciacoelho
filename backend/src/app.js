@@ -4,6 +4,12 @@ const path = require('path');
 const mainRoutes = require('./routes/index');
 const initUploads = require('./utils/initUploads');
 const prisma = require('./lib/prisma');
+const {
+  serviceInvoicesInclude,
+  invoiceServicesInclude,
+  withInvoiceServices,
+  withServiceInvoices
+} = require('./utils/serviceInvoiceHelpers');
 
 const app = express();
 
@@ -84,23 +90,19 @@ app.get('/test-data', async (req, res) => {
     });
     
     // Obtener TODAS las facturas con detalles
-    const allInvoices = await prisma.invoice.findMany({
-      include: {
-        service: {
+    const allInvoices = (await prisma.invoice.findMany({
+      include: invoiceServicesInclude({
+        building: {
           include: {
-            building: {
-              include: {
-                administrator: true
-              }
-            },
-            technician: true
+            administrator: true
           }
-        }
-      }
-    });
+        },
+        technician: true
+      })
+    })).map(withInvoiceServices);
     
     // Obtener servicios con remitos para ver cuáles pueden facturarse
-    const servicesWithRemitos = await prisma.service.findMany({
+    const servicesWithRemitos = (await prisma.service.findMany({
       where: {
         remitos: {
           some: {}
@@ -114,9 +116,9 @@ app.get('/test-data', async (req, res) => {
         },
         technician: true,
         remitos: true,
-        invoice: true
+        ...serviceInvoicesInclude
       }
-    });
+    })).map(withServiceInvoices);
     
     // Obtener pagos que son "cobros sin factura"
     // EXCLUIR pagos en efectivo ya que fueron abonados directamente

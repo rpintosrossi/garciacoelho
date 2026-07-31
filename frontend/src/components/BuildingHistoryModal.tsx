@@ -29,7 +29,11 @@ import {
   TextField,
   InputAdornment,
   Stack,
-  TableSortLabel
+  TableSortLabel,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
@@ -44,8 +48,23 @@ import {
   Build,
   Download,
   Edit,
-  Delete
+  Delete,
+  PictureAsPdf,
+  Image as ImageIcon,
+  InsertDriveFile
 } from "@mui/icons-material";
+
+type ServiceDocKind = 'invoice' | 'remito';
+
+interface ServiceDocItem {
+  key: string;
+  kind: ServiceDocKind;
+  sourceId: string;
+  label: string;
+  subtitle?: string;
+  fileUrl?: string;
+  isProv?: boolean;
+}
 
 interface Payment {
   id: string;
@@ -80,6 +99,7 @@ interface Service {
   name: string;
   description: string;
   status: string;
+  isPaid?: boolean | null;
   createdAt: string;
   visitDate: string | null;
   technician: {
@@ -88,6 +108,7 @@ interface Service {
   } | null;
   remitos: Remito[];
   invoice: Invoice | null;
+  invoices?: Invoice[];
   noChargeReason: { id: string; name: string } | null;
   noChargeComment: string | null;
 }
@@ -174,6 +195,12 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [deleteServiceOpen, setDeleteServiceOpen] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
   const [deletingService, setDeletingService] = useState(false);
+
+  // Modal de documentos del servicio
+  const [docsModalOpen, setDocsModalOpen] = useState(false);
+  const [docsModalItems, setDocsModalItems] = useState<ServiceDocItem[]>([]);
+  const [docsModalSelectedKey, setDocsModalSelectedKey] = useState<string | null>(null);
+  const [docsModalTitle, setDocsModalTitle] = useState('Documentos del servicio');
 
   // Edit Remito Date State
   const [editingRemitoId, setEditingRemitoId] = useState<string | null>(null);
@@ -535,12 +562,113 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       'PENDIENTE': 'warning',
       'ASIGNADO': 'info',
       'CON_REMITO': 'primary',
+      'FACTURADO_PARCIAL': 'warning',
       'FACTURADO': 'success',
       'PAGADO': 'success',
       'ANULADO': 'error'
     };
     return statusMap[status] || 'default';
   };
+
+  const getServiceInvoices = (service: Service): Invoice[] => {
+    if (service.invoices && service.invoices.length > 0) return service.invoices;
+    return service.invoice ? [service.invoice] : [];
+  };
+
+  /** Factura informal/provisoria: status PENDIENTE (cobro sin PDF). */
+  const isProvInvoice = (invoice: Invoice) => invoice.status === 'PENDIENTE';
+
+  const formatInvoiceChipLabel = (invoice: Invoice) => {
+    const num = invoice.number?.trim() || invoice.id.substring(0, 8);
+    return isProvInvoice(invoice) ? `Prov #${num}` : `Factura #${num}`;
+  };
+
+  const formatRemitoChipLabel = (remito: Remito) =>
+    `Remito #${remito.number?.trim() || remito.id.substring(0, 8)}`;
+
+  const getFileKind = (url?: string) => {
+    if (!url) return 'none';
+    const ext = url.split('?')[0].split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return 'image';
+    return 'other';
+  };
+
+  const buildServiceDocItems = (service: Service): ServiceDocItem[] => {
+    const invoices = getServiceInvoices(service);
+    const items: ServiceDocItem[] = [];
+
+    for (const invoice of invoices) {
+      items.push({
+        key: `invoice-${invoice.id}`,
+        kind: 'invoice',
+        sourceId: invoice.id,
+        label: formatInvoiceChipLabel(invoice),
+        subtitle: invoice.date ? formatDate(invoice.date) : undefined,
+        fileUrl: invoice.fileUrl,
+        isProv: isProvInvoice(invoice)
+      });
+    }
+
+    for (const remito of service.remitos) {
+      const images = remito.receiptImages?.filter(Boolean) || [];
+      if (images.length === 0) {
+        items.push({
+          key: `remito-${remito.id}`,
+          kind: 'remito',
+          sourceId: remito.id,
+          label: formatRemitoChipLabel(remito),
+          subtitle: remito.date ? formatDate(remito.date) : undefined
+        });
+      } else {
+        images.forEach((url, idx) => {
+          items.push({
+            key: `remito-${remito.id}-${idx}`,
+            kind: 'remito',
+            sourceId: remito.id,
+            label:
+              images.length > 1
+                ? `${formatRemitoChipLabel(remito)} (${idx + 1}/${images.length})`
+                : formatRemitoChipLabel(remito),
+            subtitle: remito.date ? formatDate(remito.date) : undefined,
+            fileUrl: url
+          });
+        });
+      }
+    }
+
+    return items;
+  };
+
+  const openServiceDocuments = (
+    service: Service,
+    focus: { kind: ServiceDocKind; sourceId: string }
+  ) => {
+    const items = buildServiceDocItems(service);
+    if (items.length === 0) return;
+
+    const focused = items.filter(
+      (item) => item.kind === focus.kind && item.sourceId === focus.sourceId
+    );
+    const rest = items.filter(
+      (item) => !(item.kind === focus.kind && item.sourceId === focus.sourceId)
+    );
+    const ordered = [...focused, ...rest];
+
+    setDocsModalItems(ordered);
+    setDocsModalSelectedKey(ordered[0]?.key || null);
+    setDocsModalTitle(`Documentos — ${service.name}`);
+    setDocsModalOpen(true);
+  };
+
+  const closeServiceDocuments = () => {
+    setDocsModalOpen(false);
+    setDocsModalItems([]);
+    setDocsModalSelectedKey(null);
+  };
+
+  const selectedDoc =
+    docsModalItems.find((item) => item.key === docsModalSelectedKey) || docsModalItems[0] || null;
 
 
 
@@ -717,8 +845,10 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                       return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
                     }).map((service) => {
                       const isExpanded = expandedServices.has(service.id);
-                      const totalService = service.invoice?.amount || 0 + service.remitos.reduce((sum, r) => sum + r.amount, 0);
-                      const hasDocuments = service.invoice || service.remitos.length > 0 || (service.status === 'SIN_COBRO' && (service.noChargeReason || service.noChargeComment));
+                      const serviceInvoices = getServiceInvoices(service);
+                      const totalService = serviceInvoices.reduce((sum, inv) => sum + (inv.amount || 0), 0)
+                        + service.remitos.reduce((sum, r) => sum + r.amount, 0);
+                      const hasDocuments = serviceInvoices.length > 0 || service.remitos.length > 0 || (service.status === 'SIN_COBRO' && (service.noChargeReason || service.noChargeComment));
                       
                       return (
                         <React.Fragment key={service.id}>
@@ -773,34 +903,64 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                             </TableCell>
                             <TableCell>{service.technician?.name || '-'}</TableCell>
                             <TableCell>
-                              <Chip
-                                label={service.status}
-                                color={getStatusColor(service.status)}
-                                size="small"
-                              />
+                              <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                                <Chip
+                                  label={service.status}
+                                  color={getStatusColor(service.status)}
+                                  size="small"
+                                />
+                                {typeof service.isPaid === 'boolean' && (
+                                  <Chip
+                                    label={service.isPaid ? 'Pagado' : 'No pagado'}
+                                    color={service.isPaid ? 'success' : 'error'}
+                                    size="small"
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Stack>
                             </TableCell>
                             <TableCell align="right">
                               {totalService > 0 ? formatCurrency(totalService) : '-'}
                             </TableCell>
                             <TableCell>
-                              <Box display="flex" gap={0.5} alignItems="center">
-                                {service.invoice && (
+                              <Box display="flex" gap={0.5} alignItems="center" flexWrap="wrap">
+                                {serviceInvoices.map((invoice) => (
                                   <Chip
+                                    key={invoice.id}
                                     icon={<Description />}
-                                    label="Factura"
+                                    label={formatInvoiceChipLabel(invoice)}
                                     size="small"
                                     color="secondary"
+                                    clickable
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openServiceDocuments(service, {
+                                        kind: 'invoice',
+                                        sourceId: invoice.id
+                                      });
+                                    }}
+                                    title="Ver documentos del servicio"
                                   />
-                                )}
-                                {service.remitos.length > 0 && (
+                                ))}
+                                {service.remitos.map((remito) => (
                                   <Chip
+                                    key={remito.id}
                                     icon={<Receipt />}
-                                    label={`${service.remitos.length} Remito${service.remitos.length > 1 ? 's' : ''}`}
+                                    label={formatRemitoChipLabel(remito)}
                                     size="small"
                                     color="warning"
+                                    clickable
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openServiceDocuments(service, {
+                                        kind: 'remito',
+                                        sourceId: remito.id
+                                      });
+                                    }}
+                                    title="Ver documentos del servicio"
                                   />
-                                )}
-                                {service.status === 'CON_REMITO' && !service.invoice && (
+                                ))}
+                                {service.status === 'CON_REMITO' && serviceInvoices.length === 0 && (
                                   <IconButton
                                     size="small"
                                     color="error"
@@ -818,19 +978,19 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                               <TableCell colSpan={7} sx={{ py: 0, borderBottom: isExpanded ? 1 : 0 }}>
                                 <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                                   <Box sx={{ p: 2, bgcolor: 'grey.50' }}>
-                                    {/* Factura */}
-                                    {service.invoice && (
-                                      <Box mb={2}>
+                                    {/* Facturas */}
+                                    {serviceInvoices.map((invoice) => (
+                                      <Box mb={2} key={invoice.id}>
                                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                                           <Typography variant="subtitle2" color="secondary">
                                             <Description fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
-                                            Factura #{service.invoice.number || service.invoice.id.substring(0, 8)}
+                                            {isProvInvoice(invoice) ? 'Prov' : 'Factura'} #{invoice.number || invoice.id.substring(0, 8)}
                                           </Typography>
-                                          {service.invoice.fileUrl && (
+                                          {invoice.fileUrl && (
                                             <IconButton
                                               size="small"
                                               color="primary"
-                                              onClick={() => window.open(service.invoice.fileUrl, '_blank')}
+                                              onClick={() => window.open(invoice.fileUrl, '_blank')}
                                               title="Descargar factura"
                                             >
                                               <Download fontSize="small" />
@@ -844,7 +1004,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                                 Fecha
                                               </Typography>
                                               <Typography variant="body2">
-                                                {formatDate(service.invoice.date)}
+                                                {formatDate(invoice.date)}
                                               </Typography>
                                             </Box>
                                             <Box>
@@ -853,14 +1013,14 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                               </Typography>
                                               <Box display="flex" alignItems="center">
                                                 <Typography variant="body2" fontWeight="bold">
-                                                  {formatCurrency(service.invoice.amount)}
+                                                  {formatCurrency(invoice.amount)}
                                                 </Typography>
                                                 <IconButton
                                                   size="small"
                                                   color="primary"
                                                   onClick={() => handleEditClick({
-                                                    id: service.invoice!.id,
-                                                    amount: service.invoice!.amount
+                                                    id: invoice.id,
+                                                    amount: invoice.amount
                                                   })}
                                                   sx={{ ml: 0.5, p: 0.5 }}
                                                   title="Editar monto"
@@ -874,9 +1034,9 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                                 Estado
                                               </Typography>
                                               <Chip
-                                                label={service.invoice.status}
+                                                label={invoice.status}
                                                 size="small"
-                                                color={service.invoice.status === 'PAGADO' ? 'success' : 'warning'}
+                                                color={invoice.status === 'PAGADO' ? 'success' : 'warning'}
                                               />
                                             </Box>
                                             <Box>
@@ -885,18 +1045,18 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                               </Typography>
                                               <Typography variant="body2">
                                                 {formatCurrency(
-                                                  service.invoice.payments.reduce((sum, p) => sum + p.amount, 0)
+                                                  invoice.payments.reduce((sum, p) => sum + p.amount, 0)
                                                 )}
                                               </Typography>
                                             </Box>
                                           </Box>
                                           
-                                          {service.invoice.payments.length > 0 && (
+                                          {invoice.payments.length > 0 && (
                                             <Box mt={2}>
                                               <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
                                                 Detalle de pagos:
                                               </Typography>
-                                              {service.invoice.payments.map((payment) => (
+                                              {invoice.payments.map((payment) => (
                                                 <Box
                                                   key={payment.id}
                                                   sx={{
@@ -920,7 +1080,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                           )}
                                         </Paper>
                                       </Box>
-                                    )}
+                                    ))}
 
                                     {/* Remitos */}
                                     {service.remitos.length > 0 && (
@@ -1022,7 +1182,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
                                     {/* Sin Cobro Económico */}
                                     {service.status === 'SIN_COBRO' && (service.noChargeReason || service.noChargeComment) && (
-                                      <Box mt={service.remitos.length > 0 || service.invoice ? 2 : 0}>
+                                      <Box mt={service.remitos.length > 0 || serviceInvoices.length > 0 ? 2 : 0}>
                                         <Typography variant="subtitle2" gutterBottom sx={{ color: 'success.main' }}>
                                           <CheckCircle fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
                                           Sin Cobro Económico
@@ -1091,6 +1251,145 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
         </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cerrar</Button>
+      </DialogActions>
+    </Dialog>
+
+    <Dialog
+      open={docsModalOpen}
+      onClose={closeServiceDocuments}
+      maxWidth="lg"
+      fullWidth
+      PaperProps={{ sx: { height: '85vh', display: 'flex', flexDirection: 'column' } }}
+    >
+      <DialogTitle sx={{ pb: 1 }}>
+        <Typography variant="h6" component="div">{docsModalTitle}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Vista previa a la izquierda · todos los archivos del servicio a la derecha
+        </Typography>
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: 0, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box display="flex" flex={1} minHeight={480} height="100%">
+          <Box
+            flex={1}
+            minWidth={0}
+            sx={{
+              bgcolor: 'grey.100',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 2,
+              borderRight: '1px solid',
+              borderColor: 'divider'
+            }}
+          >
+            {!selectedDoc ? (
+              <Typography color="text.secondary">Sin documentos</Typography>
+            ) : !selectedDoc.fileUrl ? (
+              <Box textAlign="center" px={3}>
+                <InsertDriveFile sx={{ fontSize: 56, color: 'text.disabled', mb: 1 }} />
+                <Typography variant="subtitle1" gutterBottom>
+                  {selectedDoc.label}
+                </Typography>
+                <Typography color="text.secondary">
+                  {selectedDoc.isProv
+                    ? 'Cobro provisorio sin archivo PDF asociado.'
+                    : 'Este documento no tiene archivo adjunto.'}
+                </Typography>
+              </Box>
+            ) : getFileKind(selectedDoc.fileUrl) === 'pdf' ? (
+              <Box
+                component="iframe"
+                src={selectedDoc.fileUrl}
+                title={selectedDoc.label}
+                sx={{ width: '100%', height: '100%', border: 0, borderRadius: 1, bgcolor: 'white' }}
+              />
+            ) : getFileKind(selectedDoc.fileUrl) === 'image' ? (
+              <Box
+                component="img"
+                src={selectedDoc.fileUrl}
+                alt={selectedDoc.label}
+                sx={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  borderRadius: 1,
+                  boxShadow: 1
+                }}
+              />
+            ) : (
+              <Box textAlign="center">
+                <Typography gutterBottom>{selectedDoc.label}</Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<Download />}
+                  href={selectedDoc.fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Abrir archivo
+                </Button>
+              </Box>
+            )}
+          </Box>
+
+          <Box
+            width={300}
+            flexShrink={0}
+            sx={{ overflowY: 'auto', bgcolor: 'background.paper' }}
+          >
+            <Box px={2} py={1.5} borderBottom="1px solid" borderColor="divider">
+              <Typography variant="subtitle2">
+                Archivos ({docsModalItems.length})
+              </Typography>
+            </Box>
+            <List dense disablePadding>
+              {docsModalItems.map((item) => {
+                const selected = item.key === (selectedDoc?.key);
+                const kind = getFileKind(item.fileUrl);
+                return (
+                  <ListItemButton
+                    key={item.key}
+                    selected={selected}
+                    onClick={() => setDocsModalSelectedKey(item.key)}
+                    alignItems="flex-start"
+                  >
+                    <ListItemIcon sx={{ minWidth: 36, mt: 0.5 }}>
+                      {item.kind === 'invoice' ? (
+                        kind === 'pdf' ? <PictureAsPdf color="error" fontSize="small" /> : <Description color="secondary" fontSize="small" />
+                      ) : kind === 'image' ? (
+                        <ImageIcon color="primary" fontSize="small" />
+                      ) : (
+                        <Receipt color="warning" fontSize="small" />
+                      )}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={item.label}
+                      secondary={item.subtitle || (item.fileUrl ? undefined : 'Sin archivo')}
+                      primaryTypographyProps={{
+                        variant: 'body2',
+                        fontWeight: selected ? 600 : 400
+                      }}
+                      secondaryTypographyProps={{ variant: 'caption' }}
+                    />
+                  </ListItemButton>
+                );
+              })}
+            </List>
+          </Box>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        {selectedDoc?.fileUrl && (
+          <Button
+            startIcon={<Download />}
+            href={selectedDoc.fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Abrir en pestaña
+          </Button>
+        )}
+        <Button onClick={closeServiceDocuments}>Cerrar</Button>
       </DialogActions>
     </Dialog>
 

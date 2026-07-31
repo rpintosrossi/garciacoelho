@@ -20,6 +20,7 @@ const {
   getServiceStats,
   getAssignedServicesForTechnician,
   cancelService,
+  closeInvoicing,
   markServiceNoCharge
 } = require('../controllers/serviceController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
@@ -97,6 +98,9 @@ router.post('/:id/cancel', roleMiddleware(['TECNICO', 'ADMIN', 'OPERADOR']), can
 
 // Ruta para marcar servicio sin cobro económico (solo ADMIN u OPERADOR)
 router.patch('/:id/no-charge', roleMiddleware(['ADMIN', 'OPERADOR']), markServiceNoCharge);
+
+// Cerrar facturación parcial (solo ADMIN u OPERADOR)
+router.post('/:id/close-invoicing', roleMiddleware(['ADMIN', 'OPERADOR']), closeInvoicing);
 
 // Ruta para crear factura (solo ADMIN u OPERADOR)
 router.post('/:id/invoice', roleMiddleware(['ADMIN', 'OPERADOR']), createInvoice);

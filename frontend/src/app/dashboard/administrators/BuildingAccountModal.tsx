@@ -458,7 +458,7 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
           open={openPaymentModal}
           onClose={handleClosePaymentModal}
           buildingId={buildingId}
-          buildingName={buildingName || data?.building?.name || ''}
+          buildingAddress={data?.building?.address || buildingName || ''}
           onSuccess={handlePaymentSuccess}
         />
       )}

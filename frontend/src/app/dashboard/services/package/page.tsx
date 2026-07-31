@@ -131,6 +131,7 @@ export default function PackagePage() {
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
+  const [loadingLastPaymentMethod, setLoadingLastPaymentMethod] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [downloadMode, setDownloadMode] = useState<'single' | 'split' | 'individual'>('single');
 
@@ -203,10 +204,6 @@ export default function PackagePage() {
       const response = await cachedApi.get('/payment-methods');
       const methods: PaymentMethod[] = response.data;
       setPaymentMethods(methods);
-      // Establecer el primer método como seleccionado por defecto
-      if (methods.length > 0 && !selectedPaymentMethod) {
-        setSelectedPaymentMethod(methods[0].id);
-      }
     } catch (err) {
       console.error('Error fetching payment methods:', err);
     }
@@ -298,9 +295,25 @@ export default function PackagePage() {
   };
 
   const handleDownloadPackage = async (adminId: string) => {
-    // Mostrar modal para seleccionar método de pago
     setSelectedAdminId(adminId);
+    setSelectedPaymentMethod('');
     setShowPaymentMethodModal(true);
+    setLoadingLastPaymentMethod(true);
+
+    try {
+      const response = await cachedApi.get(`/packages/${adminId}/last-payment-method`);
+      const lastMethodId = response.data?.paymentMethodId as string | null;
+      if (
+        lastMethodId &&
+        (paymentMethods.length === 0 || paymentMethods.some((m) => m.id === lastMethodId))
+      ) {
+        setSelectedPaymentMethod(lastMethodId);
+      }
+    } catch (err) {
+      console.error('Error al obtener último método de pago:', err);
+    } finally {
+      setLoadingLastPaymentMethod(false);
+    }
   };
 
   const handleConfirmDownload = async () => {
@@ -631,7 +644,7 @@ export default function PackagePage() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Selecciona el método de pago para incluir los datos correspondientes en el PDF:
             </Typography>
-            <FormControl fullWidth>
+            <FormControl fullWidth disabled={loadingLastPaymentMethod}>
               <InputLabel>Método de Pago</InputLabel>
               <Select
                 value={selectedPaymentMethod}
@@ -644,6 +657,11 @@ export default function PackagePage() {
                   </MenuItem>
                 ))}
               </Select>
+              {loadingLastPaymentMethod && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Buscando último método usado para esta administración...
+                </Typography>
+              )}
             </FormControl>
 
             <Box sx={{ mt: 3 }}>
@@ -692,7 +710,11 @@ export default function PackagePage() {
           <Button 
             onClick={handleConfirmDownload} 
             variant="contained"
-            disabled={downloading === selectedAdminId}
+            disabled={
+              downloading === selectedAdminId ||
+              loadingLastPaymentMethod ||
+              !selectedPaymentMethod
+            }
           >
             {downloading === selectedAdminId ? <CircularProgress size={20} /> : 'Descargar'}
           </Button>

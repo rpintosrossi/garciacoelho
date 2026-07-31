@@ -22,6 +22,8 @@ import {
   InputLabel,
   Select,
   SelectChangeEvent,
+  Chip,
+  Stack,
 } from '@mui/material';
 import { 
   Edit as EditIcon, 
@@ -38,6 +40,7 @@ interface Service {
   name: string;
   description: string;
   status: string;
+  isPaid?: boolean | null;
   cancellationReason?: string;
   building: {
     name: string;
@@ -47,6 +50,24 @@ interface Service {
   };
   visitDate?: string;
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  PENDIENTE: 'Pendiente',
+  ASIGNADO: 'Asignado',
+  CON_REMITO: 'Con remito',
+  FACTURADO_PARCIAL: 'Facturado',
+  FACTURADO: 'Facturado',
+  SIN_COBRO: 'Sin cobro',
+};
+
+const STATUS_COLORS: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning'> = {
+  PENDIENTE: 'warning',
+  ASIGNADO: 'info',
+  CON_REMITO: 'primary',
+  FACTURADO_PARCIAL: 'warning',
+  FACTURADO: 'success',
+  SIN_COBRO: 'default',
+};
 
 interface PaginationData {
   total: number;
@@ -270,7 +291,23 @@ export default function ServicesPage() {
               <TableRow key={service.id}>
                 <TableCell>{service.building.name}</TableCell>
                 <TableCell>{service.description}</TableCell>
-                <TableCell>{service.status}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Chip
+                      label={STATUS_LABELS[service.status] || service.status}
+                      color={STATUS_COLORS[service.status] || 'default'}
+                      size="small"
+                    />
+                    {typeof service.isPaid === 'boolean' && (
+                      <Chip
+                        label={service.isPaid ? 'Pagado' : 'No pagado'}
+                        color={service.isPaid ? 'success' : 'error'}
+                        size="small"
+                        variant="outlined"
+                      />
+                    )}
+                  </Stack>
+                </TableCell>
                 <TableCell>{service.technician?.name || '-'}</TableCell>
                 <TableCell>
                   {service.visitDate

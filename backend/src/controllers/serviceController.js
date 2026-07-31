@@ -1,5 +1,12 @@
 const { getFileUrl, convertToAbsoluteUrls } = require('../utils/fileUtils');
 const prisma = require('../lib/prisma');
+const {
+  canInvoice,
+  serviceInvoicesInclude,
+  getServiceInvoices,
+  withServiceInvoices,
+  linkInvoiceToServicesData
+} = require('../utils/serviceInvoiceHelpers');
 
 // Obtener todos los servicios
 const getAllServices = async (req, res) => {
@@ -22,7 +29,8 @@ const getAllServices = async (req, res) => {
     const where = {};
     
     if (status) {
-      where.status = status;
+      const statuses = String(status).split(',').map((s) => s.trim()).filter(Boolean);
+      where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
     }
 
     if (buildingId) {
@@ -55,7 +63,7 @@ const getAllServices = async (req, res) => {
           }
         },
         technician: true,
-        invoice: true,
+        ...serviceInvoicesInclude,
         remitos: true,
         workshopRepairs: {
           select: {
@@ -72,7 +80,7 @@ const getAllServices = async (req, res) => {
 
     // Convertir URLs relativas a absolutas para las imágenes
     const servicesWithAbsoluteUrls = services.map(service => ({
-      ...service,
+      ...withServiceInvoices(service),
       receiptImages: convertToAbsoluteUrls(service.receiptImages),
       remitos: service.remitos ? service.remitos.map(remito => ({
         ...remito,
@@ -116,7 +124,7 @@ const getServiceById = async (req, res) => {
         },
         technician: true,
         remitos: true,
-        invoice: true
+        ...serviceInvoicesInclude
       }
     });
 
@@ -136,7 +144,7 @@ const getServiceById = async (req, res) => {
       }));
     }
 
-    res.json(service);
+    res.json(withServiceInvoices(service));
   } catch (error) {
     console.error('Error al obtener servicio:', error);
     res.status(500).json({ message: 'Error al obtener servicio' });
@@ -314,11 +322,11 @@ const updateService = async (req, res) => {
             }
           }
         },
-        invoice: true
+        ...serviceInvoicesInclude
       }
     });
 
-    res.json(service);
+    res.json(withServiceInvoices(service));
   } catch (error) {
     console.error('Error al actualizar servicio:', error);
     res.status(500).json({ message: 'Error al actualizar servicio' });
@@ -334,7 +342,7 @@ const deleteService = async (req, res) => {
     const service = await prisma.service.findUnique({
       where: { id },
       include: { 
-        invoice: true,
+        ...serviceInvoicesInclude,
         remitos: {
           include: { paymentDocuments: true }
         }
@@ -355,7 +363,7 @@ const deleteService = async (req, res) => {
     }
 
     // Verificar si el servicio tiene una factura asociada
-    if (service.invoice) {
+    if (getServiceInvoices(service).length > 0) {
       return res.status(400).json({ 
         message: 'No se puede eliminar el servicio porque tiene una factura asociada' 
       });
@@ -792,19 +800,19 @@ const getServiceCounts = async (req, res) => {
   }
 };
 
-// Estadísticas de servicios: trabajos realizados por mes (remitos subidos)
+// Estadísticas de servicios: trabajos realizados por mes (fecha del remito)
 const getServiceStats = async (req, res) => {
   try {
-    // Obtener servicios ordenados por fecha de creación para estadística de "Servicios Creados"
-    const services = await prisma.service.findMany({
-      select: { createdAt: true },
-      orderBy: { createdAt: 'asc' }
+    // Agrupar por fecha del remito (cuando se realizó el trabajo)
+    const remitos = await prisma.remito.findMany({
+      select: { date: true },
+      orderBy: { date: 'asc' }
     });
 
     // Formatear resultado: { '2024-05': 10, ... }
     const stats = {};
-    services.forEach(s => {
-      const date = new Date(s.createdAt);
+    remitos.forEach(r => {
+      const date = new Date(r.date);
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       stats[key] = (stats[key] || 0) + 1;
     });
@@ -973,9 +981,9 @@ const createInformalInvoice = async (req, res) => {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
 
-    // Verificar que el servicio tiene remito
-    if (service.status !== 'CON_REMITO') {
-      return res.status(400).json({ message: 'El servicio debe tener un remito antes de crear el cobro' });
+    // CON_REMITO (primera) o FACTURADO (factura adicional sobre remito ya facturado)
+    if (!canInvoice(service.status)) {
+      return res.status(400).json({ message: 'El servicio no puede facturarse en su estado actual' });
     }
 
     // Verificar permisos (solo ADMIN u OPERADOR pueden crear cobros)
@@ -994,13 +1002,11 @@ const createInformalInvoice = async (req, res) => {
         paymentMethod: paymentMethod,
         ...(provNumber ? { number: provNumber } : {}),
         ...(date ? { date: new Date(date) } : {}),
-        services: {
-          connect: { id: id }
-        }
+        ...linkInvoiceToServicesData([id])
       }
     });
 
-    const updatedService = await prisma.service.update({
+    const updatedService = withServiceInvoices(await prisma.service.update({
       where: { id },
       data: {
         status: 'FACTURADO'
@@ -1012,9 +1018,9 @@ const createInformalInvoice = async (req, res) => {
             administrator: true
           }
         },
-        invoice: true
+        ...serviceInvoicesInclude
       }
-    });
+    }));
 
     // Si el método de pago es EFECTIVO, crear el pago inmediatamente
     if (paymentMethod === 'EFECTIVO') {
@@ -1114,11 +1120,11 @@ const createInformalInvoiceMultiple = async (req, res) => {
       return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
     }
 
-    // Validar que todos los servicios tienen remito
-    const invalidServices = services.filter(s => s.status !== 'CON_REMITO');
+    // Validar que todos los servicios pueden facturarse
+    const invalidServices = services.filter(s => !canInvoice(s.status));
     if (invalidServices.length > 0) {
       return res.status(400).json({ 
-        message: 'Todos los servicios deben tener remito antes de crear el cobro',
+        message: 'Todos los servicios deben tener remito (o facturación parcial abierta) antes de crear el cobro',
         invalidServices: invalidServices.map(s => s.id)
       });
     }
@@ -1142,7 +1148,8 @@ const createInformalInvoiceMultiple = async (req, res) => {
         data: {
           amount: parseFloat(amount),
           status: invoiceStatus,
-          paymentMethod: paymentMethod
+          paymentMethod: paymentMethod,
+          ...linkInvoiceToServicesData(serviceIds)
         }
       });
 
@@ -1152,8 +1159,7 @@ const createInformalInvoiceMultiple = async (req, res) => {
           tx.service.update({
             where: { id: serviceId },
             data: {
-              status: 'FACTURADO',
-              invoiceId: invoice.id
+              status: 'FACTURADO'
             },
             include: {
               technician: true,
@@ -1161,7 +1167,8 @@ const createInformalInvoiceMultiple = async (req, res) => {
                 include: {
                   administrator: true
                 }
-              }
+              },
+              ...serviceInvoicesInclude
             }
           })
         )
@@ -1196,7 +1203,7 @@ const createInformalInvoiceMultiple = async (req, res) => {
 
     res.json({ 
       message: `Cobro sin factura creado exitosamente para ${result.services.length} servicios`, 
-      services: result.services,
+      services: result.services.map(withServiceInvoices),
       invoice: result.invoice
     });
   } catch (error) {
@@ -1228,9 +1235,9 @@ const createInvoice = async (req, res) => {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
 
-    // Verificar que el servicio tiene remito
-    if (service.status !== 'CON_REMITO') {
-      return res.status(400).json({ message: 'El servicio debe tener un remito antes de facturar' });
+    // Verificar que el servicio puede facturarse
+    if (!canInvoice(service.status)) {
+      return res.status(400).json({ message: 'El servicio debe tener un remito (o facturación parcial abierta) antes de facturar' });
     }
 
     // Verificar permisos (solo ADMIN u OPERADOR pueden facturar)
@@ -1242,27 +1249,26 @@ const createInvoice = async (req, res) => {
     }
 
     // Crear la factura y actualizar el estado del servicio
-    const [invoice, updatedService] = await prisma.$transaction([
-      prisma.invoice.create({
-        data: {
-          serviceId: id,
-          number: invoiceNumber ? String(invoiceNumber).trim() : null,
-          amount: parseFloat(invoiceAmount),
-          date: invoiceDate ? new Date(invoiceDate) : new Date(),
-          status: 'EMITIDA'
-        }
-      }),
-      prisma.service.update({
-        where: { id },
-        data: {
-          status: 'FACTURADO'
-        },
-        include: {
-          technician: true,
-          invoice: true
-        }
-      })
-    ]);
+    const invoice = await prisma.invoice.create({
+      data: {
+        number: invoiceNumber ? String(invoiceNumber).trim() : null,
+        amount: parseFloat(invoiceAmount),
+        date: invoiceDate ? new Date(invoiceDate) : new Date(),
+        status: 'EMITIDA',
+        ...linkInvoiceToServicesData([id])
+      }
+    });
+
+    const updatedService = withServiceInvoices(await prisma.service.update({
+      where: { id },
+      data: {
+        status: 'FACTURADO'
+      },
+      include: {
+        technician: true,
+        ...serviceInvoicesInclude
+      }
+    }));
 
     res.json({ 
       message: 'Factura creada exitosamente', 
@@ -1394,6 +1400,12 @@ const importInvoice = async (req, res) => {
     const fileUrl = file.location ? file.location : getFileUrl(file.filename);
     console.log('URL del archivo de factura:', fileUrl);
     
+    if (!canInvoice(service.status)) {
+      return res.status(400).json({
+        message: 'El servicio debe tener un remito (o facturación parcial abierta) antes de importar una factura'
+      });
+    }
+
     // Crear la factura y actualizar el servicio
     const invoice = await prisma.invoice.create({
       data: {
@@ -1403,22 +1415,20 @@ const importInvoice = async (req, res) => {
         fileUrl: fileUrl,
         status: 'EMITIDA',
         paymentMethod: paymentMethod || 'CUENTA_CORRIENTE',
-        services: {
-          connect: { id: id }
-        }
+        ...linkInvoiceToServicesData([id])
       }
     });
 
-    const updatedService = await prisma.service.update({
+    const updatedService = withServiceInvoices(await prisma.service.update({
       where: { id },
       data: {
         status: 'FACTURADO'
       },
       include: {
         technician: true,
-        invoice: true
+        ...serviceInvoicesInclude
       }
-    });
+    }));
     
     console.log('Factura importada exitosamente:', invoice);
     console.log('Servicio actualizado:', updatedService);
@@ -1498,6 +1508,15 @@ const importInvoiceMultiple = async (req, res) => {
       return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
     }
 
+    // Validar que todos los servicios pueden facturarse
+    const invalidServices = services.filter(s => !canInvoice(s.status));
+    if (invalidServices.length > 0) {
+      return res.status(400).json({
+        message: 'Todos los servicios deben tener remito (o facturación parcial abierta) antes de importar la factura',
+        invalidServices: invalidServices.map(s => s.id)
+      });
+    }
+
     // Validar que todos los servicios son del mismo edificio
     const buildingIds = [...new Set(services.map(s => s.buildingId))];
     if (buildingIds.length > 1) {
@@ -1521,7 +1540,8 @@ const importInvoiceMultiple = async (req, res) => {
           date: date ? new Date(date) : new Date(),
           fileUrl: fileUrl,
           status: 'EMITIDA',
-          paymentMethod: paymentMethod || 'CUENTA_CORRIENTE'
+          paymentMethod: paymentMethod || 'CUENTA_CORRIENTE',
+          ...linkInvoiceToServicesData(parsedServiceIds)
         }
       });
 
@@ -1531,8 +1551,7 @@ const importInvoiceMultiple = async (req, res) => {
           tx.service.update({
             where: { id: serviceId },
             data: {
-              status: 'FACTURADO',
-              invoiceId: invoice.id
+              status: 'FACTURADO'
             },
             include: {
               technician: true,
@@ -1540,7 +1559,8 @@ const importInvoiceMultiple = async (req, res) => {
                 include: {
                   administrator: true
                 }
-              }
+              },
+              ...serviceInvoicesInclude
             }
           })
         )
@@ -1554,13 +1574,61 @@ const importInvoiceMultiple = async (req, res) => {
 
     res.status(200).json({ 
       message: `Factura importada exitosamente para ${result.services.length} servicios`, 
-      services: result.services,
+      services: result.services.map(withServiceInvoices),
       invoice: result.invoice
     });
   } catch (error) {
     console.error('Error al importar factura múltiple:', error);
     console.error('Stack trace:', error.stack);
     res.status(500).json({ message: 'Error al importar factura múltiple', error: error.message });
+  }
+};
+
+// Cerrar facturación parcial: el servicio sale de la cola de Facturación
+const closeInvoicing = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      include: serviceInvoicesInclude
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    if (service.status !== 'FACTURADO_PARCIAL') {
+      return res.status(400).json({
+        message: 'Solo se puede cerrar la facturación de un servicio en estado FACTURADO_PARCIAL'
+      });
+    }
+
+    if (getServiceInvoices(service).length === 0) {
+      return res.status(400).json({
+        message: 'El servicio debe tener al menos una factura antes de cerrar la facturación'
+      });
+    }
+
+    const updatedService = withServiceInvoices(await prisma.service.update({
+      where: { id },
+      data: { status: 'FACTURADO' },
+      include: {
+        technician: true,
+        building: {
+          include: { administrator: true }
+        },
+        ...serviceInvoicesInclude
+      }
+    }));
+
+    res.json({
+      message: 'Facturación cerrada correctamente',
+      service: updatedService
+    });
+  } catch (error) {
+    console.error('Error al cerrar facturación:', error);
+    res.status(500).json({ message: 'Error al cerrar facturación' });
   }
 };
 
@@ -1628,5 +1696,6 @@ module.exports = {
   getServiceStats,
   getAssignedServicesForTechnician,
   cancelService,
+  closeInvoicing,
   markServiceNoCharge
 }; 

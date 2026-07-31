@@ -39,7 +39,6 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
-import { formatCurrency } from '@/utils/formatCurrency';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 
@@ -48,6 +47,7 @@ interface Service {
   name: string;
   description: string;
   status: string;
+  isPaid?: boolean | null;
   createdAt: string;
   visitDate?: string;
   buildingId: string;
@@ -63,6 +63,12 @@ interface Service {
     amount: number;
     date: string;
   };
+  invoices?: {
+    id: string;
+    number?: string;
+    amount: number;
+    date?: string;
+  }[];
   receiptImages?: string[];
   remitos?: any[];
 }
@@ -204,6 +210,14 @@ export default function InvoicedServices() {
   const [bulkMode, setBulkMode] = useState(false);
   const [openBulkRemito, setOpenBulkRemito] = useState(false);
   const [openBulkImportInvoice, setOpenBulkImportInvoice] = useState(false);
+
+  // Facturar remito ya facturado
+  const [openReinvoice, setOpenReinvoice] = useState(false);
+  const [reinvoiceBuilding, setReinvoiceBuilding] = useState<any | null>(null);
+  const [reinvoiceSearch, setReinvoiceSearch] = useState('');
+  const [reinvoiceRemitos, setReinvoiceRemitos] = useState<any[]>([]);
+  const [reinvoiceSelected, setReinvoiceSelected] = useState<any | null>(null);
+  const [loadingReinvoiceRemitos, setLoadingReinvoiceRemitos] = useState(false);
 
   const fetchServices = async () => {
     try {
@@ -373,6 +387,87 @@ export default function InvoicedServices() {
     setInvoiceDate(new Date());
     setOpenImportInvoice(true);
   };
+
+  const handleOpenReinvoice = () => {
+    setOpenReinvoice(true);
+    setReinvoiceBuilding(null);
+    setReinvoiceSearch('');
+    setReinvoiceRemitos([]);
+    setReinvoiceSelected(null);
+  };
+
+  const handleCloseReinvoice = () => {
+    setOpenReinvoice(false);
+    setReinvoiceBuilding(null);
+    setReinvoiceSearch('');
+    setReinvoiceRemitos([]);
+    setReinvoiceSelected(null);
+  };
+
+  const loadInvoicedRemitos = async (buildingId: string, search = '') => {
+    setLoadingReinvoiceRemitos(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams();
+      if (search.trim()) params.append('search', search.trim());
+      const res = await axios.get(
+        `/buildings/${buildingId}/invoiced-remitos?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setReinvoiceRemitos(res.data.remitos || []);
+    } catch (err: any) {
+      console.error('Error cargando remitos facturados:', err);
+      setReinvoiceRemitos([]);
+      alert(err?.response?.data?.message || 'Error al cargar remitos facturados');
+    } finally {
+      setLoadingReinvoiceRemitos(false);
+    }
+  };
+
+  const remitoToService = (item: any): Service => ({
+    id: item.service.id,
+    name: item.service.name,
+    description: item.service.description,
+    status: item.service.status,
+    createdAt: item.service.visitDate || new Date().toISOString(),
+    visitDate: item.service.visitDate,
+    buildingId: reinvoiceBuilding?.id,
+    building: {
+      name: reinvoiceBuilding?.name || '',
+      address: reinvoiceBuilding?.address || ''
+    },
+    technician: item.service.technician || { name: '-' },
+    invoices: item.invoices || [],
+    remitos: [{
+      id: item.id,
+      number: item.number,
+      amount: item.amount,
+      date: item.date,
+      receiptImages: item.receiptImages
+    }]
+  });
+
+  const handleReinvoiceInformal = () => {
+    if (!reinvoiceSelected) return;
+    const service = remitoToService(reinvoiceSelected);
+    handleCloseReinvoice();
+    handleOpenRemito(service);
+  };
+
+  const handleReinvoiceImport = () => {
+    if (!reinvoiceSelected) return;
+    const service = remitoToService(reinvoiceSelected);
+    handleCloseReinvoice();
+    handleOpenImportInvoice(service);
+  };
+
+  useEffect(() => {
+    if (!openReinvoice || !reinvoiceBuilding?.id) return;
+    const t = setTimeout(() => {
+      loadInvoicedRemitos(reinvoiceBuilding.id, reinvoiceSearch);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [openReinvoice, reinvoiceBuilding?.id, reinvoiceSearch]);
 
   const handleCloseImportInvoice = () => {
     setOpenImportInvoice(false);
@@ -643,17 +738,20 @@ export default function InvoicedServices() {
 
   return (
     <Box p={3}>
-      <Box display="flex" alignItems="center" mb={2}>
+      <Box display="flex" alignItems="center" mb={2} gap={2} flexWrap="wrap">
         <Badge
           badgeContent={pagination.total}
           color="primary"
-          sx={{ mr: 2 }}
+          sx={{ mr: 1 }}
         >
           <AttachMoneyIcon color="primary" />
         </Badge>
-        <Typography variant="h4" gutterBottom>
+        <Typography variant="h4" gutterBottom sx={{ flex: 1, mb: '0 !important' }}>
           Servicios con remito pendientes de facturación
         </Typography>
+        <Button variant="contained" color="secondary" onClick={handleOpenReinvoice}>
+          Facturar un remito facturado
+        </Button>
       </Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} mb={3} alignItems="center">
         <Autocomplete
@@ -951,6 +1049,108 @@ export default function InvoicedServices() {
           <Button onClick={handleNoChargeClose} disabled={markingNoCharge}>Cancelar</Button>
           <Button onClick={handleConfirmNoCharge} variant="contained" color="success" disabled={markingNoCharge}>
             {markingNoCharge ? 'Guardando...' : 'Confirmar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openReinvoice} onClose={handleCloseReinvoice} fullWidth maxWidth="md">
+        <DialogTitle>Facturar un remito facturado</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={1}>
+            <Typography variant="body2" color="text.secondary">
+              Buscá el edificio y elegí el remito que ya tiene factura para emitir otra (cobro o importación).
+            </Typography>
+            <Autocomplete
+              options={buildings}
+              getOptionLabel={(option) =>
+                option.address
+                  ? `${option.name} — ${option.address}`
+                  : option.name
+              }
+              value={reinvoiceBuilding}
+              onChange={(_, value) => {
+                setReinvoiceBuilding(value);
+                setReinvoiceSelected(null);
+                setReinvoiceSearch('');
+                setReinvoiceRemitos([]);
+              }}
+              renderInput={(params) => <TextField {...params} label="Edificio" />}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              noOptionsText="No se encontraron edificios"
+            />
+            <TextField
+              label="Buscar remito (número, descripción...)"
+              value={reinvoiceSearch}
+              onChange={(e) => {
+                setReinvoiceSearch(e.target.value);
+                setReinvoiceSelected(null);
+              }}
+              disabled={!reinvoiceBuilding}
+              fullWidth
+              placeholder="Ej: 1234"
+            />
+            <Autocomplete
+              options={reinvoiceRemitos}
+              loading={loadingReinvoiceRemitos}
+              disabled={!reinvoiceBuilding}
+              value={reinvoiceSelected}
+              onChange={(_, value) => setReinvoiceSelected(value)}
+              getOptionLabel={(option) => {
+                const invs = (option.invoices || [])
+                  .map((inv: any) =>
+                    inv.isProv || inv.status === 'PENDIENTE'
+                      ? `Prov #${inv.number || inv.id?.substring(0, 8)}`
+                      : `Factura #${inv.number || inv.id?.substring(0, 8)}`
+                  )
+                  .join(', ');
+                return `Remito #${option.number || '-'} — ${option.service?.description || ''} (${option.invoiceCount || 0} factura${(option.invoiceCount || 0) === 1 ? '' : 's'}${invs ? `: ${invs}` : ''})`;
+              }}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              filterOptions={(x) => x}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Remito"
+                  helperText={
+                    !reinvoiceBuilding
+                      ? 'Primero elegí un edificio'
+                      : loadingReinvoiceRemitos
+                        ? 'Cargando...'
+                        : reinvoiceRemitos.length === 0
+                          ? 'No hay remitos facturados en este edificio'
+                          : `${reinvoiceRemitos.length} remito(s) encontrados`
+                  }
+                />
+              )}
+              noOptionsText="No hay remitos facturados que coincidan"
+            />
+            {reinvoiceSelected && (
+              <Alert severity="info">
+                Servicio: <b>{reinvoiceSelected.service?.description}</b>
+                <br />
+                Remito #<b>{reinvoiceSelected.number}</b> — ya tiene{' '}
+                <b>{reinvoiceSelected.invoiceCount}</b> factura(s).
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseReinvoice}>Cancelar</Button>
+          <Button
+            variant="outlined"
+            color="secondary"
+            disabled={!reinvoiceSelected}
+            onClick={handleReinvoiceInformal}
+          >
+            Cobro sin Factura
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={!reinvoiceSelected}
+            onClick={handleReinvoiceImport}
+          >
+            Importar Factura
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Box, Typography, Tabs, Tab } from '@mui/material';
+import { Box, Tabs, Tab } from '@mui/material';
 import PaymentMethodsManager from '@/components/PaymentMethodsManager';
 import ServiceTypesManager from '@/components/ServiceTypesManager';
 import NoChargeReasonsManager from '@/components/NoChargeReasonsManager';
+import BalanceMaintenanceManager from '@/components/BalanceMaintenanceManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -46,6 +47,7 @@ export default function SettingsPage() {
           <Tab label="Medios de Pago" />
           <Tab label="Tipos de Servicio" />
           <Tab label="Motivos Sin Cobro" />
+          <Tab label="Mantenimiento" />
         </Tabs>
       </Box>
       <TabPanel value={value} index={0}>
@@ -57,6 +59,9 @@ export default function SettingsPage() {
       <TabPanel value={value} index={2}>
         <NoChargeReasonsManager />
       </TabPanel>
+      <TabPanel value={value} index={3}>
+        <BalanceMaintenanceManager />
+      </TabPanel>
     </Box>
   );
-} 
+}

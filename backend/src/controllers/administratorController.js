@@ -1,4 +1,14 @@
 const prisma = require('../lib/prisma');
+const {
+  calculateBalanceFromData,
+  getInvoiceRemaining,
+  recalculateBuildingBalance,
+  dedupeInvoices
+} = require('../services/buildingBalanceService');
+const {
+  serviceInvoicesInclude,
+  getServiceInvoices
+} = require('../utils/serviceInvoiceHelpers');
 
 // Obtener todos los administradores
 const getAdministrators = async (req, res) => {
@@ -107,121 +117,18 @@ const getAdministrators = async (req, res) => {
       }
     });
 
-    const buildingIds = administrators.flatMap(admin => 
-      admin.buildings.map(building => building.id)
-    );
-
-    // Obtener todos los servicios, facturas y remitos en consultas optimizadas
-    const allServices = await prisma.service.findMany({
-      where: {
-        buildingId: { in: buildingIds }
-      },
-      include: {
-        invoice: true,
-        remitos: true
-      }
-    });
-
-    // Obtener todos los payment documents en una sola consulta
-    const invoiceIds = allServices.map(s => s.invoice?.id).filter(Boolean);
-    const remitoIds = allServices.flatMap(s => s.remitos.map(r => r.id));
-    
-    const allPaymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
-      ? await prisma.paymentDocument.findMany({
-          where: {
-            OR: [
-              ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
-              ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
-            ]
-          },
-          include: { payment: true }
-        })
-      : [];
-
-    // Crear mapas para acceso rápido
-    const servicesByBuilding = allServices.reduce((acc, service) => {
-      if (!acc[service.buildingId]) acc[service.buildingId] = [];
-      acc[service.buildingId].push(service);
-      return acc;
-    }, {});
-
-    const paymentDocsByInvoice = allPaymentDocs.reduce((acc, pd) => {
-      if (pd.invoiceId) {
-        if (!acc[pd.invoiceId]) acc[pd.invoiceId] = [];
-        acc[pd.invoiceId].push(pd);
-      }
-      return acc;
-    }, {});
-
-    const paymentDocsByRemito = allPaymentDocs.reduce((acc, pd) => {
-      if (pd.remitoId) {
-        if (!acc[pd.remitoId]) acc[pd.remitoId] = [];
-        acc[pd.remitoId].push(pd);
-      }
-      return acc;
-    }, {});
-
-    // Calcular saldos para cada administrador
-    const adminsWithBalance = await Promise.all(administrators.map(async admin => {
-      let totalBalance = 0;
-      
-      // Calcular saldo para cada edificio del administrador
-      const buildingsWithBalance = await Promise.all(admin.buildings.map(async (building) => {
-        const buildingServices = servicesByBuilding[building.id] || [];
-        
-        // IMPORTANTE: Deduplicar facturas para evitar contar múltiples veces
-        const invoiceMap = new Map();
-        buildingServices.forEach(s => {
-          if (s.invoice && !invoiceMap.has(s.invoice.id)) {
-            invoiceMap.set(s.invoice.id, s.invoice);
-          }
-        });
-        const invoices = Array.from(invoiceMap.values());
-        
-        const remitos = buildingServices.flatMap(s => s.remitos);
-
-        // Calcular saldo del edificio usando la misma lógica que la cuenta corriente
-        let saldo = 0;
-        
-        // Sumar todas las facturas (como en la cuenta corriente)
-        for (const inv of invoices) {
-          saldo += inv.amount;
-        }
-        
-        // Restar todos los pagos (solo el monto aplicado a cada factura específica)
-        for (const inv of invoices) {
-          const paymentDocs = paymentDocsByInvoice[inv.id] || [];
-          for (const pd of paymentDocs) {
-            // Usar pd.amount que es el monto específico aplicado a esta factura
-            saldo -= pd.amount;
-          }
-        }
-
-        totalBalance += saldo;
-
-        // Actualizar el saldo en la cuenta solo si es diferente
-        if (building.account && Math.abs(building.account.balance - saldo) > 0.01) {
-          await prisma.account.update({
-            where: { buildingId: building.id },
-            data: { balance: saldo }
-          });
-        }
-
-        return {
-          ...building,
-          account: {
-            ...building.account,
-            balance: saldo
-          }
-        };
-      }));
+    // Usar saldos persistidos en Account (actualizados en pagos / mantenimiento)
+    const adminsWithBalance = administrators.map(admin => {
+      const totalBalance = admin.buildings.reduce(
+        (sum, building) => sum + (building.account?.balance || 0),
+        0
+      );
 
       return {
         ...admin,
-        buildings: buildingsWithBalance,
         saldoTotal: totalBalance
       };
-    }));
+    });
 
     res.json({
       administrators: adminsWithBalance,
@@ -371,78 +278,18 @@ const deleteAdministrator = async (req, res) => {
 // Obtener saldos de todos los edificios de un administrador
 const getBuildingsBalances = async (req, res) => {
   try {
-    const { id } = req.params; // id del administrador
+    const { id } = req.params;
     const buildings = await prisma.building.findMany({
       where: { administratorId: id },
       include: {
         administrator: true,
         account: true
-      }
+      },
+      orderBy: { name: 'asc' }
     });
 
-    // Calcular el saldo real para cada edificio (igual que getBuildings)
-    const buildingsWithBalance = await Promise.all(buildings.map(async (building) => {
-      const services = await prisma.service.findMany({
-        where: { buildingId: building.id },
-        include: {
-          invoice: true,
-          remitos: true
-        }
-      });
-      
-      // IMPORTANTE: Deduplicar facturas para evitar contar múltiples veces
-      const invoiceMap = new Map();
-      services.forEach(s => {
-        if (s.invoice && !invoiceMap.has(s.invoice.id)) {
-          invoiceMap.set(s.invoice.id, s.invoice);
-        }
-      });
-      const invoices = Array.from(invoiceMap.values());
-      const invoiceIds = invoices.map(inv => inv.id);
-      const remitos = services.flatMap(s => s.remitos);
-      const remitoIds = remitos.map(r => r.id);
-      // Buscar PaymentDocuments asociados a facturas y remitos de este edificio
-      const paymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
-        ? await prisma.paymentDocument.findMany({
-            where: {
-              OR: [
-                ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
-                ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
-              ]
-            },
-            include: { payment: true }
-          })
-        : [];
-      // Calcular saldo usando la misma lógica que la cuenta corriente
-      let saldo = 0;
-      
-      // Sumar todas las facturas (como en la cuenta corriente)
-      for (const inv of invoices) {
-        if (inv) saldo += inv.amount;
-      }
-      
-      // Restar todos los pagos (solo el monto aplicado a cada factura específica)
-      for (const pd of paymentDocs) {
-        // Solo procesar pagos de facturas (no remitos)
-        if (pd.invoiceId) {
-          // Usar pd.amount que es el monto específico aplicado a esta factura
-          saldo -= pd.amount;
-        }
-      }
-      // Actualizar el saldo en la cuenta
-      await prisma.account.update({
-        where: { buildingId: building.id },
-        data: { balance: saldo }
-      });
-      return {
-        ...building,
-        account: {
-          ...building.account,
-          balance: saldo
-        }
-      };
-    }));
-    res.json(buildingsWithBalance);
+    // Saldo persistido (se actualiza en pagos / herramienta de mantenimiento)
+    res.json(buildings);
   } catch (error) {
     console.error('Error al obtener saldos de edificios del administrador:', error);
     res.status(500).json({ message: 'Error al obtener saldos de edificios del administrador' });
@@ -452,106 +299,92 @@ const getBuildingsBalances = async (req, res) => {
 // Obtener facturas y remitos pendientes de todos los edificios de un administrador
 const getPendingInvoicesForAdmin = async (req, res) => {
   try {
-    const { id } = req.params; // id del administrador
-    // Buscar todos los edificios del administrador
-    const buildings = await prisma.building.findMany({ where: { administratorId: id } });
-    let pendientes = [];
-    for (const building of buildings) {
-      // Buscar servicios del edificio
-      const services = await prisma.service.findMany({
-        where: { buildingId: building.id },
-        include: {
-          invoice: true,
-          remitos: true
-        }
-      });
-      
-      // Deduplicar facturas - un Map para no procesar la misma factura múltiples veces
-      const processedInvoices = new Map();
-      
-      // Facturas pendientes (monto > suma de pagos asociados)
-      for (const service of services) {
-        if (service.invoice && !processedInvoices.has(service.invoice.id)) {
-          processedInvoices.set(service.invoice.id, true);
-          
-          const paymentDocs = await prisma.paymentDocument.findMany({
-            where: { invoiceId: service.invoice.id },
-            include: { payment: true }
+    const { id } = req.params;
+    const buildings = await prisma.building.findMany({
+      where: { administratorId: id },
+      select: { id: true, name: true, address: true }
+    });
+
+    if (buildings.length === 0) {
+      return res.json([]);
+    }
+
+    const buildingsById = new Map(buildings.map((b) => [b.id, b]));
+    const buildingIds = buildings.map((b) => b.id);
+
+    const services = await prisma.service.findMany({
+      where: { buildingId: { in: buildingIds } },
+      include: {
+        ...serviceInvoicesInclude,
+        remitos: true
+      }
+    });
+
+    const remitoIds = services.flatMap((s) => s.remitos.map((r) => r.id));
+    const remitoPaymentDocs = remitoIds.length > 0
+      ? await prisma.paymentDocument.findMany({
+          where: { remitoId: { in: remitoIds } },
+          include: { payment: true }
+        })
+      : [];
+
+    const paymentDocsByRemito = remitoPaymentDocs.reduce((acc, pd) => {
+      if (!pd.remitoId) return acc;
+      if (!acc[pd.remitoId]) acc[pd.remitoId] = [];
+      acc[pd.remitoId].push(pd);
+      return acc;
+    }, {});
+
+    const pendientes = [];
+    const processedInvoices = new Map();
+
+    for (const service of services) {
+      const building = buildingsById.get(service.buildingId);
+      if (!building) continue;
+
+      for (const invoice of getServiceInvoices(service)) {
+        if (processedInvoices.has(invoice.id)) continue;
+        processedInvoices.set(invoice.id, true);
+
+        const montoPendiente = getInvoiceRemaining(invoice, invoice.paymentDocuments || []);
+
+        if (montoPendiente > 0.01) {
+          pendientes.push({
+            id: invoice.id,
+            type: 'FACTURA',
+            serviceId: service.id,
+            buildingId: building.id,
+            buildingName: building.name,
+            buildingAddress: building.address,
+            description: service.description,
+            amount: montoPendiente,
+            date: invoice.createdAt
           });
-          
-          // Calcular el monto total pagado y descuentos aplicados
-          let totalPagado = 0;
-          let totalDescuentos = 0;
-          
-          for (const pd of paymentDocs) {
-            totalPagado += pd.amount;
-            if (pd.payment && pd.payment.discount > 0) {
-              totalDescuentos += pd.payment.discount;
-            }
-          }
-          
-          // El monto acordado es el original menos todos los descuentos aplicados
-          const montoAcordado = service.invoice.amount - totalDescuentos;
-          
-          // El monto pendiente es: monto acordado a pagar - monto realmente pagado
-          const montoPendiente = montoAcordado - totalPagado;
-          
-          if (montoPendiente > 0) {
-            pendientes.push({
-              id: service.invoice.id,
-              type: 'FACTURA',
-              serviceId: service.id,
-              buildingId: building.id,
-              buildingName: building.name,
-              buildingAddress: building.address,
-              description: service.description,
-              amount: montoPendiente,
-              date: service.invoice.createdAt
-            });
-          }
         }
       }
-      // Remitos pendientes (monto > suma de pagos asociados)
-      for (const service of services) {
-        for (const remito of service.remitos) {
-          const paymentDocs = await prisma.paymentDocument.findMany({
-            where: { remitoId: remito.id },
-            include: { payment: true }
+
+      for (const remito of service.remitos) {
+        const montoPendiente = getInvoiceRemaining(
+          remito,
+          paymentDocsByRemito[remito.id] || []
+        );
+
+        if (montoPendiente > 0.01) {
+          pendientes.push({
+            id: remito.id,
+            type: 'REMITO',
+            serviceId: service.id,
+            buildingId: building.id,
+            buildingName: building.name,
+            buildingAddress: building.address,
+            description: service.description,
+            amount: montoPendiente,
+            date: remito.date
           });
-          
-          // Calcular el monto total pagado y descuentos aplicados
-          let totalPagado = 0;
-          let totalDescuentos = 0;
-          
-          for (const pd of paymentDocs) {
-            totalPagado += pd.amount;
-            if (pd.payment && pd.payment.discount > 0) {
-              totalDescuentos += pd.payment.discount;
-            }
-          }
-          
-          // El monto acordado es el original menos todos los descuentos aplicados
-          const montoAcordado = remito.amount - totalDescuentos;
-          
-          // El monto pendiente es: monto acordado a pagar - monto realmente pagado
-          const montoPendiente = montoAcordado - totalPagado;
-          
-          if (montoPendiente > 0) {
-            pendientes.push({
-              id: remito.id,
-              type: 'REMITO',
-              serviceId: service.id,
-              buildingId: building.id,
-              buildingName: building.name,
-              buildingAddress: building.address,
-              description: service.description,
-              amount: montoPendiente,
-              date: remito.date
-            });
-          }
         }
       }
     }
+
     res.json(pendientes);
   } catch (error) {
     console.error('Error al obtener facturas/remitos pendientes del administrador:', error);
@@ -576,17 +409,20 @@ const createAdminMassivePayment = async (req, res) => {
     const montoDescuento = discount ? parseFloat(discount) : 0;
     const montoFinal = parseFloat(amount);
 
+    // Con descuento, el monto final no puede ser menor a original - descuento;
+    // sí puede ser mayor (pago con saldo a favor).
     if (montoDescuento > 0) {
-      if (montoOriginal - montoDescuento !== montoFinal) {
+      const esperadoMinimo = Math.round((montoOriginal - montoDescuento) * 100) / 100;
+      if (montoFinal + 0.01 < esperadoMinimo) {
         return res.status(400).json({ 
-          message: 'El monto final debe ser igual al monto original menos el descuento.' 
+          message: 'El monto final no puede ser menor al monto original menos el descuento.' 
         });
       }
     }
     
     // Validar suma de montos
     const sumaMontos = docsToAssociate.reduce((sum, doc) => sum + (parseFloat(doc.amount) || 0), 0);
-    if (sumaMontos > montoFinal) {
+    if (sumaMontos > montoFinal + 0.01) {
       return res.status(400).json({ message: 'La suma de los montos aplicados a los documentos no puede superar el monto total del pago.' });
     }
     // Generar número de comprobante simple (timestamp + random)
@@ -627,6 +463,31 @@ const createAdminMassivePayment = async (req, res) => {
         }
       });
     }
+    console.log('✅ [MASSIVE PAYMENT] Documentos asociados');
+
+    // Recalcular saldos de los edificios afectados
+    const affectedBuildingIds = new Set();
+    for (const doc of docsToAssociate) {
+      if (doc.type === 'FACTURA') {
+        const services = await prisma.service.findMany({
+          where: { invoiceServices: { some: { invoiceId: doc.id } } },
+          select: { buildingId: true }
+        });
+        services.forEach(s => affectedBuildingIds.add(s.buildingId));
+      } else if (doc.type === 'REMITO') {
+        const remito = await prisma.remito.findUnique({
+          where: { id: doc.id },
+          include: { service: { select: { buildingId: true } } }
+        });
+        if (remito?.service?.buildingId) {
+          affectedBuildingIds.add(remito.service.buildingId);
+        }
+      }
+    }
+    for (const buildingId of affectedBuildingIds) {
+      await recalculateBuildingBalance(buildingId);
+    }
+
     console.log('✅ [MASSIVE PAYMENT] Pago masivo completado exitosamente');
     res.status(201).json(pago);
   } catch (error) {
@@ -657,7 +518,7 @@ const getBuildingAccountDetails = async (req, res) => {
     const services = await prisma.service.findMany({
       where: { buildingId: buildingId },
       include: {
-        invoice: true,
+        ...serviceInvoicesInclude,
         technician: true
       },
       orderBy: {
@@ -666,14 +527,7 @@ const getBuildingAccountDetails = async (req, res) => {
     });
 
     // Obtener todas las facturas del edificio (incluyendo las de efectivo)
-    // IMPORTANTE: Deduplicar facturas para evitar contar múltiples veces
-    const invoiceMap = new Map();
-    services.forEach(s => {
-      if (s.invoice && !invoiceMap.has(s.invoice.id)) {
-        invoiceMap.set(s.invoice.id, s.invoice);
-      }
-    });
-    const invoices = Array.from(invoiceMap.values());
+    const invoices = dedupeInvoices(services);
     const invoiceIds = invoices.map(inv => inv.id);
 
     // Obtener todos los pagos asociados a las facturas de este edificio
@@ -698,14 +552,14 @@ const getBuildingAccountDetails = async (req, res) => {
 
     // Crear un mapa de facturas con sus pagos asociados
     const invoicesWithPayments = invoices.map(invoice => {
-      const associatedPayments = paymentDocs
-        .filter(pd => pd.invoiceId === invoice.id)
-        .map(pd => pd.payment);
+      const associatedPaymentDocs = paymentDocs.filter(pd => pd.invoiceId === invoice.id);
       
       // Para facturas con método de pago EFECTIVO, considerar que ya están pagadas
       const isEfectivo = invoice.paymentMethod === 'EFECTIVO';
-      const totalPaid = isEfectivo ? invoice.amount : associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
-      const remaining = isEfectivo ? 0 : invoice.amount - associatedPayments.reduce((sum, p) => sum + (p.originalAmount || p.amount), 0);
+      const totalPaid = isEfectivo
+        ? invoice.amount
+        : associatedPaymentDocs.reduce((sum, pd) => sum + pd.amount, 0);
+      const remaining = getInvoiceRemaining(invoice, associatedPaymentDocs);
       
       const result = {
         id: invoice.id,
@@ -714,19 +568,15 @@ const getBuildingAccountDetails = async (req, res) => {
         status: isEfectivo ? 'PAGADO' : invoice.status,
         paymentMethod: invoice.paymentMethod,
         createdAt: invoice.createdAt,
-        service: services.find(s => s.invoice?.id === invoice.id),
-        payments: associatedPayments,
-        totalPaid: totalPaid,
-        remaining: remaining,
-        isEfectivo: isEfectivo
+        service: services.find(s => getServiceInvoices(s).some(inv => inv.id === invoice.id)),
+        payments: associatedPaymentDocs.map(pd => ({
+          ...pd.payment,
+          amountApplied: pd.amount
+        })),
+        totalPaid,
+        remaining,
+        isEfectivo
       };
-      
-      console.log('🔍 [BACKEND] Factura procesada:', {
-        id: result.id,
-        paymentMethod: result.paymentMethod,
-        isEfectivo: result.isEfectivo,
-        status: result.status
-      });
       
       return result;
     });
@@ -735,29 +585,18 @@ const getBuildingAccountDetails = async (req, res) => {
     const allTransactions = [];
     
     invoicesWithPayments.forEach(invoice => {
-      // Agregar la factura
-      const transactionToAdd = {
+      allTransactions.push({
         ...invoice,
         displayType: 'invoice'
-      };
-      
-      console.log('🔍 [BACKEND] Agregando transacción:', {
-        id: transactionToAdd.id,
-        displayType: transactionToAdd.displayType,
-        paymentMethod: transactionToAdd.paymentMethod,
-        isEfectivo: transactionToAdd.paymentMethod === 'EFECTIVO'
       });
       
-      allTransactions.push(transactionToAdd);
-      
-      // Solo agregar pagos adicionales si NO es una factura en efectivo
-      // (las facturas en efectivo ya están consideradas como pagadas)
       if (!invoice.isEfectivo) {
         invoice.payments.forEach(payment => {
           allTransactions.push({
             id: payment.id,
             type: 'payment',
-            amount: payment.originalAmount || payment.amount,
+            amount: payment.amountApplied ?? payment.amount,
+            totalAmount: payment.originalAmount || payment.amount,
             status: 'PAGADO',
             createdAt: payment.createdAt,
             comprobante: payment.comprobante,
@@ -774,32 +613,17 @@ const getBuildingAccountDetails = async (req, res) => {
     // Ordenar por fecha de creación
     allTransactions.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-    // Calcular saldo actual
-    const totalInvoices = invoices.reduce((sum, inv) => sum + inv.amount, 0);
-    const totalPayments = paymentDocs.reduce((sum, pd) => sum + (pd.payment.originalAmount || pd.payment.amount), 0);
-    const currentBalance = totalInvoices - totalPayments;
+    const { totalInvoiced, totalPaid: totalPayments, totalDiscounts, balance: currentBalance } =
+      calculateBalanceFromData(invoices, paymentDocs);
+    const totalInvoices = totalInvoiced;
 
-    // DEBUG: Agregar logs para comparar con los listados
-    console.log(`🔍 [DEBUG] Cuenta corriente edificio ${building.name} (${buildingId}):`);
-    console.log(`  - Facturas: ${invoices.length}, Total: ${totalInvoices}`);
-    console.log(`  - Pagos totales: ${totalPayments}`);
-    console.log(`  - Saldo calculado: ${currentBalance}`);
-
-    console.log('🔍 [BACKEND] Enviando respuesta final:', {
-      totalTransactions: allTransactions.length,
-      sampleTransaction: allTransactions[0] ? {
-        id: allTransactions[0].id,
-        displayType: allTransactions[0].displayType,
-        paymentMethod: allTransactions[0].paymentMethod
-      } : null
-    });
-    
     res.json({
       building,
       transactions: allTransactions,
       summary: {
         totalInvoices,
         totalPayments,
+        totalDiscounts,
         currentBalance,
         totalTransactions: allTransactions.length
       }

@@ -926,7 +926,7 @@ export default function PaymentsPage() {
           open={openBuildingPayment}
           onClose={handleCloseBuildingPayment}
           buildingId={selectedBuilding.id}
-          buildingName={selectedBuilding.name}
+          buildingAddress={selectedBuilding.address}
           onSuccess={() => {
             handlePaymentSuccess();
             handleCloseBuildingPayment();

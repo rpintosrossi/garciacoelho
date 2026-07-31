@@ -26,6 +26,7 @@ import {
   Select,
   MenuItem,
   Autocomplete,
+  CircularProgress,
   Container,
 } from "@mui/material";
 import { Add, Edit, Delete, AccountBalance } from "@mui/icons-material";
@@ -97,6 +98,19 @@ const taxConditionLabels: Record<string, string> = {
   CONSUMIDOR_FINAL: "Consumidor Final",
 };
 
+/** Ordena por el número al inicio del nombre (ej: "2 ...", "10 ...") */
+const extractLeadingNumber = (name: string) => {
+  const match = (name || '').match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+};
+
+const compareBuildingNames = (a: string, b: string) => {
+  const numA = extractLeadingNumber(a);
+  const numB = extractLeadingNumber(b);
+  if (numA !== numB) return numA - numB;
+  return (a || '').localeCompare(b || '', 'es', { sensitivity: 'base' });
+};
+
 const BuildingsPage = () => {
   const searchParams = useSearchParams();
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -117,6 +131,10 @@ const BuildingsPage = () => {
   const [openNewAdmin, setOpenNewAdmin] = useState(false);
   const [openNewLocality, setOpenNewLocality] = useState(false);
   const [newLocalityName, setNewLocalityName] = useState('');
+  const [nameSuggestions, setNameSuggestions] = useState<Building[]>([]);
+  const [loadingNameSearch, setLoadingNameSearch] = useState(false);
+  const [duplicateNameWarning, setDuplicateNameWarning] = useState('');
+  const nameSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchBuildings = async () => {
     setLoading(true);
@@ -199,7 +217,58 @@ const BuildingsPage = () => {
 
 
 
+  const clearNameSearchState = () => {
+    setNameSuggestions([]);
+    setLoadingNameSearch(false);
+    setDuplicateNameWarning('');
+    if (nameSearchTimeout.current) {
+      clearTimeout(nameSearchTimeout.current);
+      nameSearchTimeout.current = null;
+    }
+  };
+
+  const searchNameSuggestions = async (searchTerm: string) => {
+    if (!searchTerm || searchTerm.trim().length < 2) {
+      setNameSuggestions([]);
+      setDuplicateNameWarning('');
+      return;
+    }
+
+    setLoadingNameSearch(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await api.get(`/buildings/search/autocomplete?search=${encodeURIComponent(searchTerm.trim())}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const results: Building[] = res.data || [];
+      setNameSuggestions(results);
+
+      const normalized = searchTerm.trim().toLowerCase();
+      const exactMatch = results.find(
+        (b) => b.name.toLowerCase() === normalized && (!editing || b.id !== editing.id)
+      );
+      setDuplicateNameWarning(
+        exactMatch
+          ? `Ya existe: ${exactMatch.name}${exactMatch.address ? ` (${exactMatch.address})` : ''}`
+          : ''
+      );
+    } catch (error) {
+      console.error('Error al buscar edificios:', error);
+    } finally {
+      setLoadingNameSearch(false);
+    }
+  };
+
+  const handleNameInputChange = (value: string) => {
+    formik.setFieldValue('name', value);
+    if (nameSearchTimeout.current) clearTimeout(nameSearchTimeout.current);
+    nameSearchTimeout.current = setTimeout(() => {
+      searchNameSuggestions(value);
+    }, 300);
+  };
+
   const handleOpen = (building?: Building) => {
+    clearNameSearchState();
     setEditing(building || null);
     setOpen(true);
   };
@@ -220,6 +289,7 @@ const BuildingsPage = () => {
     
     setEditing(null);
     setOpen(false);
+    clearNameSearchState();
     formik.resetForm();
   };
 
@@ -227,6 +297,7 @@ const BuildingsPage = () => {
   const handleCloseAfterSave = () => {
     setEditing(null);
     setOpen(false);
+    clearNameSearchState();
     formik.resetForm();
   };
 
@@ -348,7 +419,7 @@ const BuildingsPage = () => {
     let comparison = 0;
     switch (orderBy) {
       case 'name':
-        comparison = a.name.localeCompare(b.name);
+        comparison = compareBuildingNames(a.name, b.name);
         break;
       case 'address':
         comparison = a.address.localeCompare(b.address);
@@ -511,15 +582,75 @@ const BuildingsPage = () => {
           <DialogTitle>{editing ? "Editar Edificio" : "Nuevo Edificio"}</DialogTitle>
           <form onSubmit={formik.handleSubmit}>
             <DialogContent>
-              <TextField
-                margin="dense"
-                label="Num/Nombre"
-                name="name"
-                fullWidth
-                value={formik.values.name}
-                onChange={formik.handleChange}
-                error={formik.touched.name && Boolean(formik.errors.name)}
-                helperText={formik.touched.name && formik.errors.name}
+              <Autocomplete
+                freeSolo
+                options={nameSuggestions}
+                filterOptions={(x) => x}
+                getOptionLabel={(option) =>
+                  typeof option === 'string' ? option : option.name
+                }
+                inputValue={formik.values.name}
+                onInputChange={(_, value, reason) => {
+                  if (reason === 'reset' && editing) return;
+                  handleNameInputChange(value);
+                }}
+                onChange={(_, value) => {
+                  if (typeof value === 'string') {
+                    handleNameInputChange(value);
+                  } else if (value) {
+                    formik.setFieldValue('name', value.name);
+                    setDuplicateNameWarning(
+                      !editing || value.id !== editing.id
+                        ? `Ya existe: ${value.name}${value.address ? ` (${value.address})` : ''}`
+                        : ''
+                    );
+                  }
+                }}
+                loading={loadingNameSearch}
+                renderOption={(props, option) => {
+                  const { key, ...otherProps } = props;
+                  return (
+                    <Box component="li" key={key} {...otherProps}>
+                      <Box>
+                        <Typography variant="body2" fontWeight="bold">
+                          {option.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {option.address}
+                          {option.cuit ? ` | CUIT: ${option.cuit}` : ''}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    margin="dense"
+                    label="Num/Nombre"
+                    name="name"
+                    error={formik.touched.name && Boolean(formik.errors.name)}
+                    helperText={
+                      (formik.touched.name && formik.errors.name) ||
+                      duplicateNameWarning ||
+                      "Escribí para ver si el edificio ya existe"
+                    }
+                    FormHelperTextProps={{
+                      sx: duplicateNameWarning && !(formik.touched.name && formik.errors.name)
+                        ? { color: 'warning.main' }
+                        : undefined,
+                    }}
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {loadingNameSearch ? <CircularProgress color="inherit" size={20} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
+                )}
               />
               <TextField
                 margin="dense"

@@ -13,6 +13,11 @@ const os = require('os');
 const { randomBytes } = require('crypto');
 const archiver = require('archiver');
 const hummus = require('hummus');
+const {
+  invoiceServicesInclude,
+  withInvoiceServices,
+  getInvoiceServices
+} = require('../utils/serviceInvoiceHelpers');
 
 // Función para descargar archivo desde S3 o URL
 const downloadFile = async (fileUrl) => {
@@ -292,20 +297,16 @@ const testData = async (req, res) => {
     });
     
     // Obtener algunos ejemplos
-    const sampleInvoices = await prisma.invoice.findMany({ 
+    const sampleInvoices = (await prisma.invoice.findMany({ 
       take: 3,
-      include: {
-        services: {
+      include: invoiceServicesInclude({
+        building: {
           include: {
-            building: {
-              include: {
-                administrator: true
-              }
-            }
+            administrator: true
           }
         }
-      }
-    });
+      })
+    })).map(withInvoiceServices);
     
     res.json({
       counts: {
@@ -332,22 +333,18 @@ const testInvoices = async (req, res) => {
     console.log('🧪 [TEST INVOICES] Verificando facturas y métodos de pago...');
     
     // Obtener todas las facturas con sus métodos de pago
-    const allInvoices = await prisma.invoice.findMany({
-      include: {
-        services: {
+    const allInvoices = (await prisma.invoice.findMany({
+      include: invoiceServicesInclude({
+        building: {
           include: {
-            building: {
-              include: {
-                administrator: true
-              }
-            }
+            administrator: true
           }
         }
-      },
+      }),
       orderBy: {
         createdAt: 'desc'
       }
-    });
+    })).map(withInvoiceServices);
     
     console.log(`📄 [TEST INVOICES] Total de facturas: ${allInvoices.length}`);
     
@@ -409,37 +406,41 @@ const getPackages = async (req, res) => {
           number: true,
           paymentMethod: true,
           fileUrl: true,
-          services: {
+          invoiceServices: {
             select: {
-              id: true,
-              status: true,
-              visitDate: true,
-              building: {
+              service: {
                 select: {
                   id: true,
-                  name: true,
-                  address: true,
-                  administrator: {
+                  status: true,
+                  visitDate: true,
+                  building: {
                     select: {
                       id: true,
                       name: true,
-                      email: true
+                      address: true,
+                      administrator: {
+                        select: {
+                          id: true,
+                          name: true,
+                          email: true
+                        }
+                      }
+                    }
+                  },
+                  technician: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  },
+                  remitos: {
+                    select: {
+                      id: true,
+                      number: true,
+                      amount: true,
+                      date: true
                     }
                   }
-                }
-              },
-              technician: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              },
-              remitos: {
-                select: {
-                  id: true,
-                  number: true,
-                  amount: true,
-                  date: true
                 }
               }
             }
@@ -531,11 +532,13 @@ const getPackages = async (req, res) => {
     ]);
 
     console.log(`📄 [PACKAGES] Encontradas ${invoices.length} facturas y ${payments.length} pagos en ${Date.now() - startTime}ms`);
+
+    const invoicesWithServices = invoices.map(withInvoiceServices);
     
     // Filtrar facturas que realmente están pendientes (no tienen pagos asociados o pagos insuficientes)
     const pendingInvoices = [];
     
-    for (const invoice of invoices) {
+    for (const invoice of invoicesWithServices) {
       // Calcular el total pagado y descuentos aplicados para esta factura
       let totalPaid = 0;
       let totalDiscounts = 0;
@@ -584,7 +587,7 @@ const getPackages = async (req, res) => {
           return null;
         }
         return {
-          type: (invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO') ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
+          type: (invoice.status === 'PENDIENTE' && (firstService.status === 'FACTURADO' || firstService.status === 'FACTURADO_PARCIAL')) ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
           id: invoice.id,
           number: invoice.number || null,
           amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
@@ -604,7 +607,7 @@ const getPackages = async (req, res) => {
           invoiceFileUrl: invoice.fileUrl,
           hasInvoicePDF: invoice.fileUrl && isPDF(invoice.fileUrl),
           // Para facturas informales, agregar campos de remito sin factura
-          ...(invoice.status === 'PENDIENTE' && firstService.status === 'FACTURADO' && {
+          ...(invoice.status === 'PENDIENTE' && (firstService.status === 'FACTURADO' || firstService.status === 'FACTURADO_PARCIAL') && {
           comprobante: invoice.number || `REMITO-SIN-FACTURA-${invoice.id.slice(0, 8)}`,
             paymentMethod: { name: 'Cuenta Corriente' }
           })
@@ -689,17 +692,25 @@ const getPackages = async (req, res) => {
       if (!selectedPaymentMethod) {
         return res.status(404).json({ message: 'Método de pago no encontrado' });
       }
+
+      // Recordar el último método usado al armar paquete para esta administración
+      await prisma.administrator.update({
+        where: { id: adminId },
+        data: { lastPackagePaymentMethodId: paymentMethodId }
+      });
     } else {
       console.log(`⚠️ [PACKAGES] No se recibió paymentMethodId en la query`);
     }
 
         // Obtener todas las facturas del administrador
-    const invoices = await prisma.invoice.findMany({
+    const invoices = (await prisma.invoice.findMany({
       where: {
-        services: {
+        invoiceServices: {
           some: {
-            building: {
-              administratorId: adminId
+            service: {
+              building: {
+                administratorId: adminId
+              }
             }
           }
         },
@@ -710,13 +721,11 @@ const getPackages = async (req, res) => {
         ]
       },
       include: {
-        services: {
-          include: {
-            building: true,
-            technician: true,
-            remitos: true
-          }
-        },
+        ...invoiceServicesInclude({
+          building: true,
+          technician: true,
+          remitos: true
+        }),
         paymentDocuments: {
           include: {
             payment: true
@@ -726,7 +735,7 @@ const getPackages = async (req, res) => {
       orderBy: {
         createdAt: 'desc'
       }
-    });
+    })).map(withInvoiceServices);
 
     // Filtrar facturas que realmente están pendientes
     const pendingInvoices = [];
@@ -814,15 +823,47 @@ const getPackages = async (req, res) => {
     // Calcular totales separando facturas formales de provs
     const formalInvoices = pendingInvoices.filter(inv => {
       const firstService = inv.services?.[0];
-      return !(inv.status === 'PENDIENTE' && firstService?.status === 'FACTURADO');
+      return !(inv.status === 'PENDIENTE' && (firstService?.status === 'FACTURADO' || firstService?.status === 'FACTURADO_PARCIAL'));
     });
     const provInvoices = pendingInvoices.filter(inv => {
       const firstService = inv.services?.[0];
-      return inv.status === 'PENDIENTE' && firstService?.status === 'FACTURADO';
+      return inv.status === 'PENDIENTE' && (firstService?.status === 'FACTURADO' || firstService?.status === 'FACTURADO_PARCIAL');
     });
     const totalFacturas = formalInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
     const totalProv = provInvoices.reduce((sum, inv) => sum + (inv.montoAcordado || inv.amount), 0);
     const netoTotal = totalFacturas + totalProv;
+
+    // Último pago registrado del administrador (por factura o remito de sus edificios)
+    const lastPayment = await prisma.payment.findFirst({
+      where: {
+        documents: {
+          some: {
+            OR: [
+              {
+                invoice: {
+                  invoiceServices: {
+                    some: {
+                      service: {
+                        building: { administratorId: adminId }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                remito: {
+                  service: {
+                    building: { administratorId: adminId }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      orderBy: { date: 'desc' },
+      select: { date: true }
+    });
 
     // Crear el PDF del paquete
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -1330,7 +1371,8 @@ const getPackages = async (req, res) => {
                   // Nombre: {direccionEdificio}_{numeroFactura|numeroRemito}
                   const invoiceNumber = invData.invoice?.number;
                   const firstRemitoNumber = invData.remitos[0]?.remito?.number;
-                  const buildingAddress = invData.remitos[0]?.buildingAddress || invData.invoice?.services?.[0]?.building?.address || '';
+                  const invServices = invData.invoice ? getInvoiceServices(invData.invoice) : (invData.invoice?.services || []);
+                  const buildingAddress = invData.remitos[0]?.buildingAddress || invServices[0]?.building?.address || '';
                   const docId = invoiceNumber || firstRemitoNumber || invData.name;
                   const safeAddress = buildingAddress.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim().slice(0, 50);
                   const safeId = docId.replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim();
@@ -1417,23 +1459,44 @@ const getPackages = async (req, res) => {
     const pageWidth = 595.276;
     const margin = 50;
     const logoWidth = 160;
+    const logoTop = 20;
+    let logoBottom = logoTop;
 
     if (fs.existsSync(logoPath)) {
       const logoX = (pageWidth - logoWidth) / 2;
-      doc.image(logoPath, logoX, 20, { width: logoWidth });
+      // El logo es cuadrado (1024x1024): al escalar por ancho, la altura = logoWidth
+      const logoHeight = logoWidth;
+      doc.image(logoPath, logoX, logoTop, { width: logoWidth });
+      logoBottom = logoTop + logoHeight;
     }
 
-    // Bloque de texto debajo del logo (logo ~90px alto + 20px top + padding)
-    const adminY = 125;
-    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, { lineBreak: false });
+    // Bloque de texto siempre debajo del logo (evita solaparse)
+    const adminY = logoBottom + 12;
+    const contentWidth = pageWidth - margin * 2;
+
+    doc.fontSize(11).text(`ADM.: ${administrator.name}`, margin, adminY, {
+      width: contentWidth - 90,
+      lineBreak: false
+    });
     doc.fontSize(11).text(
       new Date().toLocaleDateString('es-AR'),
       margin,
       adminY,
-      { width: pageWidth - margin * 2, align: 'right', lineBreak: false }
+      { width: contentWidth, align: 'right', lineBreak: false }
     );
     if (administrator.email) {
-      doc.fontSize(9).text(`EMAIL: ${administrator.email}`, margin, adminY + 16, { lineBreak: false });
+      const emailText = `EMAIL: ${administrator.email}`;
+      // Achicar la fuente si el mail es largo para que no se corte ni pise otros elementos
+      let emailFontSize = 9;
+      doc.fontSize(emailFontSize);
+      while (emailFontSize > 6 && doc.widthOfString(emailText) > contentWidth) {
+        emailFontSize -= 0.5;
+        doc.fontSize(emailFontSize);
+      }
+      doc.text(emailText, margin, adminY + 16, {
+        width: contentWidth,
+        lineBreak: false
+      });
     }
 
     // Avanzar por debajo del bloque de texto
@@ -1522,6 +1585,13 @@ const getPackages = async (req, res) => {
       doc.text(`• Remito Nº ${remitoInfo.number} - ${remitoInfo.address}`, 70);
     }
 
+    // Último pago al final de la hoja de resumen
+    doc.moveDown(2);
+    const lastPaymentLabel = lastPayment
+      ? `Último pago registrado: ${new Date(lastPayment.date).toLocaleDateString('es-AR')}`
+      : 'Último pago registrado: Sin registros';
+    doc.fontSize(11).fillColor('#000').text(lastPaymentLabel, 50);
+
     doc.end();
   } catch (error) {
     console.error('Error al generar paquete:', error);
@@ -1537,9 +1607,87 @@ const addLogoToDoc = (doc) => {
   }
 };
 
+// Último método de pago usado al armar paquete para una administración
+const getLastPackagePaymentMethod = async (req, res) => {
+  try {
+    const { adminId } = req.params;
+
+    const administrator = await prisma.administrator.findUnique({
+      where: { id: adminId },
+      select: {
+        id: true,
+        lastPackagePaymentMethodId: true,
+        lastPackagePaymentMethod: true
+      }
+    });
+
+    if (!administrator) {
+      return res.status(404).json({ message: 'Administrador no encontrado' });
+    }
+
+    if (administrator.lastPackagePaymentMethodId && administrator.lastPackagePaymentMethod) {
+      return res.json({
+        paymentMethodId: administrator.lastPackagePaymentMethodId,
+        paymentMethod: administrator.lastPackagePaymentMethod,
+        source: 'package'
+      });
+    }
+
+    // Fallback: último cobro registrado con método de pago para esa administración
+    const lastPayment = await prisma.payment.findFirst({
+      where: {
+        paymentMethodId: { not: null },
+        documents: {
+          some: {
+            OR: [
+              {
+                invoice: {
+                  invoiceServices: {
+                    some: {
+                      service: {
+                        building: { administratorId: adminId }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                remito: {
+                  service: {
+                    building: { administratorId: adminId }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      orderBy: { date: 'desc' },
+      select: {
+        paymentMethodId: true,
+        paymentMethod: true
+      }
+    });
+
+    if (lastPayment?.paymentMethodId && lastPayment.paymentMethod) {
+      return res.json({
+        paymentMethodId: lastPayment.paymentMethodId,
+        paymentMethod: lastPayment.paymentMethod,
+        source: 'payment'
+      });
+    }
+
+    return res.json({ paymentMethodId: null, paymentMethod: null, source: null });
+  } catch (error) {
+    console.error('Error al obtener último método de pago del paquete:', error);
+    res.status(500).json({ message: 'Error al obtener último método de pago' });
+  }
+};
+
 module.exports = {
   testData,
   testInvoices,
   getPackages,
-  downloadPackage
+  downloadPackage,
+  getLastPackagePaymentMethod
 };

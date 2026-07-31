@@ -20,25 +20,28 @@ model User {
 }
 
 model Administrator {
-  id                String     @id @default(uuid())
-  name              String
-  administratorName String?
-  email             String     @unique
-  phone             String
-  cuit              String?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
-  emailNames        String[]
-  emails            String[]
-  phoneNames        String[]
-  phones            String[]
-  cuits             String[]
-  cuitNames         String[]
-  officeAddress     String?
-  buildings         Building[]
+  id                         String         @id @default(uuid())
+  name                       String
+  administratorName          String?
+  email                      String         @unique
+  phone                      String
+  cuit                       String?
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  emailNames                 String[]
+  emails                     String[]
+  phoneNames                 String[]
+  phones                     String[]
+  cuits                      String[]
+  cuitNames                  String[]
+  officeAddress              String?
+  lastPackagePaymentMethodId String?
+  buildings                  Building[]
+  lastPackagePaymentMethod   PaymentMethod? @relation("LastPackagePaymentMethod", fields: [lastPackagePaymentMethodId], references: [id])
 
   @@index([email])
   @@index([name])
+  @@index([lastPackagePaymentMethodId])
 }
 
 model Building {
@@ -84,14 +87,13 @@ model Service {
   status               ServiceStatus      @default(PENDIENTE)
   receiptImages        String[]
   cancellationReason   String?
-  invoiceId            String?
   noChargeReasonId     String?
   noChargeComment      String?
   remitos              Remito[]
   workshopRepairs      WorkshopRepair[]
+  invoiceServices      InvoiceService[]
   building             Building           @relation(fields: [buildingId], references: [id])
   technician           Technician?        @relation(fields: [technicianId], references: [id])
-  invoice              Invoice?           @relation(fields: [invoiceId], references: [id])
   noChargeReason       NoChargeReason?    @relation(fields: [noChargeReasonId], references: [id])
 
   @@index([buildingId])
@@ -100,7 +102,6 @@ model Service {
   @@index([createdAt])
   @@index([status])
   @@index([technicianId])
-  @@index([invoiceId])
 }
 
 model Invoice {
@@ -113,13 +114,24 @@ model Invoice {
   fileUrl          String?
   number           String?
   paymentMethod    String?
-  services         Service[]
+  invoiceServices  InvoiceService[]
   paymentDocuments PaymentDocument[]
 
   @@index([createdAt])
   @@index([paymentMethod])
   @@index([paymentMethod, status], map: "Invoice_payment_status_idx")
   @@index([status])
+}
+
+model InvoiceService {
+  invoiceId String
+  serviceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([invoiceId, serviceId])
+  @@index([serviceId])
+  @@index([invoiceId])
 }
 
 model Account {
@@ -201,17 +213,18 @@ model PaymentDocument {
 }
 
 model PaymentMethod {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  alias     String?
-  banco     String?
-  cbu       String?
-  cuenta    String?
-  cuit      String?
-  titular   String?
-  payments  Payment[]
+  id                        String          @id @default(uuid())
+  name                      String          @unique
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
+  alias                     String?
+  banco                     String?
+  cbu                       String?
+  cuenta                    String?
+  cuit                      String?
+  titular                   String?
+  payments                  Payment[]
+  lastPackageAdministrators Administrator[] @relation("LastPackagePaymentMethod")
 }
 
 model Remito {
@@ -319,6 +332,7 @@ enum ServiceStatus {
   PENDIENTE
   ASIGNADO
   CON_REMITO
+  FACTURADO_PARCIAL
   FACTURADO
   SIN_COBRO
 }

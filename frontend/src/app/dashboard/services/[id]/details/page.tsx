@@ -42,8 +42,13 @@ export default function ServiceDetailsPage() {
 
   // Estados para editar factura
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
+  const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [savingInvoice, setSavingInvoice] = useState(false);
+
+  const serviceInvoices = service?.invoices?.length
+    ? service.invoices
+    : (service?.invoice ? [service.invoice] : []);
 
   const fetchService = async () => {
     setLoading(true);
@@ -128,24 +133,24 @@ export default function ServiceDetailsPage() {
     }
   };
 
-  const handleOpenEditInvoice = () => {
-    if (service?.invoice) {
-        setEditAmount(service.invoice.amount.toString());
-        setEditInvoiceOpen(true);
-    }
+  const handleOpenEditInvoice = (invoice: { id: string; amount: number }) => {
+    setEditInvoiceId(invoice.id);
+    setEditAmount(invoice.amount.toString());
+    setEditInvoiceOpen(true);
   };
 
   const handleCloseEditInvoice = () => {
     setEditInvoiceOpen(false);
+    setEditInvoiceId(null);
     setEditAmount('');
   };
 
   const handleSaveInvoiceChanges = async () => {
-    if (!service?.invoice || !editAmount) return;
+    if (!editInvoiceId || !editAmount) return;
 
     setSavingInvoice(true);
     try {
-        await api.put(`/invoices/${service.invoice.id}`, {
+        await api.put(`/invoices/${editInvoiceId}`, {
             amount: parseFloat(editAmount)
         });
         
@@ -186,27 +191,43 @@ export default function ServiceDetailsPage() {
         </Stack>
         <Stack direction="row" spacing={2} alignItems="center" mb={2}>
           <Typography variant="h6">Estado:</Typography>
-          <Chip label={service.status} color={service.status === 'CON_REMITO' ? 'success' : 'warning'} />
+          <Chip
+            label={service.status}
+            color={
+              service.status === 'CON_REMITO' ? 'success'
+                : service.status === 'FACTURADO_PARCIAL' ? 'warning'
+                : 'default'
+            }
+          />
         </Stack>
         <Stack direction="row" spacing={2} alignItems="center" mb={2}>
           <Typography variant="h6">Técnico asignado:</Typography>
           <Typography>{service.technician?.name || '-'}</Typography>
         </Stack>
-        {service.invoice && (
-          <Stack direction="row" spacing={2} alignItems="center" mb={2}>
-            <Typography variant="h6">Monto Facturado:</Typography>
-            <Typography sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                ${service.invoice.amount}
+        {serviceInvoices.length > 0 && (
+          <Box mb={2}>
+            <Typography variant="h6" gutterBottom>
+              Facturas ({serviceInvoices.length}) — Total: $
+              {serviceInvoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0).toLocaleString('es-AR')}
             </Typography>
-            <Tooltip title="Editar monto">
-                <IconButton size="small" onClick={handleOpenEditInvoice} color="primary">
-                    <EditIcon />
-                </IconButton>
-            </Tooltip>
-            {service.invoice.status === 'PAGADA' && (
-                <Chip label="PAGADA" color="success" size="small" />
-            )}
-           </Stack>
+            <Stack spacing={1}>
+              {serviceInvoices.map((invoice: any) => (
+                <Stack key={invoice.id} direction="row" spacing={2} alignItems="center">
+                  <Typography variant="body2">
+                    #{invoice.number || invoice.id.substring(0, 8)} — ${invoice.amount}
+                  </Typography>
+                  <Tooltip title="Editar monto">
+                    <IconButton size="small" onClick={() => handleOpenEditInvoice(invoice)} color="primary">
+                      <EditIcon />
+                    </IconButton>
+                  </Tooltip>
+                  {invoice.status === 'PAGADA' && (
+                    <Chip label="PAGADA" color="success" size="small" />
+                  )}
+                </Stack>
+              ))}
+            </Stack>
+          </Box>
         )}
         <Divider sx={{ my: 2 }} />
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>

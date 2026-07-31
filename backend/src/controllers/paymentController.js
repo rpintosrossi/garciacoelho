@@ -1,5 +1,11 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { recalculateBuildingBalance } = require('../services/buildingBalanceService');
+const {
+  invoiceServicesInclude,
+  getInvoiceServices,
+  withInvoiceServices
+} = require('../utils/serviceInvoiceHelpers');
 
 // Registrar un pago y asociar a facturas o remitos
 const createPayment = async (req, res) => {
@@ -27,10 +33,13 @@ const createPayment = async (req, res) => {
     const montoDescuento = discount ? parseFloat(discount) : 0;
     const montoFinal = parseFloat(amount);
 
+    // Con descuento, el monto final no puede ser menor a original - descuento;
+    // sí puede ser mayor (pago con saldo a favor).
     if (montoDescuento > 0) {
-      if (montoOriginal - montoDescuento !== montoFinal) {
+      const esperadoMinimo = Math.round((montoOriginal - montoDescuento) * 100) / 100;
+      if (montoFinal + 0.01 < esperadoMinimo) {
         return res.status(400).json({ 
-          message: 'El monto final debe ser igual al monto original menos el descuento.' 
+          message: 'El monto final no puede ser menor al monto original menos el descuento.' 
         });
       }
     }
@@ -38,18 +47,18 @@ const createPayment = async (req, res) => {
     // Validar suma de montos si hay documentos asociados
     if (docsToAssociate && docsToAssociate.length > 0) {
       const sumaMontos = docsToAssociate.reduce((sum, doc) => sum + (parseFloat(doc.amount) || 0), 0);
-      if (sumaMontos > montoFinal) {
+      if (sumaMontos > montoFinal + 0.01) {
         return res.status(400).json({ 
           message: 'La suma de los montos aplicados a los documentos no puede superar el monto total del pago.' 
         });
       }
       
-      // Permitir pagos parciales: el monto del pago puede ser menor al total de los documentos
-      // Esto permite que quede un saldo pendiente en las facturas
-      console.log('💰 [PAYMENT] Validación de pago parcial:', {
+      // Permitir pagos parciales o mayores (saldo a favor)
+      console.log('💰 [PAYMENT] Validación de pago:', {
         montoFinal,
         sumaMontos,
-        esPagoParcial: montoFinal < sumaMontos
+        esPagoParcial: montoFinal < sumaMontos,
+        esPagoMayor: montoFinal > sumaMontos
       });
     }
 
@@ -125,6 +134,31 @@ const createPayment = async (req, res) => {
       console.log('💰 [PAYMENT] No hay documentos para asociar');
     }
 
+    // Recalcular saldos de edificios afectados
+    if (docsToAssociate && docsToAssociate.length > 0) {
+      const affectedBuildingIds = new Set();
+      for (const doc of docsToAssociate) {
+        if (doc.type === 'FACTURA') {
+          const services = await prisma.service.findMany({
+            where: { invoiceServices: { some: { invoiceId: doc.id } } },
+            select: { buildingId: true }
+          });
+          services.forEach(s => affectedBuildingIds.add(s.buildingId));
+        } else if (doc.type === 'REMITO') {
+          const remito = await prisma.remito.findUnique({
+            where: { id: doc.id },
+            include: { service: { select: { buildingId: true } } }
+          });
+          if (remito?.service?.buildingId) {
+            affectedBuildingIds.add(remito.service.buildingId);
+          }
+        }
+      }
+      for (const buildingId of affectedBuildingIds) {
+        await recalculateBuildingBalance(buildingId);
+      }
+    }
+
     res.status(201).json({
       ...pago,
       message: 'Pago registrado exitosamente',
@@ -146,11 +180,9 @@ const getPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                services: {
-                  include: {
-                    building: true
-                  }
-                }
+                ...invoiceServicesInclude({
+                  building: true
+                })
               }
             },
             remito: {
@@ -181,7 +213,10 @@ const getPayments = async (req, res) => {
       method: payment.method,
       comprobante: payment.comprobante,
       paymentMethod: payment.paymentMethod,
-      documents: payment.documents,
+      documents: payment.documents.map(doc => ({
+        ...doc,
+        invoice: doc.invoice ? withInvoiceServices(doc.invoice) : null
+      })),
       hasDiscount: payment.discount > 0,
       discountPercentage: payment.originalAmount ? 
         ((payment.discount / payment.originalAmount) * 100).toFixed(2) : 0
@@ -236,9 +271,11 @@ const getBuildingPayments = async (req, res) => {
             OR: [
               {
                 invoice: {
-                  services: {
+                  invoiceServices: {
                     some: {
-                      buildingId: { in: buildingIds }
+                      service: {
+                        buildingId: { in: buildingIds }
+                      }
                     }
                   }
                 }
@@ -281,15 +318,13 @@ const getBuildingPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                services: {
-                  include: {
-                    building: {
-                      include: {
-                        administrator: true
-                      }
+                ...invoiceServicesInclude({
+                  building: {
+                    include: {
+                      administrator: true
                     }
                   }
-                }
+                })
               }
             },
             remito: {
@@ -319,7 +354,8 @@ const getBuildingPayments = async (req, res) => {
     const formattedPayments = payments.map(payment => {
       // Obtener el edificio del primer documento
       const firstDoc = payment.documents[0];
-      const building = firstDoc?.invoice?.services?.[0]?.building || firstDoc?.remito?.service?.building;
+      const invoiceServices = firstDoc?.invoice ? getInvoiceServices(firstDoc.invoice) : [];
+      const building = invoiceServices[0]?.building || firstDoc?.remito?.service?.building;
       
       return {
         id: payment.id,
@@ -400,10 +436,12 @@ const getAdministratorPayments = async (req, res) => {
             OR: [
               {
                 invoice: {
-                  services: {
+                  invoiceServices: {
                     some: {
-                      building: {
-                        administratorId: { in: adminIds }
+                      service: {
+                        building: {
+                          administratorId: { in: adminIds }
+                        }
                       }
                     }
                   }
@@ -444,15 +482,13 @@ const getAdministratorPayments = async (req, res) => {
           include: {
             invoice: {
               include: {
-                services: {
-                  include: {
-                    building: {
-                      include: {
-                        administrator: true
-                      }
+                ...invoiceServicesInclude({
+                  building: {
+                    include: {
+                      administrator: true
                     }
                   }
-                }
+                })
               }
             },
             remito: {
@@ -480,7 +516,8 @@ const getAdministratorPayments = async (req, res) => {
     const massivePayments = allPayments.filter(payment => {
       const buildingIds = new Set();
       payment.documents.forEach(doc => {
-        const buildingId = doc.invoice?.services?.[0]?.buildingId || doc.remito?.service?.buildingId;
+        const invServices = doc.invoice ? getInvoiceServices(doc.invoice) : [];
+        const buildingId = invServices[0]?.buildingId || doc.remito?.service?.buildingId;
         if (buildingId) buildingIds.add(buildingId);
       });
       return buildingIds.size > 1; // Solo pagos que impactan más de un edificio
@@ -497,7 +534,8 @@ const getAdministratorPayments = async (req, res) => {
       // Agrupar documentos por edificio
       const buildingMap = new Map();
       payment.documents.forEach(doc => {
-        const building = doc.invoice?.services?.[0]?.building || doc.remito?.service?.building;
+        const invServices = doc.invoice ? getInvoiceServices(doc.invoice) : [];
+        const building = invServices[0]?.building || doc.remito?.service?.building;
         if (building) {
           if (!buildingMap.has(building.id)) {
             buildingMap.set(building.id, {
@@ -525,9 +563,10 @@ const getAdministratorPayments = async (req, res) => {
       // Obtener administrador buscando en todos los documentos hasta encontrar uno válido
       let firstBuilding = null;
       for (const doc of payment.documents) {
+        const invServices = doc.invoice ? getInvoiceServices(doc.invoice) : [];
         // Buscar en todos los servicios del invoice (no solo el primero)
-        const bldgFromInvoice = doc.invoice?.services?.find(s => s.building?.administrator)?.building
-          || doc.invoice?.services?.[0]?.building;
+        const bldgFromInvoice = invServices.find(s => s.building?.administrator)?.building
+          || invServices[0]?.building;
         const bldgFromRemito = doc.remito?.service?.building;
         const bldg = bldgFromInvoice || bldgFromRemito;
         if (bldg?.administrator) {

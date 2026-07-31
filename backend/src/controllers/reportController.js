@@ -3,6 +3,11 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const prisma = new PrismaClient();
+const { dedupeInvoices } = require('../services/buildingBalanceService');
+const {
+  serviceInvoicesInclude,
+  getServiceInvoices
+} = require('../utils/serviceInvoiceHelpers');
 
 // Reporte de deuda de administradores
 const getAdminDebtReport = async (req, res) => {
@@ -45,19 +50,12 @@ const getAdminDebtReport = async (req, res) => {
         const services = await prisma.service.findMany({
           where: { buildingId: building.id },
           include: {
-            invoice: true,
+            ...serviceInvoicesInclude,
             remitos: true
           }
         });
 
-        // Deduplicate invoices to avoid counting the same invoice multiple times
-        const invoiceMap = new Map();
-        services.forEach(s => {
-          if (s.invoice) {
-            invoiceMap.set(s.invoice.id, s.invoice);
-          }
-        });
-        const invoices = Array.from(invoiceMap.values());
+        const invoices = dedupeInvoices(services);
         const invoiceIds = invoices.map(inv => inv.id);
         const remitos = services.flatMap(s => s.remitos);
         const remitoIds = remitos.map(r => r.id);
@@ -100,7 +98,7 @@ const getAdminDebtReport = async (req, res) => {
           const montoPendiente = montoAcordado - totalPagado;
           if (montoPendiente > 0) {
             buildingDebt += montoPendiente;
-            const invService = services.find(s => s.invoice?.id === inv.id);
+            const invService = services.find(s => getServiceInvoices(s).some(i => i.id === inv.id));
             const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
             const invoiceLabel = inv.number ? `Nº ${inv.number}` : inv.id.slice(0, 8);
             pendingDocuments.push({
@@ -192,19 +190,12 @@ const getBuildingDebtReport = async (req, res) => {
       const services = await prisma.service.findMany({
         where: { buildingId: building.id },
         include: {
-          invoice: true,
+          ...serviceInvoicesInclude,
           remitos: true
         }
       });
 
-      // Deduplicate invoices to avoid counting the same invoice multiple times
-      const invoiceMap = new Map();
-      services.forEach(s => {
-        if (s.invoice) {
-          invoiceMap.set(s.invoice.id, s.invoice);
-        }
-      });
-      const invoices = Array.from(invoiceMap.values());
+      const invoices = dedupeInvoices(services);
       const invoiceIds = invoices.map(inv => inv.id);
       const remitos = services.flatMap(s => s.remitos);
       const remitoIds = remitos.map(r => r.id);
@@ -243,7 +234,7 @@ const getBuildingDebtReport = async (req, res) => {
         const montoPendiente = montoAcordado - totalPagado;
         if (montoPendiente > 0) {
           totalDebt += montoPendiente;
-          const invService = services.find(s => s.invoice?.id === inv.id);
+          const invService = services.find(s => getServiceInvoices(s).some(i => i.id === inv.id));
           const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
           const invoiceLabel = inv.number ? `Nº ${inv.number}` : inv.id.slice(0, 8);
           pendingDocuments.push({
@@ -331,12 +322,10 @@ const getAdminDebtPDF = async (req, res) => {
     for (const building of admin.buildings) {
       const services = await prisma.service.findMany({
         where: { buildingId: building.id },
-        include: { invoice: true, remitos: true }
+        include: { ...serviceInvoicesInclude, remitos: true }
       });
 
-      const invoiceMap = new Map();
-      services.forEach(s => { if (s.invoice) invoiceMap.set(s.invoice.id, s.invoice); });
-      const invoices = Array.from(invoiceMap.values());
+      const invoices = dedupeInvoices(services);
       const invoiceIds = invoices.map(inv => inv.id);
       const remitos = services.flatMap(s => s.remitos);
       const remitoIds = remitos.map(r => r.id);
@@ -370,7 +359,7 @@ const getAdminDebtPDF = async (req, res) => {
         const montoPendiente = montoAcordado - totalPagado;
 
         if (montoPendiente > 0.1) { // Error de redondeo
-          const invService = services.find(s => s.invoice?.id === inv.id);
+          const invService = services.find(s => getServiceInvoices(s).some(i => i.id === inv.id));
           const serviceDate = invService?.remitos?.[0]?.date || invService?.visitDate || inv.date || inv.createdAt;
           pendingItems.push({
             buildingName: building.name,

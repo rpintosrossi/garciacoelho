@@ -1,5 +1,12 @@
 const { PrismaClient } = require('@prisma/client');
 const { getFileUrl } = require('../utils/fileUtils');
+const {
+  invoiceServicesInclude,
+  getInvoiceServices,
+  withInvoiceServices,
+  linkInvoiceToServicesData,
+  serviceInvoicesInclude
+} = require('../utils/serviceInvoiceHelpers');
 
 const prisma = new PrismaClient();
 
@@ -10,17 +17,15 @@ const getAllInvoices = async (req, res) => {
     
     const includeOptions = {};
     if (include === 'service') {
-      includeOptions.service = {
-        include: {
-          building: {
-            include: {
-              administrator: true
-            }
-          },
-          technician: true,
-          remitos: true
-        }
-      };
+      Object.assign(includeOptions, invoiceServicesInclude({
+        building: {
+          include: {
+            administrator: true
+          }
+        },
+        technician: true,
+        remitos: true
+      }));
     }
 
     const invoices = await prisma.invoice.findMany({
@@ -30,7 +35,7 @@ const getAllInvoices = async (req, res) => {
       }
     });
 
-    res.json(invoices);
+    res.json(invoices.map(withInvoiceServices));
   } catch (error) {
     console.error('Error al obtener facturas:', error);
     res.status(500).json({ message: 'Error al obtener facturas' });
@@ -44,26 +49,22 @@ const getInvoiceById = async (req, res) => {
     
     const invoice = await prisma.invoice.findUnique({
       where: { id },
-      include: {
-        service: {
+      include: invoiceServicesInclude({
+        building: {
           include: {
-            building: {
-              include: {
-                administrator: true
-              }
-            },
-            technician: true,
-            remitos: true
+            administrator: true
           }
-        }
-      }
+        },
+        technician: true,
+        remitos: true
+      })
     });
 
     if (!invoice) {
       return res.status(404).json({ message: 'Factura no encontrada' });
     }
 
-    res.json(invoice);
+    res.json(withInvoiceServices(invoice));
   } catch (error) {
     console.error('Error al obtener factura:', error);
     res.status(500).json({ message: 'Error al obtener factura' });
@@ -77,39 +78,32 @@ const createInvoice = async (req, res) => {
 
     // Verificar que el servicio existe
     const service = await prisma.service.findUnique({
-      where: { id: serviceId }
+      where: { id: serviceId },
+      include: serviceInvoicesInclude
     });
 
     if (!service) {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
 
-    // Verificar que no existe ya una factura para este servicio
-    const existingInvoice = await prisma.invoice.findUnique({
-      where: { serviceId }
-    });
-
-    if (existingInvoice) {
-      return res.status(400).json({ message: 'Ya existe una factura para este servicio' });
-    }
-
     const invoice = await prisma.invoice.create({
       data: {
-        serviceId,
         amount,
-        status
+        status,
+        ...linkInvoiceToServicesData([serviceId])
       },
-      include: {
-        service: {
-          include: {
-            building: true,
-            technician: true
-          }
-        }
-      }
+      include: invoiceServicesInclude({
+        building: true,
+        technician: true
+      })
     });
 
-    res.status(201).json(invoice);
+    await prisma.service.update({
+      where: { id: serviceId },
+      data: { status: 'FACTURADO' }
+    });
+
+    res.status(201).json(withInvoiceServices(invoice));
   } catch (error) {
     console.error('Error al crear factura:', error);
     res.status(500).json({ message: 'Error al crear factura' });
@@ -155,14 +149,10 @@ const updateInvoice = async (req, res) => {
         ...(status !== undefined && { status }),
         ...(fileUrl && { fileUrl })
       },
-      include: {
-        services: {
-          include: {
-            building: true,
-            technician: true
-          }
-        }
-      }
+      include: invoiceServicesInclude({
+        building: true,
+        technician: true
+      })
     });
 
     // Si hay cambio de monto, verificar si debemos actualizar pagos automáticos (EFECTIVO)
@@ -190,7 +180,7 @@ const updateInvoice = async (req, res) => {
       }
     }
 
-    res.json(invoice);
+    res.json(withInvoiceServices(invoice));
   } catch (error) {
     console.error('Error al actualizar factura:', error);
     res.status(500).json({ message: 'Error al actualizar factura' });
@@ -207,11 +197,9 @@ const deleteInvoice = async (req, res) => {
       where: { id },
       include: {
         paymentDocuments: true,
-        services: {
-          include: {
-            remitos: true
-          }
-        }
+        ...invoiceServicesInclude({
+          remitos: true
+        })
       }
     });
 
@@ -226,8 +214,10 @@ const deleteInvoice = async (req, res) => {
       });
     }
 
-    // Determinar el estado de rollback para cada servicio
-    const determineRollbackStatus = (service) => {
+    const services = getInvoiceServices(invoice);
+
+    const determineRollbackStatus = (service, remainingInvoiceCount) => {
+      if (remainingInvoiceCount > 0) return 'FACTURADO';
       if (service.remitos && service.remitos.length > 0) return 'CON_REMITO';
       if (service.technicianId) return 'ASIGNADO';
       return 'PENDIENTE';
@@ -235,18 +225,23 @@ const deleteInvoice = async (req, res) => {
 
     // Transacción: desasociar servicios + eliminar factura
     await prisma.$transaction(async (tx) => {
-      // Resetear cada servicio: quitar invoiceId y revertir estado
-      for (const service of invoice.services) {
+      for (const service of services) {
+        const otherLinks = await tx.invoiceService.count({
+          where: {
+            serviceId: service.id,
+            invoiceId: { not: id }
+          }
+        });
+
         await tx.service.update({
           where: { id: service.id },
           data: {
-            invoiceId: null,
-            status: determineRollbackStatus(service)
+            status: determineRollbackStatus(service, otherLinks)
           }
         });
       }
 
-      // Eliminar la factura
+      // Eliminar la factura (cascade borra InvoiceService)
       await tx.invoice.delete({ where: { id } });
     });
 

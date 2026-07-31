@@ -1,4 +1,9 @@
 const prisma = require('../lib/prisma');
+const {
+  invoiceServicesInclude,
+  getInvoiceServices,
+  withInvoiceServices
+} = require('../utils/serviceInvoiceHelpers');
 
 const getQuickStats = async (req, res) => {
   try {
@@ -56,88 +61,16 @@ const getQuickStats = async (req, res) => {
       facturasMes.reduce((sum, f) => sum + (f.amount || 0), 0) +
       remitosMes.reduce((sum, r) => sum + (r.amount || 0), 0);
 
-    // Obtener edificios con cuentas para calcular saldos
-    const buildings = await prisma.building.findMany({
-      include: {
-        account: true,
-      }
+    // Saldos desde Account (evita recorrer todos los servicios/facturas en cada carga)
+    const accounts = await prisma.account.findMany({
+      select: { balance: true }
     });
 
-    // Calcular saldos totales usando consultas optimizadas
     let saldoTotalFavor = 0;
     let edificiosSaldoNegativo = 0;
 
-    // Obtener todos los servicios, facturas y remitos en una sola consulta
-    const allServices = await prisma.service.findMany({
-      where: {
-        buildingId: { in: buildings.map(b => b.id) }
-      },
-      include: {
-        invoice: true,
-        remitos: true
-      }
-    });
-
-    // Obtener todos los payment documents en una sola consulta
-    const invoiceIds = allServices.map(s => s.invoice?.id).filter(Boolean);
-    const remitoIds = allServices.flatMap(s => s.remitos.map(r => r.id));
-    
-    const allPaymentDocs = (invoiceIds.length > 0 || remitoIds.length > 0)
-      ? await prisma.paymentDocument.findMany({
-          where: {
-            OR: [
-              ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
-              ...(remitoIds.length > 0 ? [{ remitoId: { in: remitoIds } }] : [])
-            ]
-          },
-          include: { payment: true }
-        })
-      : [];
-
-    // Crear mapas para acceso rápido
-    const servicesByBuilding = allServices.reduce((acc, service) => {
-      if (!acc[service.buildingId]) acc[service.buildingId] = [];
-      acc[service.buildingId].push(service);
-      return acc;
-    }, {});
-
-    const paymentDocsByInvoice = allPaymentDocs.reduce((acc, pd) => {
-      if (pd.invoiceId) {
-        if (!acc[pd.invoiceId]) acc[pd.invoiceId] = [];
-        acc[pd.invoiceId].push(pd);
-      }
-      return acc;
-    }, {});
-
-    const paymentDocsByRemito = allPaymentDocs.reduce((acc, pd) => {
-      if (pd.remitoId) {
-        if (!acc[pd.remitoId]) acc[pd.remitoId] = [];
-        acc[pd.remitoId].push(pd);
-      }
-      return acc;
-    }, {});
-
-    // Calcular saldos para cada edificio
-    for (const building of buildings) {
-      const buildingServices = servicesByBuilding[building.id] || [];
-      const invoices = buildingServices.map(s => s.invoice).filter(Boolean);
-      const remitos = buildingServices.flatMap(s => s.remitos);
-
-      let saldo = 0;
-      
-      // Sumar todas las facturas (como en la cuenta corriente)
-      for (const inv of invoices) {
-        saldo += inv.amount;
-      }
-      
-      // Restar todos los pagos (como en la cuenta corriente)
-      for (const inv of invoices) {
-        const paymentDocs = paymentDocsByInvoice[inv.id] || [];
-        for (const pd of paymentDocs) {
-          saldo -= (pd.payment.originalAmount || pd.payment.amount);
-        }
-      }
-
+    for (const account of accounts) {
+      const saldo = account.balance || 0;
       if (saldo > 0) {
         saldoTotalFavor += saldo;
       } else if (saldo < 0) {
@@ -262,17 +195,14 @@ const getFastPaymentAdmins = async (req, res) => {
       include: {
         payment: { select: { date: true, amount: true } },
         invoice: {
-          select: {
-            createdAt: true,
-            services: {
-              select: {
-                building: {
-                  select: {
-                    administrator: { select: { id: true, name: true } }
-                  }
+          include: {
+            ...invoiceServicesInclude({
+              building: {
+                include: {
+                  administrator: { select: { id: true, name: true } }
                 }
               }
-            }
+            })
           }
         }
       }
@@ -282,7 +212,9 @@ const getFastPaymentAdmins = async (req, res) => {
 
     for (const pd of paymentDocs) {
       if (!pd.payment || !pd.invoice) continue;
-      const admin = pd.invoice.services?.[0]?.building?.administrator;
+      const invoice = withInvoiceServices(pd.invoice);
+      const admin = getInvoiceServices(invoice)?.[0]?.building?.administrator
+        || invoice.services?.[0]?.building?.administrator;
       if (!admin) continue;
 
       const invoiceDate = new Date(pd.invoice.createdAt);
@@ -325,7 +257,8 @@ const getBuildingsWithOverdueDebts = async (req, res) => {
           s."buildingId",
           MIN(COALESCE(i.date, i."createdAt")) AS oldest_date
         FROM "Service" s
-        JOIN "Invoice" i ON s."invoiceId" = i.id
+        JOIN "InvoiceService" invs ON invs."serviceId" = s.id
+        JOIN "Invoice" i ON invs."invoiceId" = i.id
         LEFT JOIN "PaymentDocument" pd ON pd."invoiceId" = i.id
         GROUP BY s."buildingId", i.id, i.amount
         HAVING COALESCE(SUM(pd.amount), 0) < i.amount

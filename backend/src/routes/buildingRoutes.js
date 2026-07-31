@@ -14,15 +14,19 @@ const {
   getBuildingAccountDetails,
   createBuildingPayment,
   getBuildingServiceHistory,
-  searchBuildingsAutocomplete
+  searchBuildingsAutocomplete,
+  recalculateAllBuildingBalances,
+  getInvoicedRemitos
 } = require('../controllers/buildingController');
 
 // Rutas protegidas con autenticación y roles
 router.get('/', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildings);
 router.get('/search/autocomplete', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), searchBuildingsAutocomplete);
 router.get('/localities/available', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getAvailableLocalities);
+router.post('/recalculate-balances', authMiddleware, roleMiddleware(['ADMIN']), recalculateAllBuildingBalances);
 router.get('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingById);
 router.get('/:id/service-history', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getBuildingServiceHistory);
+router.get('/:id/invoiced-remitos', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), getInvoicedRemitos);
 router.post('/', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), createBuilding);
 router.put('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), updateBuilding);
 router.delete('/:id', authMiddleware, roleMiddleware(['ADMIN', 'OPERADOR']), deleteBuilding);
