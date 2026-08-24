@@ -29,7 +29,8 @@ import {
   MenuItem,
   Checkbox,
   Chip,
-  IconButton
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import axios from '@/lib/axios';
@@ -37,6 +38,7 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import EditIcon from '@mui/icons-material/Edit';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
 import { cachedApi } from '@/lib/axios';
@@ -204,6 +206,13 @@ export default function InvoicedServices() {
   const [uploadRemitoDescription, setUploadRemitoDescription] = useState('');
   const [uploadRemitoFiles, setUploadRemitoFiles] = useState<File[]>([]);
   const [isUploadingRemito, setIsUploadingRemito] = useState(false);
+
+  // Editar número y archivo de remito
+  const [openEditRemitoNumber, setOpenEditRemitoNumber] = useState(false);
+  const [editRemito, setEditRemito] = useState<any | null>(null);
+  const [editRemitoNumber, setEditRemitoNumber] = useState('');
+  const [editRemitoFiles, setEditRemitoFiles] = useState<File[]>([]);
+  const [savingRemitoNumber, setSavingRemitoNumber] = useState(false);
 
   // Estados para selección múltiple
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -513,6 +522,59 @@ export default function InvoicedServices() {
     setUploadRemitoDescription('');
     setUploadRemitoFiles([]);
     setError(null);
+  };
+
+  const handleOpenEditRemitoNumber = (remito: any) => {
+    setEditRemito(remito);
+    setEditRemitoNumber(remito?.number || '');
+    setEditRemitoFiles([]);
+    setOpenEditRemitoNumber(true);
+  };
+
+  const handleCloseEditRemitoNumber = () => {
+    setOpenEditRemitoNumber(false);
+    setEditRemito(null);
+    setEditRemitoNumber('');
+    setEditRemitoFiles([]);
+  };
+
+  const handleEditRemitoFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      setEditRemitoFiles(Array.from(event.target.files));
+    }
+  };
+
+  const handleSaveRemitoNumber = async () => {
+    if (!editRemito?.id) return;
+    const trimmedNumber = editRemitoNumber.trim();
+    if (!trimmedNumber && editRemitoFiles.length === 0) return;
+    setSavingRemitoNumber(true);
+    try {
+      if (editRemitoFiles.length > 0) {
+        const formData = new FormData();
+        if (trimmedNumber) {
+          formData.append('number', trimmedNumber);
+        }
+        editRemitoFiles.forEach(file => {
+          formData.append('receipts', file);
+        });
+        await axios.patch(`/remitos/${editRemito.id}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } else {
+        await axios.patch(`/remitos/${editRemito.id}`, {
+          number: trimmedNumber
+        });
+      }
+      cachedApi.clearCacheFor('/services');
+      handleCloseEditRemitoNumber();
+      await fetchServices();
+    } catch (err: any) {
+      console.error('Error actualizando remito:', err);
+      alert(err?.response?.data?.message || 'Error al actualizar el remito');
+    } finally {
+      setSavingRemitoNumber(false);
+    }
   };
 
   const handleUploadFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -883,6 +945,16 @@ export default function InvoicedServices() {
                     {hasReceipt ? (
                       <>
                         <Typography variant="body2">{remitoNumber}</Typography>
+                        {service.remitos?.[0]?.id && (
+                          <Tooltip title="Editar remito">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenEditRemitoNumber(service.remitos[0])}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                         <Button
                           size="small"
                           variant="text" 
@@ -899,9 +971,21 @@ export default function InvoicedServices() {
                     ) : (
                       <>
                         {pendingRemitoNumber && (
-                          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                            Nº {pendingRemitoNumber}
-                          </Typography>
+                          <>
+                            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                              Nº {pendingRemitoNumber}
+                            </Typography>
+                            {service.remitos?.[0]?.id && (
+                              <Tooltip title="Editar remito">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleOpenEditRemitoNumber(service.remitos[0])}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </>
                         )}
                         <Button
                           variant="contained"
@@ -1186,6 +1270,63 @@ export default function InvoicedServices() {
           <Button onClick={handleCloseRemito}>Cancelar</Button>
           <Button onClick={handleSaveRemito} variant="contained" disabled={savingRemito || !remitoAmount}>
             Guardar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openEditRemitoNumber} onClose={handleCloseEditRemitoNumber} fullWidth maxWidth="sm">
+        <DialogTitle>Editar remito</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={1}>
+            <TextField
+              label="Número de remito"
+              value={editRemitoNumber}
+              onChange={(e) => setEditRemitoNumber(e.target.value)}
+              fullWidth
+              autoFocus
+            />
+            {editRemito?.receiptImages?.length > 0 && editRemitoFiles.length === 0 && (
+              <Typography variant="body2" color="text.secondary">
+                Archivo actual: {editRemito.receiptImages.length} archivo(s). Seleccioná uno nuevo para reemplazarlo.
+              </Typography>
+            )}
+            <Box>
+              <input
+                accept=".jpg,.jpeg,.pdf"
+                type="file"
+                multiple
+                onChange={handleEditRemitoFileSelect}
+                style={{ display: 'none' }}
+                id="edit-remito-file-input"
+              />
+              <label htmlFor="edit-remito-file-input">
+                <Button variant="outlined" component="span" startIcon={<CloudUploadIcon />}>
+                  {editRemitoFiles.length > 0 ? 'Cambiar archivo' : 'Reemplazar archivo (JPG o PDF)'}
+                </Button>
+              </label>
+              {editRemitoFiles.length > 0 && (
+                <Box mt={1}>
+                  <Typography variant="body2" color="success.main">
+                    Nuevo archivo seleccionado:
+                  </Typography>
+                  {editRemitoFiles.map((file, index) => (
+                    <Typography key={index} variant="caption" display="block" color="text.secondary">
+                      {index + 1}. {file.name} - {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseEditRemitoNumber}>Cancelar</Button>
+          <Button
+            onClick={handleSaveRemitoNumber}
+            variant="contained"
+            disabled={savingRemitoNumber || (!editRemitoNumber.trim() && editRemitoFiles.length === 0)}
+          >
+            {savingRemitoNumber ? 'Guardando...' : 'Guardar'}
           </Button>
         </DialogActions>
       </Dialog>

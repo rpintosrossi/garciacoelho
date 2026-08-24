@@ -7,6 +7,7 @@ const administratorRoutes = require('./administratorRoutes');
 const paymentMethodRoutes = require('./paymentMethodRoutes');
 const paymentController = require('../controllers/paymentController');
 const remitoController = require('../controllers/remitoController');
+const upload = require('../middleware/upload');
 const serviceRoutes = require('./serviceRoutes');
 const technicianRoutes = require('./technicianRoutes');
 const clientRoutes = require('./clientRoutes');
@@ -50,7 +51,7 @@ router.get('/payments/buildings', paymentController.getBuildingPayments);
 router.get('/payments/administrators', paymentController.getAdministratorPayments);
 router.patch('/payments/:id/comment', paymentController.updatePaymentComment);
 router.post('/remitos', remitoController.createRemito);
-router.patch('/remitos/:id', remitoController.updateRemitoDate);
+router.patch('/remitos/:id', upload.array('receipts'), remitoController.updateRemitoDate);
 
 // Endpoint de prueba simple para diagnosticar datos
 router.get('/test-data', async (req, res) => {
