@@ -22,11 +22,13 @@ const workshopRoutes = require('./workshops');
 const workshopRepairRoutes = require('./workshopRepairs');
 const serviceTypeRoutes = require('./serviceTypeRoutes');
 const noChargeReasonRoutes = require('./noChargeReasonRoutes');
+const afipRoutes = require('./afipRoutes');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
 router.use('/auth', authRoutes);
+router.use('/afip', afipRoutes);
 router.use('/users', userRoutes);
 router.use('/buildings', buildingRoutes);
 router.use('/administrators', administratorRoutes);

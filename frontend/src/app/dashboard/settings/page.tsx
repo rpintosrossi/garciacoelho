@@ -6,6 +6,7 @@ import PaymentMethodsManager from '@/components/PaymentMethodsManager';
 import ServiceTypesManager from '@/components/ServiceTypesManager';
 import NoChargeReasonsManager from '@/components/NoChargeReasonsManager';
 import BalanceMaintenanceManager from '@/components/BalanceMaintenanceManager';
+import AfipSettingsManager from '@/components/AfipSettingsManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -47,6 +48,7 @@ export default function SettingsPage() {
           <Tab label="Medios de Pago" />
           <Tab label="Tipos de Servicio" />
           <Tab label="Motivos Sin Cobro" />
+          <Tab label="Facturación AFIP" />
           <Tab label="Mantenimiento" />
         </Tabs>
       </Box>
@@ -60,6 +62,9 @@ export default function SettingsPage() {
         <NoChargeReasonsManager />
       </TabPanel>
       <TabPanel value={value} index={3}>
+        <AfipSettingsManager />
+      </TabPanel>
+      <TabPanel value={value} index={4}>
         <BalanceMaintenanceManager />
       </TabPanel>
     </Box>

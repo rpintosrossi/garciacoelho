@@ -114,6 +114,18 @@ model Invoice {
   fileUrl          String?
   number           String?
   paymentMethod    String?
+  emissionSource   InvoiceEmissionSource @default(IMPORT)
+  cae              String?
+  caeVto           DateTime?
+  puntoVenta       Int?
+  tipoComprobante  Int?
+  cuitEmisor       String?
+  docTipo          Int?
+  docNro           String?
+  impNeto          Float?
+  impIVA           Float?
+  impTotal         Float?
+  afipRaw          Json?
   invoiceServices  InvoiceService[]
   paymentDocuments PaymentDocument[]
 
@@ -121,6 +133,9 @@ model Invoice {
   @@index([paymentMethod])
   @@index([paymentMethod, status], map: "Invoice_payment_status_idx")
   @@index([status])
+  @@index([cae])
+  @@index([cuitEmisor])
+  @@index([cuitEmisor, date])
 }
 
 model InvoiceService {
@@ -343,6 +358,12 @@ enum InvoiceStatus {
   PAGADA
 }
 
+enum InvoiceEmissionSource {
+  IMPORT
+  AFIP
+  INFORMAL
+}
+
 enum TaxCondition {
   RESPONSABLE_INSCRIPTO
   MONOTRIBUTO
@@ -383,6 +404,12 @@ model WorkshopRepair {
   @@index([serviceId])
   @@index([workshopId])
   @@index([createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model ServiceType {

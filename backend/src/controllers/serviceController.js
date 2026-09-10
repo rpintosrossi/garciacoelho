@@ -7,6 +7,135 @@ const {
   withServiceInvoices,
   linkInvoiceToServicesData
 } = require('../utils/serviceInvoiceHelpers');
+const { generarFactura, isAfipConfigured, listIssuers, consultarPadron } = require('../services/afipClient');
+const { getModoHomologacion } = require('../services/afipSettings');
+const { generateAfipInvoicePdf } = require('../services/afipInvoicePdf');
+const { uploadBuffer } = require('../utils/uploadBuffer');
+const {
+  mapDocTipo,
+  normalizeDocForAfip,
+  mapTipoComprobante,
+  condicionIvaReceptorId,
+  taxConditionLabel,
+  formatInvoiceNumber,
+  parseAfipDate,
+  toAfipDateString,
+  splitAmounts,
+  digitsOnly
+} = require('../utils/afipFiscal');
+const { extractAfipErrorMessage } = require('../utils/afipErrors');
+const { recalculateBuildingBalance } = require('../services/buildingBalanceService');
+
+/** Cache corto de issuers (evita cold-start de Railway en cada apertura del modal). */
+let issuersCache = { at: 0, data: null };
+const ISSUERS_CACHE_MS = Number(process.env.AFIP_ISSUERS_CACHE_MS || 60000);
+
+async function listIssuersCached() {
+  const now = Date.now();
+  if (issuersCache.data && now - issuersCache.at < ISSUERS_CACHE_MS) {
+    return issuersCache.data;
+  }
+  const data = await listIssuers();
+  issuersCache = { at: now, data };
+  return data;
+}
+
+async function getIssuersForCurrentMode() {
+  const modoHomologacion = await getModoHomologacion();
+  const ambiente = modoHomologacion ? 'H' : 'P';
+  if (!isAfipConfigured()) {
+    return { modoHomologacion, ambiente, issuers: [] };
+  }
+  const all = await listIssuersCached();
+  const issuers = all.filter(
+    (i) => i.activo !== false && String(i.ambiente).toUpperCase() === ambiente
+  );
+  return { modoHomologacion, ambiente, issuers };
+}
+
+/**
+ * Totales facturados por CUIT emisor (facturas AFIP) en mes y año calendario.
+ */
+async function getIssuerBillingStats(cuits) {
+  const normalized = [...new Set((cuits || []).map((c) => digitsOnly(c)).filter(Boolean))];
+  const empty = () => ({
+    facturadoMes: 0,
+    facturadoAnio: 0,
+    cantidadMes: 0,
+    cantidadAnio: 0
+  });
+  const stats = Object.fromEntries(normalized.map((c) => [c, empty()]));
+  if (!normalized.length) return stats;
+
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const invoices = await prisma.invoice.findMany({
+    where: {
+      emissionSource: 'AFIP',
+      cuitEmisor: { in: normalized },
+      OR: [{ date: { gte: yearStart } }, { date: null, createdAt: { gte: yearStart } }]
+    },
+    select: {
+      cuitEmisor: true,
+      amount: true,
+      impTotal: true,
+      date: true,
+      createdAt: true
+    }
+  });
+
+  for (const inv of invoices) {
+    const cuit = digitsOnly(inv.cuitEmisor);
+    if (!stats[cuit]) continue;
+    const when = inv.date || inv.createdAt;
+    const total = Number(inv.impTotal != null ? inv.impTotal : inv.amount) || 0;
+    stats[cuit].facturadoAnio += total;
+    stats[cuit].cantidadAnio += 1;
+    if (when >= monthStart) {
+      stats[cuit].facturadoMes += total;
+      stats[cuit].cantidadMes += 1;
+    }
+  }
+
+  for (const cuit of normalized) {
+    stats[cuit].facturadoMes = Math.round(stats[cuit].facturadoMes * 100) / 100;
+    stats[cuit].facturadoAnio = Math.round(stats[cuit].facturadoAnio * 100) / 100;
+  }
+  return stats;
+}
+
+function pickIssuer(issuers, cuitEmisor) {
+  if (!issuers.length) return null;
+  if (cuitEmisor) {
+    const found = issuers.find((i) => digitsOnly(i.cuit) === digitsOnly(cuitEmisor));
+    if (found) return found;
+  }
+  return issuers[0];
+}
+
+async function safePadron(cuitEmisor, idPersona, modoHomologacion) {
+  try {
+    const id = digitsOnly(idPersona);
+    const emisor = digitsOnly(cuitEmisor);
+    if (!emisor || !id || id === '0' || id.length < 8) return null;
+    return await consultarPadron({ cuitEmisor: emisor, idPersona: id, modoHomologacion });
+  } catch (err) {
+    const msg = String(err?.message || err || '');
+    // AFIP: el certificado no tiene habilitado ws_sr_padron_a5 (no es error de GarciaCoelho)
+    if (msg.includes('notAuthorized') || msg.includes('no autorizado') || msg.includes('Computador no autorizado')) {
+      if (process.env.AFIP_PADRON_DEBUG === 'true') {
+        console.warn('[AFIP] Padrón no autorizado para este certificado (habilitar ws_sr_padron_a5 en AFIP).');
+      }
+      return null;
+    }
+    if (process.env.AFIP_PADRON_DEBUG === 'true') {
+      console.warn('[AFIP] Padrón no disponible:', msg);
+    }
+    return null;
+  }
+}
 
 // Obtener todos los servicios
 const getAllServices = async (req, res) => {
@@ -1000,6 +1129,7 @@ const createInformalInvoice = async (req, res) => {
         amount: parseFloat(amount),
         status: 'PENDIENTE',
         paymentMethod: paymentMethod,
+        emissionSource: 'INFORMAL',
         ...(provNumber ? { number: provNumber } : {}),
         ...(date ? { date: new Date(date) } : {}),
         ...linkInvoiceToServicesData([id])
@@ -1070,6 +1200,10 @@ const createInformalInvoice = async (req, res) => {
     console.log('--- [FACTURA INFORMAL] Cobro sin factura creado exitosamente ---');
     console.log('Factura creada:', invoice);
     console.log('Servicio actualizado:', updatedService);
+
+    if (service.buildingId) {
+      await recalculateBuildingBalance(service.buildingId);
+    }
 
     res.json({ 
       message: 'Cobro sin factura creado exitosamente', 
@@ -1149,6 +1283,7 @@ const createInformalInvoiceMultiple = async (req, res) => {
           amount: parseFloat(amount),
           status: invoiceStatus,
           paymentMethod: paymentMethod,
+          emissionSource: 'INFORMAL',
           ...linkInvoiceToServicesData(serviceIds)
         }
       });
@@ -1200,6 +1335,10 @@ const createInformalInvoiceMultiple = async (req, res) => {
     console.log('--- [FACTURA INFORMAL MÚLTIPLE] Cobro sin factura creado exitosamente ---');
     console.log('Factura creada:', result.invoice);
     console.log('Servicios actualizados:', result.services.length);
+
+    if (buildingIds[0]) {
+      await recalculateBuildingBalance(buildingIds[0]);
+    }
 
     res.json({ 
       message: `Cobro sin factura creado exitosamente para ${result.services.length} servicios`, 
@@ -1269,6 +1408,10 @@ const createInvoice = async (req, res) => {
         ...serviceInvoicesInclude
       }
     }));
+
+    if (service.buildingId) {
+      await recalculateBuildingBalance(service.buildingId);
+    }
 
     res.json({ 
       message: 'Factura creada exitosamente', 
@@ -1415,6 +1558,7 @@ const importInvoice = async (req, res) => {
         fileUrl: fileUrl,
         status: 'EMITIDA',
         paymentMethod: paymentMethod || 'CUENTA_CORRIENTE',
+        emissionSource: 'IMPORT',
         ...linkInvoiceToServicesData([id])
       }
     });
@@ -1432,6 +1576,10 @@ const importInvoice = async (req, res) => {
     
     console.log('Factura importada exitosamente:', invoice);
     console.log('Servicio actualizado:', updatedService);
+
+    if (service.buildingId) {
+      await recalculateBuildingBalance(service.buildingId);
+    }
 
     res.status(200).json({ 
       message: 'Factura importada exitosamente', 
@@ -1541,6 +1689,7 @@ const importInvoiceMultiple = async (req, res) => {
           fileUrl: fileUrl,
           status: 'EMITIDA',
           paymentMethod: paymentMethod || 'CUENTA_CORRIENTE',
+          emissionSource: 'IMPORT',
           ...linkInvoiceToServicesData(parsedServiceIds)
         }
       });
@@ -1571,6 +1720,10 @@ const importInvoiceMultiple = async (req, res) => {
     
     console.log('Factura importada exitosamente:', result.invoice);
     console.log('Servicios actualizados:', result.services.length);
+
+    if (buildingIds[0]) {
+      await recalculateBuildingBalance(buildingIds[0]);
+    }
 
     res.status(200).json({ 
       message: `Factura importada exitosamente para ${result.services.length} servicios`, 
@@ -1676,6 +1829,453 @@ const markServiceNoCharge = async (req, res) => {
   }
 };
 
+// Defaults para el modal de facturación electrónica
+const getElectronicInvoiceDefaults = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const wantPadron = String(req.query.padron || '') === '1';
+
+    const [service, mode] = await Promise.all([
+      prisma.service.findUnique({
+        where: { id },
+        include: {
+          building: true,
+          remitos: { orderBy: { createdAt: 'desc' }, take: 1 }
+        }
+      }),
+      getIssuersForCurrentMode()
+    ]);
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    const { modoHomologacion, ambiente, issuers } = mode;
+    const selectedIssuer = pickIssuer(issuers, req.query.cuitEmisor);
+    const remito = service.remitos?.[0];
+    const amount = Number(remito?.amount || 0);
+    const taxCondition = service.building?.taxCondition || 'CONSUMIDOR_FINAL';
+    const { docTipo, docNro } = mapDocTipo(taxCondition, service.building?.cuit);
+    const today = toAfipDateString(new Date());
+
+    // Padrón es opcional y lento (Railway + AFIP). No se consulta al abrir el modal.
+    let padronEmisor = null;
+    let padronReceptor = null;
+    if (wantPadron && selectedIssuer) {
+      [padronEmisor, padronReceptor] = await Promise.all([
+        safePadron(selectedIssuer.cuit, selectedIssuer.cuit, modoHomologacion),
+        docNro && docNro !== '0'
+          ? safePadron(selectedIssuer.cuit, docNro, modoHomologacion)
+          : Promise.resolve(null)
+      ]);
+    }
+
+    const emisorCondicion =
+      selectedIssuer?.condicionIva ||
+      padronEmisor?.condicionIva ||
+      'IVA Responsable Inscripto';
+    const tipoComprobante = mapTipoComprobante(emisorCondicion, taxCondition);
+    const amounts = splitAmounts({ amount, tipocomprobante: tipoComprobante });
+
+    const emisor = selectedIssuer
+      ? {
+          cuit: selectedIssuer.cuit,
+          puntoVenta: selectedIssuer.puntoVenta || 1,
+          razonSocial:
+            selectedIssuer.razonSocial ||
+            selectedIssuer.nombre ||
+            padronEmisor?.razonSocial ||
+            selectedIssuer.cuit,
+          domicilio: selectedIssuer.domicilio || padronEmisor?.domicilio || '',
+          condicionIva: emisorCondicion,
+          ingresosBrutos: selectedIssuer.ingresosBrutos || '',
+          inicioActividades: selectedIssuer.inicioActividades || '',
+          nombre:
+            selectedIssuer.nombre ||
+            selectedIssuer.razonSocial ||
+            padronEmisor?.razonSocial ||
+            selectedIssuer.cuit,
+          ambiente: selectedIssuer.ambiente,
+          apellido: padronEmisor?.apellido || null,
+          padron: Boolean(padronEmisor)
+        }
+      : null;
+
+    const receptorNombre =
+      padronReceptor?.razonSocial ||
+      service.building?.name ||
+      '';
+    const receptorDomicilio =
+      padronReceptor?.domicilio ||
+      service.building?.address ||
+      '';
+    const receptorCondicion =
+      taxConditionLabel(taxCondition) ||
+      padronReceptor?.condicionIva ||
+      'Consumidor Final';
+
+    const billingStats = await getIssuerBillingStats(issuers.map((i) => i.cuit));
+
+    res.json({
+      configured: isAfipConfigured() && issuers.length > 0,
+      modoHomologacion,
+      ambiente,
+      facturadores: issuers.map((i) => {
+        const cuit = digitsOnly(i.cuit);
+        const stats = billingStats[cuit] || {
+          facturadoMes: 0,
+          facturadoAnio: 0,
+          cantidadMes: 0,
+          cantidadAnio: 0
+        };
+        return {
+          id: i.id,
+          cuit: i.cuit,
+          nombre: i.nombre || i.razonSocial || i.cuit,
+          razonSocial: i.razonSocial,
+          puntoVenta: i.puntoVenta,
+          domicilio: i.domicilio,
+          condicionIva: i.condicionIva,
+          ingresosBrutos: i.ingresosBrutos,
+          inicioActividades: i.inicioActividades,
+          ambiente: i.ambiente,
+          ...stats
+        };
+      }),
+      emisor,
+      receptor: {
+        nombre: receptorNombre,
+        domicilio: receptorDomicilio,
+        taxCondition,
+        condicionIva: receptorCondicion,
+        condicionIvaReceptorId: condicionIvaReceptorId(taxCondition),
+        docTipo,
+        docNro,
+        cuit: service.building?.cuit || '',
+        apellido: padronReceptor?.apellido || null,
+        padron: Boolean(padronReceptor)
+      },
+      comprobante: {
+        tipoComprobante,
+        puntoVenta: emisor?.puntoVenta || 1,
+        concepto: 2,
+        fchServicio: today,
+        fchVtoPago: today,
+        condicionVenta: 'Cuenta Corriente',
+        ...amounts,
+        items: [
+          {
+            quantity: 1,
+            description: service.description || service.name || 'Servicio',
+            unitPrice: amounts.impTotal,
+            subtotal: amounts.impTotal
+          }
+        ]
+      },
+      service: {
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        remitoAmount: amount,
+        remitoNumber: remito?.number || null
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener defaults FE:', error);
+    res.status(500).json({ message: 'Error al preparar facturación electrónica', error: error.message });
+  }
+};
+
+// Emitir factura electrónica AFIP
+const createElectronicInvoice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+
+    if (!isAfipConfigured()) {
+      return res.status(503).json({
+        message: 'Servicio AFIP no configurado. Defina AFIP_SERVICE_URL y AFIP_SERVICE_API_KEY.'
+      });
+    }
+
+    const isAdminOrOperador = req.user.role === 'ADMIN' || req.user.role === 'OPERADOR';
+    if (!isAdminOrOperador) {
+      return res.status(403).json({
+        message: 'Solo administradores y operadores pueden emitir facturas electrónicas'
+      });
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      include: {
+        building: true,
+        remitos: { orderBy: { createdAt: 'desc' }, take: 1 },
+        technician: true
+      }
+    });
+
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    if (!canInvoice(service.status)) {
+      return res.status(400).json({
+        message: 'El servicio debe tener un remito (o facturación parcial abierta) antes de facturar'
+      });
+    }
+
+    const { modoHomologacion, ambiente, issuers } = await getIssuersForCurrentMode();
+    if (!issuers.length) {
+      return res.status(400).json({
+        message: `No hay facturadores activos en ambiente ${ambiente}. Registre issuers en el servicio AFIP.`
+      });
+    }
+
+    const selectedIssuer = pickIssuer(issuers, body.cuitEmisor);
+    if (!selectedIssuer) {
+      return res.status(400).json({
+        message: 'El facturador seleccionado no está disponible en el ambiente actual'
+      });
+    }
+
+    const cuitEmisor = digitsOnly(selectedIssuer.cuit);
+    const emisor = {
+      cuit: cuitEmisor,
+      puntoVenta: selectedIssuer.puntoVenta || 1,
+      razonSocial: selectedIssuer.razonSocial || selectedIssuer.nombre || cuitEmisor,
+      domicilio: selectedIssuer.domicilio || '',
+      condicionIva: selectedIssuer.condicionIva || 'IVA Responsable Inscripto',
+      ingresosBrutos: selectedIssuer.ingresosBrutos || '',
+      inicioActividades: selectedIssuer.inicioActividades || '',
+      modoHomologacion
+    };
+
+    const taxCondition = body.taxCondition || service.building?.taxCondition || 'CONSUMIDOR_FINAL';
+    const mappedDoc = mapDocTipo(taxCondition, body.docNro || service.building?.cuit);
+    const rawDocTipo = Number(body.docTipo != null ? body.docTipo : mappedDoc.docTipo);
+    const rawDocNro = digitsOnly(body.docNro != null ? body.docNro : mappedDoc.docNro) || '0';
+    const { docTipo, docNro } = normalizeDocForAfip(rawDocTipo, rawDocNro, taxCondition);
+    // Tipo siempre según AFIP (emisor + receptor); no se permite override manual
+    const tipoComprobante = mapTipoComprobante(
+      body.emisorCondicionIva || emisor.condicionIva,
+      taxCondition
+    );
+    const puntoVenta = Number(body.puntoVenta || emisor.puntoVenta || 1);
+    const amount = Number(body.impTotal != null ? body.impTotal : body.amount || service.remitos?.[0]?.amount || 0);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'El importe total debe ser mayor a 0' });
+    }
+
+    const amounts = splitAmounts({
+      amount,
+      impNeto: body.impNeto,
+      impIVA: body.impIVA,
+      impTotal: body.impTotal != null ? body.impTotal : amount,
+      tipocomprobante: tipoComprobante
+    });
+
+    const fchServicio = toAfipDateString(body.fchServicio || body.date || new Date());
+
+    const afipPayload = {
+      cuitEmisor,
+      modoHomologacion,
+      puntoVenta,
+      tipoComprobante,
+      docTipo,
+      docNro,
+      concepto: Number(body.concepto || 2),
+      fchServicio,
+      fchServDesde: body.fchServDesde || fchServicio,
+      fchServHasta: body.fchServHasta || fchServicio,
+      fchVtoPago: body.fchVtoPago || fchServicio,
+      cbteFch: fchServicio,
+      impTotal: amounts.impTotal,
+      impNeto: amounts.impNeto,
+      impIVA: amounts.impIVA,
+      impTotConc: Number(body.impTotConc || 0),
+      impOpEx: Number(body.impOpEx || 0),
+      impTrib: Number(body.impTrib || 0),
+      monId: 'PES',
+      monCotiz: 1,
+      condicionIvaReceptorId: Number(
+        body.condicionIvaReceptorId != null
+          ? body.condicionIvaReceptorId
+          : condicionIvaReceptorId(taxCondition)
+      )
+    };
+
+    if (amounts.impIVA > 0) {
+      afipPayload.ivas = [
+        {
+          id: Number(body.ivaId || 5),
+          baseImponible: amounts.impNeto,
+          importe: amounts.impIVA
+        }
+      ];
+    }
+
+    console.log('[AFIP] Emitiendo factura para servicio', id, afipPayload);
+    const afipResult = await generarFactura(afipPayload);
+
+    const invoiceNumber = formatInvoiceNumber(afipResult.puntoVenta, afipResult.numeroComprobante);
+    const invoiceDate = parseAfipDate(fchServicio) || new Date();
+    const caeVto = parseAfipDate(afipResult.fechaVencimiento);
+
+    const items =
+      Array.isArray(body.items) && body.items.length > 0
+        ? body.items
+        : [
+            {
+              quantity: 1,
+              description: body.description || service.description || service.name || 'Servicio',
+              unitPrice: amounts.impTotal,
+              subtotal: amounts.impTotal
+            }
+          ];
+
+    const padronEmisorEmit = await safePadron(cuitEmisor, cuitEmisor, modoHomologacion);
+    const padronReceptorEmit =
+      docNro && docNro !== '0' ? await safePadron(cuitEmisor, docNro, modoHomologacion) : null;
+
+    const pdfBuffer = await generateAfipInvoicePdf({
+      emisor: {
+        cuit: cuitEmisor,
+        razonSocial:
+          body.razonSocial ||
+          afipResult.issuer?.razonSocial ||
+          emisor.razonSocial ||
+          padronEmisorEmit?.razonSocial ||
+          cuitEmisor,
+        domicilio:
+          body.domicilioEmisor ||
+          afipResult.issuer?.domicilio ||
+          emisor.domicilio ||
+          padronEmisorEmit?.domicilio ||
+          '',
+        condicionIva:
+          body.emisorCondicionIva ||
+          afipResult.issuer?.condicionIva ||
+          emisor.condicionIva ||
+          padronEmisorEmit?.condicionIva ||
+          'IVA Responsable Inscripto',
+        ingresosBrutos:
+          body.ingresosBrutos ||
+          afipResult.issuer?.ingresosBrutos ||
+          emisor.ingresosBrutos ||
+          cuitEmisor,
+        inicioActividades:
+          body.inicioActividades ||
+          afipResult.issuer?.inicioActividades ||
+          emisor.inicioActividades ||
+          ''
+      },
+      receptor: {
+        nombre:
+          body.receptorNombre ||
+          padronReceptorEmit?.razonSocial ||
+          service.building?.name ||
+          '',
+        domicilio:
+          body.receptorDomicilio ||
+          padronReceptorEmit?.domicilio ||
+          service.building?.address ||
+          '',
+        docTipo,
+        docNro,
+        taxCondition,
+        condicionIva:
+          body.receptorCondicionIva ||
+          taxConditionLabel(taxCondition) ||
+          padronReceptorEmit?.condicionIva ||
+          'Consumidor Final'
+      },
+      tipoComprobante: afipResult.tipoComprobante,
+      puntoVenta: afipResult.puntoVenta,
+      numeroComprobante: afipResult.numeroComprobante,
+      fecha: invoiceDate,
+      cae: afipResult.cae,
+      caeVto: caeVto || afipResult.fechaVencimiento,
+      items,
+      impNeto: amounts.impNeto,
+      impIVA: amounts.impIVA,
+      impTotal: amounts.impTotal,
+      concepto: afipPayload.concepto,
+      condicionVenta: body.condicionVenta || 'Contado',
+      fchServDesde: afipPayload.fchServDesde,
+      fchServHasta: afipPayload.fchServHasta,
+      fchVtoPago: afipPayload.fchVtoPago
+    });
+
+    const fileUrl = await uploadBuffer(pdfBuffer, {
+      filename: `FE-${cuitEmisor}-${invoiceNumber}-${Date.now()}.pdf`,
+      contentType: 'application/pdf',
+      folder: 'invoices'
+    });
+
+    const invoice = await prisma.invoice.create({
+      data: {
+        number: invoiceNumber,
+        amount: amounts.impTotal,
+        date: invoiceDate,
+        fileUrl,
+        status: 'EMITIDA',
+        paymentMethod: body.paymentMethod || 'CUENTA_CORRIENTE',
+        emissionSource: 'AFIP',
+        cae: afipResult.cae,
+        caeVto: caeVto,
+        puntoVenta: afipResult.puntoVenta,
+        tipoComprobante: afipResult.tipoComprobante,
+        cuitEmisor,
+        docTipo,
+        docNro,
+        impNeto: amounts.impNeto,
+        impIVA: amounts.impIVA,
+        impTotal: amounts.impTotal,
+        afipRaw: afipResult,
+        ...linkInvoiceToServicesData([id])
+      }
+    });
+
+    const updatedService = withServiceInvoices(
+      await prisma.service.update({
+        where: { id },
+        data: { status: 'FACTURADO' },
+        include: {
+          technician: true,
+          building: true,
+          ...serviceInvoicesInclude
+        }
+      })
+    );
+
+    if (service.buildingId) {
+      await recalculateBuildingBalance(service.buildingId);
+    }
+
+    res.status(200).json({
+      message: 'Factura electrónica emitida exitosamente',
+      service: updatedService,
+      invoice,
+      afip: {
+        cae: afipResult.cae,
+        fechaVencimiento: afipResult.fechaVencimiento,
+        numeroComprobante: afipResult.numeroComprobante,
+        puntoVenta: afipResult.puntoVenta,
+        tipoComprobante: afipResult.tipoComprobante
+      }
+    });
+  } catch (error) {
+    console.error('Error al emitir factura electrónica:', error);
+    const afipMessage = extractAfipErrorMessage(error);
+    const status = error.status && error.status >= 400 && error.status < 600 ? error.status : 502;
+    res.status(status).json({
+      message: afipMessage,
+      error: afipMessage,
+      details: error.details || undefined
+    });
+  }
+};
+
 module.exports = {
   getAllServices,
   getServiceById,
@@ -1691,6 +2291,8 @@ module.exports = {
   createInformalInvoiceMultiple,
   importInvoice,
   importInvoiceMultiple,
+  getElectronicInvoiceDefaults,
+  createElectronicInvoice,
   getTechnicians,
   getServiceCounts,
   getServiceStats,

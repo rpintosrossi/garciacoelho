@@ -41,6 +41,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EditIcon from '@mui/icons-material/Edit';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
+import ElectronicInvoiceModal from '@/components/ElectronicInvoiceModal';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 
@@ -198,6 +199,10 @@ export default function InvoicedServices() {
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [invoiceDate, setInvoiceDate] = useState<Date | null>(new Date());
   const [savingInvoice, setSavingInvoice] = useState(false);
+
+  // Facturación electrónica AFIP
+  const [openElectronicInvoice, setOpenElectronicInvoice] = useState(false);
+  const [electronicInvoiceService, setElectronicInvoiceService] = useState<Service | null>(null);
 
   // Estados para subir remito (corrección/adición)
   const [openUploadRemito, setOpenUploadRemito] = useState(false);
@@ -1027,19 +1032,10 @@ export default function InvoicedServices() {
                       </Button>
                       <Button
                         variant="outlined"
-                        color="default"
-                        disabled
-                        sx={{ 
-                          color: 'text.disabled',
-                          borderColor: 'text.disabled',
-                          '&:hover': {
-                            borderColor: 'text.disabled',
-                            backgroundColor: 'transparent'
-                          }
-                        }}
+                        color="warning"
                         onClick={() => {
-                          // TODO: Implementar funcionalidad de facturación electrónica
-                          console.log('🔍 [FRONTEND] Botón "Facturación Electrónica" clickeado para servicio:', service.id);
+                          setElectronicInvoiceService(service);
+                          setOpenElectronicInvoice(true);
                         }}
                       >
                         Facturación Electrónica
@@ -1401,6 +1397,21 @@ export default function InvoicedServices() {
         </DialogActions>
       </Dialog>
       
+      <ElectronicInvoiceModal
+        open={openElectronicInvoice}
+        service={electronicInvoiceService}
+        onClose={() => {
+          setOpenElectronicInvoice(false);
+          setElectronicInvoiceService(null);
+        }}
+        onSuccess={() => {
+          cachedApi.clearCacheFor('/services');
+          fetchServices();
+          localStorage.setItem('servicesLastUpdate', Date.now().toString());
+          localStorage.setItem('servicesUpdateType', 'service_invoiced');
+        }}
+      />
+
       {/* Modal para importar factura */}
       <Dialog open={openImportInvoice} onClose={handleCloseImportInvoice} fullWidth maxWidth="sm">
         <DialogTitle>Importar Factura</DialogTitle>

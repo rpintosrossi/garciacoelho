@@ -15,6 +15,8 @@ const {
   createInformalInvoiceMultiple,
   importInvoice,
   importInvoiceMultiple,
+  getElectronicInvoiceDefaults,
+  createElectronicInvoice,
   getTechnicians,
   getServiceCounts,
   getServiceStats,
@@ -119,5 +121,17 @@ router.post('/:id/import-invoice', (req, res, next) => {
   console.log('[ROUTE] Archivo recibido:', req.file);
   next();
 }, importInvoice);
+
+// Facturación electrónica AFIP
+router.get(
+  '/:id/electronic-invoice/defaults',
+  roleMiddleware(['ADMIN', 'OPERADOR']),
+  getElectronicInvoiceDefaults
+);
+router.post(
+  '/:id/electronic-invoice',
+  roleMiddleware(['ADMIN', 'OPERADOR']),
+  createElectronicInvoice
+);
 
 module.exports = router; 
