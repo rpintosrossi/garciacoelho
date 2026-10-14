@@ -32,6 +32,7 @@ import { useServiceCounts } from '@/hooks/useServiceCounts';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 import WorkshopRepairModal from '@/components/WorkshopRepairModal';
+import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
 
 interface Service {
   id: string;
@@ -83,6 +84,7 @@ export default function ServicesWithReceipt() {
   const [remitoModalOpen, setRemitoModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [remitoNumber, setRemitoNumber] = useState('');
+  const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
   const [remitoDescription, setRemitoDescription] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
@@ -167,6 +169,16 @@ export default function ServicesWithReceipt() {
       return;
     }
 
+    if (remitoNumber.trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(remitoNumber);
+        if (!canContinue) return;
+      } catch {
+        alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
+
     setUploadingId(selectedService.id);
     setError('');
     
@@ -240,6 +252,7 @@ export default function ServicesWithReceipt() {
     setRemitoDescription('');
     setSelectedFiles([]);
     setError('');
+    resetConfirmation();
   };
 
   const handleReassign = (service: Service) => {
@@ -470,7 +483,19 @@ export default function ServicesWithReceipt() {
             <TextField
               label="Número de Remito (opcional)"
               value={remitoNumber}
-              onChange={(e) => setRemitoNumber(e.target.value)}
+              onChange={(e) => {
+                resetConfirmation();
+                setRemitoNumber(e.target.value);
+              }}
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (!value) return;
+                try {
+                  await confirmIfDuplicate(value);
+                } catch {
+                  alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+                }
+              }}
               fullWidth
               placeholder="Ej: REM-2024-001 o A12345 (se generará automáticamente si no ingresas uno)"
               helperText="Ingresa el número de remito o déjalo vacío para generar uno automáticamente"
@@ -568,6 +593,7 @@ export default function ServicesWithReceipt() {
         service={selectedServiceForRepair}
         onSuccess={handleWorkshopRepairSuccess}
       />
+      {remitoDuplicateDialog}
     </Box>
   );
 } 

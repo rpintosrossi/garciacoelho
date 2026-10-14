@@ -18,6 +18,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { History as HistoryIcon, Upload as UploadIcon } from '@mui/icons-material';
 import api from '@/lib/axios';
+import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
 
 interface Building {
   id: string;
@@ -49,6 +50,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
   
   const [formData, setFormData] = useState({
     buildingId: '',
@@ -111,6 +113,16 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
       return;
     }
 
+    if (formData.remitoNumber.trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(formData.remitoNumber);
+        if (!canContinue) return;
+      } catch {
+        setError('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
+
     setLoading(true);
     setError('');
 
@@ -169,11 +181,13 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
         remitoFiles: []
       });
       setError('');
+      resetConfirmation();
       onClose();
     }
   };
 
   return (
+    <>
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={1}>
@@ -284,7 +298,19 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
           <TextField
             label="Número de Remito (Opcional)"
             value={formData.remitoNumber}
-            onChange={(e) => setFormData({ ...formData, remitoNumber: e.target.value })}
+            onChange={(e) => {
+              resetConfirmation();
+              setFormData({ ...formData, remitoNumber: e.target.value });
+            }}
+            onBlur={async (e) => {
+              const value = e.target.value.trim();
+              if (!value) return;
+              try {
+                await confirmIfDuplicate(value);
+              } catch {
+                setError('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+              }
+            }}
             placeholder="Si no se especifica, se usará el nombre del archivo"
             fullWidth
             disabled={loading}
@@ -336,5 +362,7 @@ export default function QuickPastServiceModal({ open, onClose, onSuccess }: Quic
         </Button>
       </DialogActions>
     </Dialog>
+    {remitoDuplicateDialog}
+    </>
   );
 }

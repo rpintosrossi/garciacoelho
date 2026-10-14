@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import api from '@/lib/axios';
 import { cachedApi } from '@/lib/axios';
+import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
 
 interface Building {
   id: string;
@@ -34,6 +35,7 @@ export default function ReceiptPage() {
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [remitoNumber, setRemitoNumber] = useState('');
+  const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -96,6 +98,16 @@ export default function ReceiptPage() {
       return;
     }
     
+    if (remitoNumber.trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(remitoNumber);
+        if (!canContinue) return;
+      } catch {
+        alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
+
     setSaving(true);
     setError('');
     try {
@@ -172,7 +184,19 @@ export default function ReceiptPage() {
         <TextField
           label="Número de Remito (opcional)"
           value={remitoNumber}
-          onChange={(e) => setRemitoNumber(e.target.value)}
+          onChange={(e) => {
+            resetConfirmation();
+            setRemitoNumber(e.target.value);
+          }}
+          onBlur={async (e) => {
+            const value = e.target.value.trim();
+            if (!value) return;
+            try {
+              await confirmIfDuplicate(value);
+            } catch {
+              alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+            }
+          }}
           fullWidth
           placeholder="Ej: REM-2024-001 o A12345 (se generará automáticamente si no ingresas uno)"
           helperText="Ingresa el número de remito o déjalo vacío para generar uno automáticamente"
@@ -215,6 +239,7 @@ export default function ReceiptPage() {
           Guardar Remito
         </Button>
       </Box>
+      {remitoDuplicateDialog}
     </Box>
   );
 } 

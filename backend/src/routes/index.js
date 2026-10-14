@@ -23,6 +23,7 @@ const workshopRepairRoutes = require('./workshopRepairs');
 const serviceTypeRoutes = require('./serviceTypeRoutes');
 const noChargeReasonRoutes = require('./noChargeReasonRoutes');
 const afipRoutes = require('./afipRoutes');
+const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -52,6 +53,12 @@ router.get('/payments', paymentController.getPayments);
 router.get('/payments/buildings', paymentController.getBuildingPayments);
 router.get('/payments/administrators', paymentController.getAdministratorPayments);
 router.patch('/payments/:id/comment', paymentController.updatePaymentComment);
+router.get(
+  '/remitos/check',
+  authMiddleware,
+  roleMiddleware(['ADMIN', 'OPERADOR', 'TECNICO']),
+  remitoController.checkRemitoNumber
+);
 router.post('/remitos', remitoController.createRemito);
 router.patch('/remitos/:id', upload.array('receipts'), remitoController.updateRemitoDate);
 

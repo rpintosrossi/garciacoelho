@@ -44,6 +44,7 @@ import FileViewer from '@/components/FileViewer';
 import ElectronicInvoiceModal from '@/components/ElectronicInvoiceModal';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
+import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
 
 interface Service {
   id: string;
@@ -218,6 +219,7 @@ export default function InvoicedServices() {
   const [editRemitoNumber, setEditRemitoNumber] = useState('');
   const [editRemitoFiles, setEditRemitoFiles] = useState<File[]>([]);
   const [savingRemitoNumber, setSavingRemitoNumber] = useState(false);
+  const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
 
   // Estados para selección múltiple
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -553,6 +555,15 @@ export default function InvoicedServices() {
     if (!editRemito?.id) return;
     const trimmedNumber = editRemitoNumber.trim();
     if (!trimmedNumber && editRemitoFiles.length === 0) return;
+    if (trimmedNumber && trimmedNumber !== String(editRemito.number || '').trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(trimmedNumber, { excludeRemitoId: editRemito.id });
+        if (!canContinue) return;
+      } catch {
+        alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
     setSavingRemitoNumber(true);
     try {
       if (editRemitoFiles.length > 0) {
@@ -591,6 +602,16 @@ export default function InvoicedServices() {
   const handleUploadRemitoSubmit = async () => {
     if (!uploadRemitoService || uploadRemitoFiles.length === 0) return;
     
+    if (uploadRemitoNumber.trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(uploadRemitoNumber);
+        if (!canContinue) return;
+      } catch {
+        alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
+
     setIsUploadingRemito(true);
     setError(null);
     
@@ -1277,7 +1298,19 @@ export default function InvoicedServices() {
             <TextField
               label="Número de remito"
               value={editRemitoNumber}
-              onChange={(e) => setEditRemitoNumber(e.target.value)}
+              onChange={(e) => {
+                resetConfirmation();
+                setEditRemitoNumber(e.target.value);
+              }}
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (!value || value === String(editRemito?.number || '').trim()) return;
+                try {
+                  await confirmIfDuplicate(value, { excludeRemitoId: editRemito?.id });
+                } catch {
+                  alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+                }
+              }}
               fullWidth
               autoFocus
             />
@@ -1350,7 +1383,19 @@ export default function InvoicedServices() {
             <TextField
               label="Número de Remito (opcional)"
               value={uploadRemitoNumber}
-              onChange={(e) => setUploadRemitoNumber(e.target.value)}
+              onChange={(e) => {
+                resetConfirmation();
+                setUploadRemitoNumber(e.target.value);
+              }}
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (!value) return;
+                try {
+                  await confirmIfDuplicate(value);
+                } catch {
+                  alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+                }
+              }}
               fullWidth
               placeholder="Ej: REM-2024-001 (dejar vacío para auto-generar uno nuevo si no existe)"
             />
@@ -1581,6 +1626,7 @@ export default function InvoicedServices() {
           </Button>
         </DialogActions>
       </Dialog>
+      {remitoDuplicateDialog}
     </Box>
   );
 } 

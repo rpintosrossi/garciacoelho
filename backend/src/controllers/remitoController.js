@@ -153,4 +153,54 @@ const updateRemitoDate = async (req, res) => {
   }
 };
 
-module.exports = { createRemito, updateRemitoDate };
+// Buscar si un número de remito ya fue cargado y a qué servicio pertenece
+const checkRemitoNumber = async (req, res) => {
+  try {
+    const number = String(req.query.number || '').trim();
+    const excludeId = req.query.excludeId ? String(req.query.excludeId).trim() : '';
+
+    if (!number) {
+      return res.json({ exists: false, total: 0, matches: [] });
+    }
+
+    const where = {
+      number: { equals: number, mode: 'insensitive' }
+    };
+    if (excludeId) {
+      where.id = { not: excludeId };
+    }
+
+    const [remitos, total] = await Promise.all([
+      prisma.remito.findMany({
+        where,
+        take: 10,
+        orderBy: { date: 'desc' },
+        include: {
+          service: {
+            select: {
+              id: true,
+              visitDate: true,
+              building: { select: { name: true } }
+            }
+          }
+        }
+      }),
+      prisma.remito.count({ where })
+    ]);
+
+    const matches = remitos.map((remito) => ({
+      remitoId: remito.id,
+      number: remito.number,
+      date: remito.service?.visitDate || remito.date,
+      buildingName: remito.service?.building?.name || 'Sin edificio',
+      serviceId: remito.service?.id || null
+    }));
+
+    res.json({ exists: total > 0, total, matches });
+  } catch (error) {
+    console.error('Error al verificar número de remito:', error);
+    res.status(500).json({ message: 'Error al verificar el número de remito' });
+  }
+};
+
+module.exports = { createRemito, updateRemitoDate, checkRemitoNumber };

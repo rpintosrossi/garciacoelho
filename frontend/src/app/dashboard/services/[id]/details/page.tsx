@@ -23,6 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import EditIcon from '@mui/icons-material/Edit';
 import FileViewer from '@/components/FileViewer';
 import api, { cachedApi } from '@/lib/axios';
+import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
 
 export default function ServiceDetailsPage() {
   const router = useRouter();
@@ -39,6 +40,7 @@ export default function ServiceDetailsPage() {
   const [uploadRemitoDescription, setUploadRemitoDescription] = useState('');
   const [uploadRemitoFiles, setUploadRemitoFiles] = useState<File[]>([]);
   const [isUploadingRemito, setIsUploadingRemito] = useState(false);
+  const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
 
   // Estados para editar factura
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
@@ -91,6 +93,16 @@ export default function ServiceDetailsPage() {
 
   const handleUploadRemitoSubmit = async () => {
     if (!service || uploadRemitoFiles.length === 0) return;
+
+    if (uploadRemitoNumber.trim()) {
+      try {
+        const canContinue = await confirmIfDuplicate(uploadRemitoNumber);
+        if (!canContinue) return;
+      } catch {
+        alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+        return;
+      }
+    }
     
     setIsUploadingRemito(true);
     
@@ -309,7 +321,19 @@ export default function ServiceDetailsPage() {
             <TextField
               label="Número de Remito (opcional)"
               value={uploadRemitoNumber}
-              onChange={(e) => setUploadRemitoNumber(e.target.value)}
+              onChange={(e) => {
+                resetConfirmation();
+                setUploadRemitoNumber(e.target.value);
+              }}
+              onBlur={async (e) => {
+                const value = e.target.value.trim();
+                if (!value) return;
+                try {
+                  await confirmIfDuplicate(value);
+                } catch {
+                  alert('No se pudo verificar si el remito ya existe. Intentá de nuevo.');
+                }
+              }}
               fullWidth
               placeholder="Ej: REM-2024-001 (dejar vacío para auto-generar uno nuevo si no existe)"
             />
@@ -397,6 +421,7 @@ export default function ServiceDetailsPage() {
             </Button>
         </DialogActions>
       </Dialog>
+      {remitoDuplicateDialog}
     </Box>
   );
 } 
