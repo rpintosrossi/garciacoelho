@@ -130,6 +130,7 @@ model Invoice {
   paymentDocuments PaymentDocument[]
 
   @@index([createdAt])
+  @@index([date])
   @@index([paymentMethod])
   @@index([paymentMethod, status], map: "Invoice_payment_status_idx")
   @@index([status])

@@ -30,6 +30,7 @@ import {
   AccountCircle as AccountCircleIcon,
   Settings as SettingsIcon,
   Assessment as AssessmentIcon,
+  ReceiptLong as ReceiptLongIcon,
   Inventory as InventoryIcon,
   LocationOn as LocationOnIcon,
   Payment as PaymentIcon,
@@ -179,6 +180,11 @@ export default function DashboardLayout({
       text: 'Motivos Sin Cobro',
       icon: <AssessmentIcon sx={{ color: '#10b981' }} />,
       path: '/dashboard/reports/no-charge-stats',
+    },
+    {
+      text: 'Facturación',
+      icon: <ReceiptLongIcon sx={{ color: '#2563eb' }} />,
+      path: '/dashboard/reports/billing',
     },
   ];
 

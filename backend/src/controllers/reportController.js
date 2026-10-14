@@ -599,9 +599,197 @@ const getNoChargeStats = async (req, res) => {
   }
 };
 
+const BILLING_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BILLING_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const BILLING_SOURCES = {
+  AFIP: 'afip',
+  IMPORT: 'importadas',
+  INFORMAL: 'informales'
+};
+
+function billingTodayYmd() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+function shiftBillingMonth(ymd, delta) {
+  const [year, month] = ymd.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}-01`;
+}
+
+function utcDayStart(ymd) {
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+}
+
+function utcDayEndExclusive(ymd) {
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0, 0));
+}
+
+function monthKeysBetween(startYmd, endYmd) {
+  const [startYear, startMonth] = startYmd.split('-').map(Number);
+  const [endYear, endMonth] = endYmd.split('-').map(Number);
+  const keys = [];
+  let year = startYear;
+  let month = startMonth;
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    keys.push(`${year}-${String(month).padStart(2, '0')}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return keys;
+}
+
+function emptyBillingMonth(monthKey) {
+  const [year, month] = monthKey.split('-');
+  return {
+    monthKey,
+    mes: `${BILLING_MONTHS[Number(month) - 1]} ${year}`,
+    total: 0,
+    count: 0,
+    afip: 0,
+    importadas: 0,
+    informales: 0
+  };
+}
+
+function roundMoney(value) {
+  const numeric = value != null && typeof value === 'object' && typeof value.toNumber === 'function'
+    ? value.toNumber()
+    : Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+
+// Facturación agrupada por mes, con filtro opcional de fechas
+const getBillingStats = async (req, res) => {
+  try {
+    const today = billingTodayYmd();
+    const startDate = req.query.startDate || shiftBillingMonth(today, -11);
+    const endDate = req.query.endDate || today;
+
+    if (!BILLING_DATE_RE.test(startDate) || !BILLING_DATE_RE.test(endDate)) {
+      return res.status(400).json({ message: 'Las fechas deben tener formato AAAA-MM-DD' });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ message: 'La fecha desde no puede ser posterior a la fecha hasta' });
+    }
+
+    const keys = monthKeysBetween(startDate, endDate);
+    if (keys.length > 120) {
+      return res.status(400).json({ message: 'El rango máximo es de 10 años' });
+    }
+
+    const rangeStart = utcDayStart(startDate);
+    const rangeEnd = utcDayEndExclusive(endDate);
+
+    // Dos rangos indexables (date y createdAt). COALESCE en el WHERE no puede usar índice.
+    const rows = await prisma.$queryRaw`
+      SELECT
+        month_key,
+        source,
+        status,
+        SUM(cantidad)::int AS cantidad,
+        SUM(total) AS total
+      FROM (
+        SELECT
+          TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key,
+          "emissionSource"::text AS source,
+          status::text AS status,
+          COUNT(*)::int AS cantidad,
+          COALESCE(SUM(COALESCE("impTotal", amount)), 0) AS total
+        FROM "Invoice"
+        WHERE date >= ${rangeStart}
+          AND date < ${rangeEnd}
+        GROUP BY 1, 2, 3
+
+        UNION ALL
+
+        SELECT
+          TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key,
+          "emissionSource"::text AS source,
+          status::text AS status,
+          COUNT(*)::int AS cantidad,
+          COALESCE(SUM(COALESCE("impTotal", amount)), 0) AS total
+        FROM "Invoice"
+        WHERE date IS NULL
+          AND "createdAt" >= ${rangeStart}
+          AND "createdAt" < ${rangeEnd}
+        GROUP BY 1, 2, 3
+      ) billed
+      GROUP BY month_key, source, status
+    `;
+
+    const byMonth = new Map(keys.map((key) => [key, emptyBillingMonth(key)]));
+    const bySource = {
+      AFIP: { total: 0, count: 0 },
+      IMPORT: { total: 0, count: 0 },
+      INFORMAL: { total: 0, count: 0 }
+    };
+    const byStatus = {
+      PENDIENTE: { total: 0, count: 0 },
+      EMITIDA: { total: 0, count: 0 },
+      PAGADA: { total: 0, count: 0 }
+    };
+
+    let total = 0;
+    let count = 0;
+
+    for (const row of rows) {
+      const amount = roundMoney(row.total);
+      const qty = Number(row.cantidad) || 0;
+      total += amount;
+      count += qty;
+
+      const month = byMonth.get(row.month_key);
+      if (month) {
+        month.total = roundMoney(month.total + amount);
+        month.count += qty;
+        const field = BILLING_SOURCES[row.source];
+        if (field) month[field] = roundMoney(month[field] + amount);
+      }
+
+      if (bySource[row.source]) {
+        bySource[row.source].total = roundMoney(bySource[row.source].total + amount);
+        bySource[row.source].count += qty;
+      }
+      if (byStatus[row.status]) {
+        byStatus[row.status].total = roundMoney(byStatus[row.status].total + amount);
+        byStatus[row.status].count += qty;
+      }
+    }
+
+    const monthly = keys.map((key) => byMonth.get(key));
+    const monthCount = monthly.length || 1;
+
+    res.json({
+      range: { startDate, endDate },
+      summary: {
+        total: roundMoney(total),
+        count,
+        averagePerInvoice: count > 0 ? roundMoney(total / count) : 0,
+        averagePerMonth: roundMoney(total / monthCount),
+        bySource,
+        byStatus
+      },
+      monthly
+    });
+  } catch (error) {
+    console.error('Error al obtener estadísticas de facturación:', error);
+    res.status(500).json({ message: 'Error al obtener estadísticas de facturación' });
+  }
+};
+
 module.exports = {
   getAdminDebtReport,
   getBuildingDebtReport,
   getAdminDebtPDF,
-  getNoChargeStats
+  getNoChargeStats,
+  getBillingStats
 }; 
