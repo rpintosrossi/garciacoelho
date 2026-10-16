@@ -88,7 +88,7 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
   const itemRows = items
     .map((item) => {
       const qty = Number(item.quantity ?? 1);
-      const unitPrice = Number(item.unitPrice ?? item.subtotal ?? data.impTotal);
+      const unitPrice = Number(item.unitPrice ?? item.subtotal ?? 0);
       const subtotal = Number(item.subtotal ?? unitPrice * qty);
       return `<tr>
       <td class="c-code">${esc(item.code || '')}</td>
@@ -103,7 +103,6 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
     })
     .join('');
 
-  // Filas vacías para que las líneas verticales bajen como en ARCA
   const emptyRows = Array.from({ length: Math.max(0, 12 - items.length) })
     .map(
       () => `<tr class="empty">
@@ -142,7 +141,6 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
     position: relative;
   }
 
-  /* ORIGINAL sobre el borde superior (como ARCA) */
   .original {
     position: absolute;
     top: 0;
@@ -163,12 +161,18 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
     grid-template-columns: 1fr 16mm 1fr;
     border-bottom: 1.1px solid #000;
     margin-top: 3.5mm;
-    min-height: 38mm;
+    min-height: 42mm;
   }
   .header-left, .header-right {
     padding: 3mm 3.2mm 2.5mm 3.2mm;
   }
-  .header-left { border-right: 1.1px solid #000; }
+  .header-left {
+    border-right: 1.1px solid #000;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    min-height: 100%;
+  }
   .header-right { border-left: 1.1px solid #000; }
 
   .letter-box {
@@ -197,11 +201,24 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
   }
 
   .trade-name {
-    font-size: 12.5px;
+    font-size: 14px;
     font-weight: 700;
     text-transform: uppercase;
-    margin-bottom: 2mm;
-    line-height: 1.15;
+    text-align: center;
+    line-height: 1.2;
+    margin: 0 0 3.5mm 0;
+  }
+  .emisor-details {
+    margin-top: 0;
+    padding-top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2.8mm;
+  }
+  .emisor-details .line {
+    margin: 0;
+    line-height: 1.4;
+    font-size: 11px;
   }
   .factura-title {
     font-size: 18px;
@@ -211,28 +228,32 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
     margin: 0 0 2.5mm 0;
   }
   .line {
-    margin: 0.7mm 0;
-    line-height: 1.28;
-    font-size: 9.5px;
+    margin: 0.85mm 0;
+    line-height: 1.35;
+    font-size: 11px;
+  }
+  .header-right .line {
+    font-size: 11px;
   }
   .lbl { font-weight: 700; }
 
   .period {
     border-bottom: 1.1px solid #000;
     padding: 1.8mm 3.2mm;
-    font-size: 9px;
+    font-size: 10px;
   }
   .period .lbl { margin-right: 1mm; }
   .period .gap { display: inline-block; width: 6mm; }
 
   .receptor {
     border-bottom: 1.1px solid #000;
-    padding: 2.2mm 3.2mm 2.5mm 3.2mm;
+    padding: 2.4mm 3.2mm 2.8mm 3.2mm;
     display: grid;
     grid-template-columns: 1.15fr 0.85fr;
     column-gap: 4mm;
-    row-gap: 1.1mm;
-    font-size: 9.5px;
+    row-gap: 1.4mm;
+    font-size: 11.5px;
+    line-height: 1.35;
   }
   .receptor .full { grid-column: 1 / -1; }
 
@@ -248,26 +269,24 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
     border-collapse: collapse;
     table-layout: fixed;
     height: 100%;
-    font-size: 9px;
+    font-size: 9.5px;
   }
   table.items thead th {
     background: #cfcfcf;
     border-bottom: 1.1px solid #000;
-    border-right: 1.1px solid #000;
+    border-right: none;
     padding: 1.5mm 1mm;
     font-size: 7.6px;
     font-weight: 700;
     text-align: center;
     vertical-align: middle;
   }
-  table.items thead th:last-child { border-right: none; }
   table.items tbody td {
-    border-right: 1.1px solid #000;
+    border-right: none;
     padding: 1.4mm 1.2mm;
     vertical-align: top;
     height: 1px;
   }
-  table.items tbody td:last-child { border-right: none; }
   table.items tbody tr.empty td {
     border-bottom: none;
     height: auto;
@@ -366,11 +385,13 @@ function buildFacturaAfipHtml(data, qrDataUrl) {
       <div class="header">
         <div class="header-left">
           <div class="trade-name">${esc(emisorName)}</div>
-          <div class="line"><span class="lbl">Razón Social:</span> ${esc(emisorName)}</div>
-          <div class="line"><span class="lbl">Domicilio Comercial:</span> ${esc(data.emisor.domicilio || '-')}</div>
-          <div class="line"><span class="lbl">Condición frente al IVA:</span> ${esc(
-            data.emisor.condicionIva || 'IVA Responsable Inscripto'
-          )}</div>
+          <div class="emisor-details">
+            <div class="line"><span class="lbl">Razón Social:</span> ${esc(emisorName)}</div>
+            <div class="line"><span class="lbl">Domicilio Comercial:</span> ${esc(data.emisor.domicilio || '-')}</div>
+            <div class="line"><span class="lbl">Condición frente al IVA:</span> ${esc(
+              data.emisor.condicionIva || 'IVA Responsable Inscripto'
+            )}</div>
+          </div>
         </div>
         <div class="letter-box">
           <div class="letter">${esc(letter)}</div>

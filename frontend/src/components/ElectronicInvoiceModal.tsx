@@ -199,7 +199,6 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
   const [docTipo, setDocTipo] = useState(99);
   const [docNro, setDocNro] = useState('0');
   const [taxCondition, setTaxCondition] = useState('CONSUMIDOR_FINAL');
-  const [puntoVenta, setPuntoVenta] = useState(1);
   const [concepto, setConcepto] = useState(2);
   const [fchServicio, setFchServicio] = useState('');
   const [condicionVenta, setCondicionVenta] = useState('Contado');
@@ -209,6 +208,8 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
     () => facturadores.find((f) => f.cuit === cuitEmisor) || null,
     [facturadores, cuitEmisor]
   );
+
+  const puntoVenta = Number(selectedFacturador?.puntoVenta || 0);
 
   const tipoComprobante = useMemo(
     () => mapTipoComprobante(selectedFacturador?.condicionIva, taxCondition),
@@ -252,7 +253,6 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
     setDocTipo(Number(data.receptor?.docTipo ?? 99));
     setDocNro(String(data.receptor?.docNro ?? '0'));
     setTaxCondition(data.receptor?.taxCondition || 'CONSUMIDOR_FINAL');
-    setPuntoVenta(Number(data.comprobante?.puntoVenta || data.emisor?.puntoVenta || 1));
     setConcepto(Number(data.comprobante?.concepto || 2));
     setFchServicio(data.comprobante?.fchServicio || '');
     setCondicionVenta(data.comprobante?.condicionVenta || 'Contado');
@@ -262,16 +262,24 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
       if (Array.isArray(defaultItems) && defaultItems.length > 0) {
         setItems(
           defaultItems.map((it: any) =>
-            newLine(it.description || service?.description || '', String(it.unitPrice ?? it.subtotal ?? ''))
+            newLine(
+              it.description || service?.description || '',
+              String(it.unitPrice ?? it.subtotal ?? 0)
+            )
           )
         );
       } else {
-        setItems([
-          newLine(
-            service?.description || data.service?.description || 'Servicio',
-            String(data.comprobante?.impTotal ?? '')
+        const raw = service?.description || data.service?.description || 'Servicio';
+        const lines = String(raw)
+          .split(/\r?\n|\s*\|\s*/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const total = Number(data.comprobante?.impTotal ?? 0);
+        setItems(
+          (lines.length ? lines : ['Servicio']).map((desc, index) =>
+            newLine(desc, String(index === 0 ? total : 0))
           )
-        ]);
+        );
       }
     }
   };
@@ -305,8 +313,6 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
 
   const handleFacturadorChange = (cuit: string) => {
     setCuitEmisor(cuit);
-    const f = facturadores.find((x) => x.cuit === cuit);
-    if (f?.puntoVenta != null) setPuntoVenta(Number(f.puntoVenta));
   };
 
   const updateItem = (key: string, patch: Partial<LineItem>) => {
@@ -332,9 +338,15 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
       scrollToAlerts();
       return;
     }
-    const validItems = parsedItems.filter((i) => i.description.trim() && i.subtotal > 0);
+    // Incluir ítems con valor 0 (se muestran en la factura para detallar el trabajo).
+    const validItems = parsedItems.filter((i) => i.description.trim());
     if (!validItems.length) {
-      setError('Agregá al menos un detalle con descripción e importe');
+      setError('Agregá al menos un detalle con descripción');
+      scrollToAlerts();
+      return;
+    }
+    if (impTotal <= 0) {
+      setError('El total de la factura debe ser mayor a 0');
       scrollToAlerts();
       return;
     }
@@ -367,7 +379,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
         inicioActividades: selectedFacturador?.inicioActividades,
         items: validItems.map((i) => ({
           description: i.description.trim(),
-          quantity: i.quantity,
+          quantity: i.quantity || 1,
           unit: 'unidades',
           unitPrice: i.unitPrice,
           subtotal: i.subtotal
@@ -626,10 +638,10 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
                 <Grid component="div" item xs={12} md={4}>
                   <TextField
                     label="Punto de venta"
-                    type="number"
-                    value={puntoVenta}
-                    onChange={(e) => setPuntoVenta(Number(e.target.value))}
+                    value={puntoVenta ? String(puntoVenta).padStart(5, '0') : '—'}
                     fullWidth
+                    InputProps={{ readOnly: true }}
+                    helperText="Lo define AFIP para este facturador (webservice)"
                   />
                 </Grid>
                 <Grid component="div" item xs={12} md={4}>
@@ -667,7 +679,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
 
             <Section
               title="4. Detalle a cobrar"
-              subtitle="Podés agregar varios ítems; el total e IVA se calculan solos"
+              subtitle="Cada ítem del remito va en una fila. Los de valor 0 también se incluyen en la factura"
             >
               <Stack spacing={1.5}>
                 {items.map((item, index) => {
@@ -758,7 +770,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
                 {receptorNombre || 'Receptor'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                PV {String(puntoVenta).padStart(5, '0')} — Doc {docTipo} {docNro} — {parsedItems.length} ítem(s)
+                PV {puntoVenta ? String(puntoVenta).padStart(5, '0') : '—'} — Doc {docTipo} {docNro} — {parsedItems.length} ítem(s)
               </Typography>
               <Box mt={1}>
                 {parsedItems
@@ -766,6 +778,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
                   .map((i) => (
                     <Typography key={i.key} variant="body2">
                       • {i.description} — ${money(i.subtotal)}
+                      {i.subtotal === 0 ? ' (sin cargo)' : ''}
                     </Typography>
                   ))}
               </Box>

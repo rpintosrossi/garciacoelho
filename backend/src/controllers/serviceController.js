@@ -1877,6 +1877,32 @@ const getElectronicInvoiceDefaults = async (req, res) => {
     const tipoComprobante = mapTipoComprobante(emisorCondicion, taxCondition);
     const amounts = splitAmounts({ amount, tipocomprobante: tipoComprobante });
 
+    // Desglosar descripción del servicio/remito en ítems (una línea = un ítem).
+    // El importe del remito va en el primer ítem; el resto quedan en 0 para mostrar el trabajo.
+    const remitoLines = String(service.description || service.name || 'Servicio')
+      .split(/\r?\n|\s*\|\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const defaultItems =
+      remitoLines.length > 0
+        ? remitoLines.map((description, index) => {
+            const unitPrice = index === 0 ? amounts.impTotal : 0;
+            return {
+              quantity: 1,
+              description,
+              unitPrice,
+              subtotal: unitPrice
+            };
+          })
+        : [
+            {
+              quantity: 1,
+              description: 'Servicio',
+              unitPrice: amounts.impTotal,
+              subtotal: amounts.impTotal
+            }
+          ];
+
     const emisor = selectedIssuer
       ? {
           cuit: selectedIssuer.cuit,
@@ -1963,14 +1989,7 @@ const getElectronicInvoiceDefaults = async (req, res) => {
         fchVtoPago: today,
         condicionVenta: 'Cuenta Corriente',
         ...amounts,
-        items: [
-          {
-            quantity: 1,
-            description: service.description || service.name || 'Servicio',
-            unitPrice: amounts.impTotal,
-            subtotal: amounts.impTotal
-          }
-        ]
+        items: defaultItems
       },
       service: {
         id: service.id,
@@ -2060,7 +2079,7 @@ const createElectronicInvoice = async (req, res) => {
       body.emisorCondicionIva || emisor.condicionIva,
       taxCondition
     );
-    const puntoVenta = Number(body.puntoVenta || emisor.puntoVenta || 1);
+    const puntoVenta = Number(emisor.puntoVenta || 1);
     const amount = Number(body.impTotal != null ? body.impTotal : body.amount || service.remitos?.[0]?.amount || 0);
     if (!amount || amount <= 0) {
       return res.status(400).json({ message: 'El importe total debe ser mayor a 0' });
@@ -2121,7 +2140,7 @@ const createElectronicInvoice = async (req, res) => {
     const invoiceDate = parseAfipDate(fchServicio) || new Date();
     const caeVto = parseAfipDate(afipResult.fechaVencimiento);
 
-    const items =
+    const rawItems =
       Array.isArray(body.items) && body.items.length > 0
         ? body.items
         : [
@@ -2132,6 +2151,26 @@ const createElectronicInvoice = async (req, res) => {
               subtotal: amounts.impTotal
             }
           ];
+    // Una línea de descripción = un ítem de factura (incluye valor 0).
+    const items = rawItems.flatMap((it) => {
+      const lines = String(it.description || '')
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const descriptions = lines.length ? lines : [String(it.description || 'Servicio').trim() || 'Servicio'];
+      return descriptions.map((description, index) => {
+        const quantity = Number(it.quantity ?? 1) || 1;
+        const unitPrice = index === 0 ? Number(it.unitPrice ?? it.subtotal ?? 0) : 0;
+        const subtotal = index === 0 ? Number(it.subtotal ?? unitPrice * quantity) : 0;
+        return {
+          quantity,
+          description,
+          unit: it.unit || 'unidades',
+          unitPrice,
+          subtotal
+        };
+      });
+    });
 
     const padronEmisorEmit = await safePadron(cuitEmisor, cuitEmisor, modoHomologacion);
     const padronReceptorEmit =
