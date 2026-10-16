@@ -82,6 +82,8 @@ type LineItem = {
 type Props = {
   open: boolean;
   service: ServiceLike | null;
+  /** Si hay varios remitos/servicios del mismo edificio, se emite una sola FE. */
+  services?: ServiceLike[] | null;
   onClose: () => void;
   onSuccess: () => void;
 };
@@ -180,13 +182,28 @@ function Section({
   );
 }
 
-export default function ElectronicInvoiceModal({ open, service, onClose, onSuccess }: Props) {
+export default function ElectronicInvoiceModal({
+  open,
+  service,
+  services,
+  onClose,
+  onSuccess
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [successAnim, setSuccessAnim] = useState(false);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
+
+  const serviceList = useMemo(() => {
+    if (Array.isArray(services) && services.length > 0) return services.filter((s) => s?.id);
+    return service?.id ? [service] : [];
+  }, [services, service]);
+
+  const primaryService = serviceList[0] || null;
+  const serviceIds = useMemo(() => serviceList.map((s) => s.id), [serviceList]);
+  const isBulk = serviceIds.length > 1;
 
   const [facturadores, setFacturadores] = useState<Facturador[]>([]);
   const [cuitEmisor, setCuitEmisor] = useState('');
@@ -248,8 +265,15 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
     setFacturadores(list);
     const initialCuit = data.emisor?.cuit || list[0]?.cuit || '';
     setCuitEmisor(initialCuit);
-    setReceptorNombre(data.receptor?.nombre || service?.building?.name || '');
-    setReceptorDomicilio(data.receptor?.domicilio || service?.building?.address || '');
+    setReceptorNombre(
+      data.receptor?.nombre || primaryService?.building?.name || service?.building?.name || ''
+    );
+    setReceptorDomicilio(
+      data.receptor?.domicilio ||
+        primaryService?.building?.address ||
+        service?.building?.address ||
+        ''
+    );
     setDocTipo(Number(data.receptor?.docTipo ?? 99));
     setDocNro(String(data.receptor?.docNro ?? '0'));
     setTaxCondition(data.receptor?.taxCondition || 'CONSUMIDOR_FINAL');
@@ -285,7 +309,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
   };
 
   useEffect(() => {
-    if (!open || !service?.id) return;
+    if (!open || !primaryService?.id) return;
 
     let cancelled = false;
     const load = async () => {
@@ -294,7 +318,13 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
       setResult(null);
       setSuccessAnim(false);
       try {
-        const { data } = await axios.get(`/services/${service.id}/electronic-invoice/defaults`);
+        const { data } = await axios.get(
+          `/services/${primaryService.id}/electronic-invoice/defaults`,
+          {
+            params:
+              serviceIds.length > 1 ? { serviceIds: serviceIds.join(',') } : undefined
+          }
+        );
         if (cancelled) return;
         applyDefaults(data);
       } catch (err: any) {
@@ -309,7 +339,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
     return () => {
       cancelled = true;
     };
-  }, [open, service?.id]);
+  }, [open, primaryService?.id, serviceIds.join(',')]);
 
   const handleFacturadorChange = (cuit: string) => {
     setCuitEmisor(cuit);
@@ -332,7 +362,7 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
   };
 
   const handleEmit = async () => {
-    if (!service?.id) return;
+    if (!primaryService?.id) return;
     if (!cuitEmisor) {
       setError('Seleccioná un facturador');
       scrollToAlerts();
@@ -355,8 +385,9 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
     setError(null);
     setResult(null);
     try {
-      const { data } = await axios.post(`/services/${service.id}/electronic-invoice`, {
+      const { data } = await axios.post(`/services/${primaryService.id}/electronic-invoice`, {
         cuitEmisor,
+        serviceIds,
         tipoComprobante: Number(tipoComprobante),
         puntoVenta: Number(puntoVenta),
         concepto: Number(concepto),
@@ -446,7 +477,11 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
           )}
         </Box>
       )}
-      <DialogTitle>Facturación Electrónica AFIP</DialogTitle>
+      <DialogTitle>
+        {isBulk
+          ? `Facturación Electrónica AFIP — ${serviceIds.length} remitos`
+          : 'Facturación Electrónica AFIP'}
+      </DialogTitle>
       <DialogContent dividers ref={contentRef}>
         {loading ? (
           <Box display="flex" justifyContent="center" py={4}>
@@ -459,6 +494,18 @@ export default function ElectronicInvoiceModal({ open, service, onClose, onSucce
               {' — '}
               Ajustes → Facturación AFIP
             </Alert>
+
+            {isBulk && (
+              <Alert severity="info">
+                Se emitirá <b>una sola factura</b> para {serviceIds.length} remitos del edificio{' '}
+                <b>
+                  {primaryService?.building?.name ||
+                    service?.building?.name ||
+                    'seleccionado'}
+                </b>
+                . Todos quedarán facturados y el saldo de la cuenta se actualizará.
+              </Alert>
+            )}
 
             {!configured && (
               <Alert severity="warning">

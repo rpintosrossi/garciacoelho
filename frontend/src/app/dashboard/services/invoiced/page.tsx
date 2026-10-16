@@ -203,7 +203,7 @@ export default function InvoicedServices() {
 
   // Facturación electrónica AFIP
   const [openElectronicInvoice, setOpenElectronicInvoice] = useState(false);
-  const [electronicInvoiceService, setElectronicInvoiceService] = useState<Service | null>(null);
+  const [electronicInvoiceServices, setElectronicInvoiceServices] = useState<Service[]>([]);
 
   // Estados para subir remito (corrección/adición)
   const [openUploadRemito, setOpenUploadRemito] = useState(false);
@@ -697,6 +697,20 @@ export default function InvoicedServices() {
     setOpenBulkImportInvoice(true);
   };
 
+  const handleOpenBulkElectronicInvoice = () => {
+    if (selectedServices.length === 0) {
+      alert('Debes seleccionar al menos un servicio');
+      return;
+    }
+    if (!validateSameBuilding()) {
+      alert('Todos los servicios deben pertenecer al mismo edificio');
+      return;
+    }
+    const selected = services.filter((s) => selectedServices.includes(s.id));
+    setElectronicInvoiceServices(selected);
+    setOpenElectronicInvoice(true);
+  };
+
   const handleCloseBulkImportInvoice = () => {
     setOpenBulkImportInvoice(false);
   };
@@ -909,6 +923,14 @@ export default function InvoicedServices() {
                 >
                   Importar Factura
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  onClick={handleOpenBulkElectronicInvoice}
+                  disabled={!validateSameBuilding()}
+                >
+                  Facturación Electrónica
+                </Button>
                 {!validateSameBuilding() && selectedServices.length > 0 && (
                   <Typography variant="caption" color="error">
                     Los servicios deben ser del mismo edificio
@@ -1055,7 +1077,7 @@ export default function InvoicedServices() {
                         variant="outlined"
                         color="warning"
                         onClick={() => {
-                          setElectronicInvoiceService(service);
+                          setElectronicInvoiceServices([service]);
                           setOpenElectronicInvoice(true);
                         }}
                       >
@@ -1444,16 +1466,22 @@ export default function InvoicedServices() {
       
       <ElectronicInvoiceModal
         open={openElectronicInvoice}
-        service={electronicInvoiceService}
+        service={electronicInvoiceServices[0] || null}
+        services={electronicInvoiceServices}
         onClose={() => {
           setOpenElectronicInvoice(false);
-          setElectronicInvoiceService(null);
+          setElectronicInvoiceServices([]);
         }}
         onSuccess={() => {
+          setSelectedServices([]);
+          setBulkMode(false);
+          setOpenElectronicInvoice(false);
+          setElectronicInvoiceServices([]);
           cachedApi.clearCacheFor('/services');
           fetchServices();
           localStorage.setItem('servicesLastUpdate', Date.now().toString());
           localStorage.setItem('servicesUpdateType', 'service_invoiced');
+          window.dispatchEvent(new Event('servicesChanged'));
         }}
       />
 

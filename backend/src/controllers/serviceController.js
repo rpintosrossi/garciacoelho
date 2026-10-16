@@ -1829,15 +1829,68 @@ const markServiceNoCharge = async (req, res) => {
   }
 };
 
+function parseElectronicServiceIds(raw, fallbackId) {
+  let ids = [];
+  if (Array.isArray(raw)) {
+    ids = raw;
+  } else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      ids = Array.isArray(parsed) ? parsed : String(raw).split(',');
+    } catch {
+      ids = String(raw).split(',');
+    }
+  }
+  ids = [...new Set(ids.map((s) => String(s).trim()).filter(Boolean))];
+  if (!ids.length && fallbackId) ids = [fallbackId];
+  if (fallbackId && !ids.includes(fallbackId)) ids = [fallbackId, ...ids];
+  return ids;
+}
+
+function buildItemsFromServices(servicesList) {
+  const items = [];
+  let totalAmount = 0;
+  for (const svc of servicesList) {
+    const remitoAmount = Number(svc.remitos?.[0]?.amount || 0);
+    totalAmount += remitoAmount;
+    const lines = String(svc.description || svc.name || 'Servicio')
+      .split(/\r?\n|\s*\|\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const descriptions = lines.length ? lines : ['Servicio'];
+    descriptions.forEach((description, index) => {
+      const unitPrice = index === 0 ? remitoAmount : 0;
+      items.push({
+        quantity: 1,
+        description,
+        unitPrice,
+        subtotal: unitPrice,
+        serviceId: svc.id,
+        remitoNumber: svc.remitos?.[0]?.number || null
+      });
+    });
+  }
+  if (!items.length) {
+    items.push({
+      quantity: 1,
+      description: 'Servicio',
+      unitPrice: 0,
+      subtotal: 0
+    });
+  }
+  return { items, totalAmount };
+}
+
 // Defaults para el modal de facturación electrónica
 const getElectronicInvoiceDefaults = async (req, res) => {
   try {
     const { id } = req.params;
     const wantPadron = String(req.query.padron || '') === '1';
+    const serviceIds = parseElectronicServiceIds(req.query.serviceIds, id);
 
-    const [service, mode] = await Promise.all([
-      prisma.service.findUnique({
-        where: { id },
+    const [servicesList, mode] = await Promise.all([
+      prisma.service.findMany({
+        where: { id: { in: serviceIds } },
         include: {
           building: true,
           remitos: { orderBy: { createdAt: 'desc' }, take: 1 }
@@ -1846,14 +1899,29 @@ const getElectronicInvoiceDefaults = async (req, res) => {
       getIssuersForCurrentMode()
     ]);
 
-    if (!service) {
+    if (!servicesList.length) {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
+    if (servicesList.length !== serviceIds.length) {
+      return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
+    }
+
+    const buildingIds = [...new Set(servicesList.map((s) => s.buildingId))];
+    if (buildingIds.length > 1) {
+      return res.status(400).json({
+        message: 'Todos los servicios deben pertenecer al mismo edificio'
+      });
+    }
+
+    // Mantener el orden de serviceIds y usar el primero como referencia
+    const orderedServices = serviceIds
+      .map((sid) => servicesList.find((s) => s.id === sid))
+      .filter(Boolean);
+    const service = orderedServices[0];
 
     const { modoHomologacion, ambiente, issuers } = mode;
     const selectedIssuer = pickIssuer(issuers, req.query.cuitEmisor);
-    const remito = service.remitos?.[0];
-    const amount = Number(remito?.amount || 0);
+    const { items: defaultItems, totalAmount: amount } = buildItemsFromServices(orderedServices);
     const taxCondition = service.building?.taxCondition || 'CONSUMIDOR_FINAL';
     const { docTipo, docNro } = mapDocTipo(taxCondition, service.building?.cuit);
     const today = toAfipDateString(new Date());
@@ -1876,32 +1944,6 @@ const getElectronicInvoiceDefaults = async (req, res) => {
       'IVA Responsable Inscripto';
     const tipoComprobante = mapTipoComprobante(emisorCondicion, taxCondition);
     const amounts = splitAmounts({ amount, tipocomprobante: tipoComprobante });
-
-    // Desglosar descripción del servicio/remito en ítems (una línea = un ítem).
-    // El importe del remito va en el primer ítem; el resto quedan en 0 para mostrar el trabajo.
-    const remitoLines = String(service.description || service.name || 'Servicio')
-      .split(/\r?\n|\s*\|\s*/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const defaultItems =
-      remitoLines.length > 0
-        ? remitoLines.map((description, index) => {
-            const unitPrice = index === 0 ? amounts.impTotal : 0;
-            return {
-              quantity: 1,
-              description,
-              unitPrice,
-              subtotal: unitPrice
-            };
-          })
-        : [
-            {
-              quantity: 1,
-              description: 'Servicio',
-              unitPrice: amounts.impTotal,
-              subtotal: amounts.impTotal
-            }
-          ];
 
     const emisor = selectedIssuer
       ? {
@@ -1991,12 +2033,20 @@ const getElectronicInvoiceDefaults = async (req, res) => {
         ...amounts,
         items: defaultItems
       },
+      serviceIds: orderedServices.map((s) => s.id),
+      services: orderedServices.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        remitoAmount: Number(s.remitos?.[0]?.amount || 0),
+        remitoNumber: s.remitos?.[0]?.number || null
+      })),
       service: {
         id: service.id,
         name: service.name,
         description: service.description,
         remitoAmount: amount,
-        remitoNumber: remito?.number || null
+        remitoNumber: service.remitos?.[0]?.number || null
       }
     });
   } catch (error) {
@@ -2024,8 +2074,9 @@ const createElectronicInvoice = async (req, res) => {
       });
     }
 
-    const service = await prisma.service.findUnique({
-      where: { id },
+    const serviceIds = parseElectronicServiceIds(body.serviceIds, id);
+    const servicesList = await prisma.service.findMany({
+      where: { id: { in: serviceIds } },
       include: {
         building: true,
         remitos: { orderBy: { createdAt: 'desc' }, take: 1 },
@@ -2033,13 +2084,32 @@ const createElectronicInvoice = async (req, res) => {
       }
     });
 
-    if (!service) {
+    if (!servicesList.length) {
       return res.status(404).json({ message: 'Servicio no encontrado' });
     }
+    if (servicesList.length !== serviceIds.length) {
+      return res.status(404).json({ message: 'Algunos servicios no fueron encontrados' });
+    }
 
-    if (!canInvoice(service.status)) {
+    const orderedServices = serviceIds
+      .map((sid) => servicesList.find((s) => s.id === sid))
+      .filter(Boolean);
+    const service = orderedServices[0];
+
+    const invalidServices = orderedServices.filter((s) => !canInvoice(s.status));
+    if (invalidServices.length > 0) {
       return res.status(400).json({
-        message: 'El servicio debe tener un remito (o facturación parcial abierta) antes de facturar'
+        message:
+          'Todos los servicios deben tener remito (o facturación parcial abierta) antes de facturar',
+        invalidServices: invalidServices.map((s) => s.id)
+      });
+    }
+
+    const buildingIds = [...new Set(orderedServices.map((s) => s.buildingId))];
+    if (buildingIds.length > 1) {
+      return res.status(400).json({
+        message: 'Todos los servicios deben pertenecer al mismo edificio',
+        buildings: buildingIds
       });
     }
 
@@ -2080,7 +2150,13 @@ const createElectronicInvoice = async (req, res) => {
       taxCondition
     );
     const puntoVenta = Number(emisor.puntoVenta || 1);
-    const amount = Number(body.impTotal != null ? body.impTotal : body.amount || service.remitos?.[0]?.amount || 0);
+    const remitosTotal = orderedServices.reduce(
+      (sum, s) => sum + Number(s.remitos?.[0]?.amount || 0),
+      0
+    );
+    const amount = Number(
+      body.impTotal != null ? body.impTotal : body.amount != null ? body.amount : remitosTotal
+    );
     if (!amount || amount <= 0) {
       return res.status(400).json({ message: 'El importe total debe ser mayor a 0' });
     }
@@ -2133,7 +2209,7 @@ const createElectronicInvoice = async (req, res) => {
       ];
     }
 
-    console.log('[AFIP] Emitiendo factura para servicio', id, afipPayload);
+    console.log('[AFIP] Emitiendo factura para servicios', serviceIds, afipPayload);
     const afipResult = await generarFactura(afipPayload);
 
     const invoiceNumber = formatInvoiceNumber(afipResult.puntoVenta, afipResult.numeroComprobante);
@@ -2271,29 +2347,39 @@ const createElectronicInvoice = async (req, res) => {
         impIVA: amounts.impIVA,
         impTotal: amounts.impTotal,
         afipRaw: afipResult,
-        ...linkInvoiceToServicesData([id])
+        ...linkInvoiceToServicesData(serviceIds)
       }
     });
 
-    const updatedService = withServiceInvoices(
-      await prisma.service.update({
-        where: { id },
-        data: { status: 'FACTURADO' },
-        include: {
-          technician: true,
-          building: true,
-          ...serviceInvoicesInclude
-        }
-      })
+    const updatedServices = await Promise.all(
+      serviceIds.map((serviceId) =>
+        prisma.service
+          .update({
+            where: { id: serviceId },
+            data: { status: 'FACTURADO' },
+            include: {
+              technician: true,
+              building: true,
+              ...serviceInvoicesInclude
+            }
+          })
+          .then(withServiceInvoices)
+      )
     );
+    const updatedService = updatedServices[0];
 
     if (service.buildingId) {
       await recalculateBuildingBalance(service.buildingId);
     }
 
     res.status(200).json({
-      message: 'Factura electrónica emitida exitosamente',
+      message:
+        serviceIds.length > 1
+          ? `Factura electrónica emitida para ${serviceIds.length} servicios`
+          : 'Factura electrónica emitida exitosamente',
       service: updatedService,
+      services: updatedServices,
+      serviceIds,
       invoice,
       afip: {
         cae: afipResult.cae,
