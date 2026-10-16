@@ -690,7 +690,9 @@ const getBillingStats = async (req, res) => {
     const rangeEnd = utcDayEndExclusive(endDate);
 
     // Dos rangos indexables (date y createdAt). COALESCE en el WHERE no puede usar índice.
-    const rows = await prisma.$queryRaw`
+    // El cobrado sale de PaymentDocument: el estado PAGADA casi no se actualiza al registrar un pago.
+    const [rows, collectedRows] = await Promise.all([
+    prisma.$queryRaw`
       SELECT
         month_key,
         source,
@@ -724,7 +726,44 @@ const getBillingStats = async (req, res) => {
         GROUP BY 1, 2, 3
       ) billed
       GROUP BY month_key, source, status
-    `;
+    `,
+    prisma.$queryRaw`
+      SELECT
+        COALESCE(SUM(cobrado_factura), 0) AS cobrado,
+        COALESCE(SUM(GREATEST(total - LEAST(cobrado_factura, total), 0)), 0) AS pendiente
+      FROM (
+        SELECT
+          b.total,
+          CASE
+            WHEN COALESCE(SUM(pd.amount), 0) > 0 THEN COALESCE(SUM(pd.amount), 0)
+            WHEN b.status = 'PAGADA' OR b.payment_method = 'EFECTIVO' THEN b.total
+            ELSE 0
+          END AS cobrado_factura
+        FROM (
+          SELECT
+            id,
+            COALESCE("impTotal", amount) AS total,
+            status::text AS status,
+            "paymentMethod" AS payment_method
+          FROM "Invoice"
+          WHERE date >= ${rangeStart}
+            AND date < ${rangeEnd}
+          UNION ALL
+          SELECT
+            id,
+            COALESCE("impTotal", amount) AS total,
+            status::text AS status,
+            "paymentMethod" AS payment_method
+          FROM "Invoice"
+          WHERE date IS NULL
+            AND "createdAt" >= ${rangeStart}
+            AND "createdAt" < ${rangeEnd}
+        ) b
+        LEFT JOIN "PaymentDocument" pd ON pd."invoiceId" = b.id
+        GROUP BY b.id, b.total, b.status, b.payment_method
+      ) per_invoice
+    `
+    ]);
 
     const byMonth = new Map(keys.map((key) => [key, emptyBillingMonth(key)]));
     const bySource = {
@@ -767,6 +806,8 @@ const getBillingStats = async (req, res) => {
 
     const monthly = keys.map((key) => byMonth.get(key));
     const monthCount = monthly.length || 1;
+    const collected = roundMoney(collectedRows[0]?.cobrado);
+    const pending = roundMoney(collectedRows[0]?.pendiente);
 
     res.json({
       range: { startDate, endDate },
@@ -775,6 +816,8 @@ const getBillingStats = async (req, res) => {
         count,
         averagePerInvoice: count > 0 ? roundMoney(total / count) : 0,
         averagePerMonth: roundMoney(total / monthCount),
+        collected,
+        pending,
         bySource,
         byStatus
       },

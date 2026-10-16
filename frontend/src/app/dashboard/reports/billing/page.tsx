@@ -43,6 +43,8 @@ interface BillingSummary {
   count: number;
   averagePerInvoice: number;
   averagePerMonth: number;
+  collected: number;
+  pending: number;
   bySource: {
     AFIP: SourceStat;
     IMPORT: SourceStat;
@@ -251,12 +253,12 @@ export default function BillingStatsReport() {
             </Card>
             <Card sx={{ border: '1px solid', borderColor: 'success.light' }}>
               <CardContent>
-                <Typography variant="caption" color="text.secondary">Cobradas</Typography>
+                <Typography variant="caption" color="text.secondary">Cobrado</Typography>
                 <Typography variant="h5" fontWeight={700} color="success.main">
-                  {formatCurrency(summary.byStatus.PAGADA.total)}
+                  {formatCurrency(summary.collected)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Pendientes {formatCurrency(summary.byStatus.PENDIENTE.total + summary.byStatus.EMITIDA.total)}
+                  Pendiente {formatCurrency(summary.pending)}
                 </Typography>
               </CardContent>
             </Card>
