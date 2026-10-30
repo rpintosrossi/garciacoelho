@@ -353,10 +353,12 @@ const AdministratorsPage = () => {
       ) : (
         <>
           <Autocomplete
-            options={administrators.map(a => a.name)}
+            options={Array.from(new Set(
+              administrators.flatMap((a) => [a.name, a.administratorName].filter((value): value is string => Boolean(value)))
+            ))}
             value={adminFilter}
             onInputChange={(_, value) => setAdminFilter(value)}
-            renderInput={params => <TextField {...params} label="Buscar administrador" sx={{ mb: 2, maxWidth: 400 }} />}
+            renderInput={params => <TextField {...params} label="Buscar por nombre o administrador" sx={{ mb: 2, maxWidth: 480 }} />}
             freeSolo
           />
           <Button 
@@ -382,7 +384,14 @@ const AdministratorsPage = () => {
           <TableBody>
             {administrators.map((administrator) => (
               <TableRow key={administrator.id}>
-                <TableCell>{administrator.name}</TableCell>
+                <TableCell>
+                  {administrator.name}
+                  {administrator.administratorName && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      {administrator.administratorName}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell>{administrator.email}</TableCell>
                 <TableCell>{administrator.phone || '-'}</TableCell>
                 <TableCell>{administrator.cuit || '-'}</TableCell>

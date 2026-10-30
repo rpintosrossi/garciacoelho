@@ -119,6 +119,19 @@ function money(n: number) {
   return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatAfipDate(value: unknown) {
+  if (!value) return '';
+  const raw = String(value);
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return `${ymd[3]}/${ymd[2]}/${ymd[1]}`;
+  if (/^\d{8}$/.test(raw)) {
+    return `${raw.slice(6, 8)}/${raw.slice(4, 6)}/${raw.slice(0, 4)}`;
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleDateString('es-AR');
+  return raw;
+}
+
 function newLine(description = '', unitPrice = ''): LineItem {
   return {
     key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -194,7 +207,9 @@ export default function ElectronicInvoiceModal({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [successAnim, setSuccessAnim] = useState(false);
+  const [issuingFacturador, setIssuingFacturador] = useState<string | null>(null);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
+  const emittingRef = React.useRef(false);
 
   const serviceList = useMemo(() => {
     if (Array.isArray(services) && services.length > 0) return services.filter((s) => s?.id);
@@ -317,6 +332,7 @@ export default function ElectronicInvoiceModal({
       setError(null);
       setResult(null);
       setSuccessAnim(false);
+      setIssuingFacturador(null);
       try {
         const { data } = await axios.get(
           `/services/${primaryService.id}/electronic-invoice/defaults`,
@@ -362,6 +378,7 @@ export default function ElectronicInvoiceModal({
   };
 
   const handleEmit = async () => {
+    if (emittingRef.current || saving || successAnim) return;
     if (!primaryService?.id) return;
     if (!cuitEmisor) {
       setError('Seleccioná un facturador');
@@ -381,6 +398,14 @@ export default function ElectronicInvoiceModal({
       return;
     }
 
+    const facturadorUsado = selectedFacturador
+      ? `${selectedFacturador.razonSocial || selectedFacturador.nombre || 'Emisor'}${
+          selectedFacturador.cuit ? ` — CUIT ${selectedFacturador.cuit}` : ''
+        }`
+      : cuitEmisor;
+
+    emittingRef.current = true;
+    setIssuingFacturador(facturadorUsado);
     setSaving(true);
     setError(null);
     setResult(null);
@@ -417,25 +442,43 @@ export default function ElectronicInvoiceModal({
         }))
       });
       setResult(data);
+      setSaving(false);
       setSuccessAnim(true);
       onSuccess();
-      window.setTimeout(() => {
-        setSuccessAnim(false);
-        onClose();
-      }, 1800);
     } catch (err: any) {
+      emittingRef.current = false;
+      setSaving(false);
+      setIssuingFacturador(null);
       setError(getApiErrorMessage(err, 'Error al emitir factura electrónica'));
       scrollToAlerts();
-    } finally {
-      setSaving(false);
     }
   };
+
+  const handleDismissSuccess = () => {
+    emittingRef.current = false;
+    setSuccessAnim(false);
+    setSaving(false);
+    setIssuingFacturador(null);
+    onClose();
+  };
+
+  const issuedLetter = tipoLetter(Number(result?.afip?.tipoComprobante ?? tipoComprobante));
+  const issuedNumber = result?.invoice?.number
+    ? String(result.invoice.number)
+    : result?.afip?.puntoVenta != null && result?.afip?.numeroComprobante != null
+      ? `${String(result.afip.puntoVenta).padStart(5, '0')}-${String(result.afip.numeroComprobante).padStart(8, '0')}`
+      : '';
+  const issuedTotal = Number(result?.invoice?.impTotal ?? result?.invoice?.amount ?? impTotal);
+  const issuedNeto = Number(result?.invoice?.impNeto ?? impNeto);
+  const issuedIva = Number(result?.invoice?.impIVA ?? impIVA);
+  const issuedCae = result?.afip?.cae || result?.invoice?.cae || '';
+  const issuedCaeVto = formatAfipDate(result?.afip?.fechaVencimiento || result?.invoice?.caeVto);
 
   return (
     <Dialog
       open={open}
       onClose={(_event, reason) => {
-        if (saving) return;
+        if (saving || successAnim) return;
         // Evitar perder el formulario al clickear afuera o Escape
         if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
         onClose();
@@ -444,7 +487,7 @@ export default function ElectronicInvoiceModal({
       maxWidth="xl"
       PaperProps={{ sx: { maxWidth: 1200, position: 'relative', overflow: 'hidden' } }}
     >
-      {successAnim && (
+      {(saving || successAnim) && (
         <Box
           sx={{
             position: 'absolute',
@@ -456,33 +499,89 @@ export default function ElectronicInvoiceModal({
             alignItems: 'center',
             justifyContent: 'center',
             gap: 1.5,
+            px: 3,
+            py: 3,
+            overflow: 'auto',
+            textAlign: 'center',
+            pointerEvents: 'all',
             animation: `${fadeIn} 0.25s ease-out`
           }}
         >
-          <CheckCircleRoundedIcon
-            sx={{
-              fontSize: 96,
-              color: 'success.main',
-              animation: `${checkPop} 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2)`
-            }}
-          />
-          <Typography variant="h6" fontWeight={700} color="success.main">
-            Factura emitida
-          </Typography>
-          {result?.afip?.cae && (
-            <Typography variant="body2" color="text.secondary">
-              CAE {result.afip.cae}
-              {result?.invoice?.number ? ` — N° ${result.invoice.number}` : ''}
-            </Typography>
+          {successAnim ? (
+            <>
+              <CheckCircleRoundedIcon
+                sx={{
+                  fontSize: 72,
+                  color: 'success.main',
+                  animation: `${checkPop} 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2)`
+                }}
+              />
+              <Typography variant="h6" fontWeight={700} color="success.main">
+                Factura emitida
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 2.5, width: '100%', maxWidth: 460, textAlign: 'left' }}>
+                <Stack spacing={0.75}>
+                  <Typography variant="body1">
+                    Comprobante:{' '}
+                    <b>
+                      Factura {issuedLetter}
+                      {issuedNumber ? ` — N° ${issuedNumber}` : ''}
+                    </b>
+                  </Typography>
+                  {issuingFacturador && (
+                    <Typography variant="body2">
+                      Facturador: <b>{issuingFacturador}</b>
+                    </Typography>
+                  )}
+                  <Typography variant="body2">
+                    Receptor: <b>{receptorNombre || '—'}</b>
+                  </Typography>
+                  {issuedCae && (
+                    <Typography variant="body2">
+                      CAE: <b>{issuedCae}</b>
+                    </Typography>
+                  )}
+                  {issuedCaeVto && (
+                    <Typography variant="body2">
+                      Vencimiento CAE: <b>{issuedCaeVto}</b>
+                    </Typography>
+                  )}
+                  <Divider sx={{ my: 0.5 }} />
+                  <Typography variant="body2">Neto: ${money(issuedNeto)}</Typography>
+                  <Typography variant="body2">IVA: ${money(issuedIva)}</Typography>
+                  <Typography variant="body1" fontWeight={700}>
+                    Total: ${money(issuedTotal)}
+                  </Typography>
+                </Stack>
+              </Paper>
+              <Button variant="contained" size="large" onClick={handleDismissSuccess}>
+                Cerrar
+              </Button>
+            </>
+          ) : (
+            <>
+              <CircularProgress size={64} />
+              <Typography variant="h6" fontWeight={700}>
+                Emitiendo factura AFIP…
+              </Typography>
+              {issuingFacturador && (
+                <Typography variant="body1">
+                  Facturador: <b>{issuingFacturador}</b>
+                </Typography>
+              )}
+              <Typography variant="body2" color="text.secondary">
+                Esperá a que termine. No se puede usar el formulario mientras se emite.
+              </Typography>
+            </>
           )}
         </Box>
       )}
-      <DialogTitle>
+      <DialogTitle {...(saving || successAnim ? { inert: true } : {})}>
         {isBulk
           ? `Facturación Electrónica AFIP — ${serviceIds.length} remitos`
           : 'Facturación Electrónica AFIP'}
       </DialogTitle>
-      <DialogContent dividers ref={contentRef}>
+      <DialogContent dividers ref={contentRef} {...(saving || successAnim ? { inert: true } : {})}>
         {loading ? (
           <Box display="flex" justifyContent="center" py={4}>
             <CircularProgress />
@@ -846,7 +945,7 @@ export default function ElectronicInvoiceModal({
           </Alert>
         </Box>
       )}
-      <DialogActions>
+      <DialogActions {...(saving || successAnim ? { inert: true } : {})}>
         <Button onClick={onClose} disabled={saving || successAnim}>
           Cancelar
         </Button>

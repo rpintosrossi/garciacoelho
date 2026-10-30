@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getAdminDebtReport, getBuildingDebtReport, getAdminDebtPDF, getNoChargeStats, getBillingStats } = require('../controllers/reportController');
+const { getAdminDebtReport, getBuildingDebtReport, getAdminDebtPDF, getNoChargeStats, getBillingStats, getTechnicianStats } = require('../controllers/reportController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 
 // Rutas protegidas que requieren autenticación
@@ -20,5 +20,8 @@ router.get('/no-charge-stats', roleMiddleware(['ADMIN', 'OPERADOR']), getNoCharg
 
 // Facturación agrupada por mes
 router.get('/billing-stats', roleMiddleware(['ADMIN', 'OPERADOR']), getBillingStats);
+
+// Trabajos, facturación y cobros por técnico
+router.get('/technician-stats', roleMiddleware(['ADMIN', 'OPERADOR']), getTechnicianStats);
 
 module.exports = router; 

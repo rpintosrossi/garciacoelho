@@ -18,6 +18,64 @@ const {
   withInvoiceServices,
   getInvoiceServices
 } = require('../utils/serviceInvoiceHelpers');
+const { listIssuers, isAfipConfigured } = require('../services/afipClient');
+const { digitsOnly } = require('../utils/afipFiscal');
+
+let issuerNameCache = { at: 0, map: null };
+const ISSUER_NAME_CACHE_MS = 5 * 60 * 1000;
+
+function formatCuit(cuit) {
+  const digits = digitsOnly(cuit);
+  if (digits.length !== 11) return digits || null;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`;
+}
+
+function cleanFacturadorName(value) {
+  if (!value) return null;
+  const cleaned = String(value)
+    .replace(/\b(homologaci[oó]n|producci[oó]n|pruebas?)\b/gi, ' ')
+    .replace(/\bambiente\s*[hp]\b/gi, ' ')
+    .replace(/\([hp]\)/gi, ' ')
+    .replace(/[()[\]{}\-–—|/:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || null;
+}
+
+async function getIssuerNameMap() {
+  const now = Date.now();
+  if (issuerNameCache.map && now - issuerNameCache.at < ISSUER_NAME_CACHE_MS) {
+    return issuerNameCache.map;
+  }
+  if (!isAfipConfigured()) {
+    return issuerNameCache.map || new Map();
+  }
+  try {
+    const all = await listIssuers();
+    const map = new Map();
+    for (const issuer of all || []) {
+      const cuit = digitsOnly(issuer.cuit);
+      if (!cuit) continue;
+      const name = cleanFacturadorName(issuer.nombre);
+      if (!name) continue;
+      const prev = map.get(cuit);
+      if (!prev || (!prev.includes(' ') && name.includes(' '))) {
+        map.set(cuit, name);
+      }
+    }
+    issuerNameCache = { at: now, map };
+    return map;
+  } catch (error) {
+    console.warn('[PACKAGES] No se pudo resolver el nombre de los facturadores:', error.message);
+    return issuerNameCache.map || new Map();
+  }
+}
+
+function facturadorLabel(nameMap, cuitEmisor) {
+  const cuit = digitsOnly(cuitEmisor);
+  if (!cuit) return null;
+  return nameMap.get(cuit) || formatCuit(cuit);
+}
 
 // Función para descargar archivo desde S3 o URL
 const downloadFile = async (fileUrl) => {
@@ -388,7 +446,7 @@ const getPackages = async (req, res) => {
     const startTime = Date.now();
     
     // OPTIMIZACIÓN: Usar consultas paralelas con select específico en lugar de include profundo
-    const [invoices, payments] = await Promise.all([
+    const [invoices, payments, issuerNameMap] = await Promise.all([
       // Consulta optimizada para facturas
       prisma.invoice.findMany({
         where: {
@@ -404,6 +462,7 @@ const getPackages = async (req, res) => {
           createdAt: true,
           date: true,
           number: true,
+          cuitEmisor: true,
           paymentMethod: true,
           fileUrl: true,
           invoiceServices: {
@@ -528,7 +587,8 @@ const getPackages = async (req, res) => {
         orderBy: {
           createdAt: 'desc'
         }
-      })
+      }),
+      getIssuerNameMap()
     ]);
 
     console.log(`📄 [PACKAGES] Encontradas ${invoices.length} facturas y ${payments.length} pagos en ${Date.now() - startTime}ms`);
@@ -590,6 +650,7 @@ const getPackages = async (req, res) => {
           type: (invoice.status === 'PENDIENTE' && (firstService.status === 'FACTURADO' || firstService.status === 'FACTURADO_PARCIAL')) ? 'remito_sin_factura' : 'invoice', // Las facturas informales se tratan como remitos sin factura
           id: invoice.id,
           number: invoice.number || null,
+          facturador: facturadorLabel(issuerNameMap, invoice.cuitEmisor),
           amount: invoice.remainingAmount, // Usar el saldo pendiente en lugar del monto original
           originalAmount: invoice.amount, // Mantener el monto original para referencia
           totalPaid: invoice.totalPaid,
@@ -667,6 +728,7 @@ const getPackages = async (req, res) => {
      const { adminId } = req.params;
      const { paymentMethodId, mode } = req.query;
      const splitMode = mode === 'split';
+     const issuerNamesPromise = getIssuerNameMap();
     
     console.log(`📦 [PACKAGES] Descargando paquete para adminId: ${adminId} | modo: ${splitMode ? 'separado' : 'único'}`);
     console.log(`💳 [PACKAGES] PaymentMethodId recibido: ${paymentMethodId}`);
@@ -1503,28 +1565,32 @@ const getPackages = async (req, res) => {
     doc.y = administrator.email ? adminY + 40 : adminY + 24;
 
     // Tabla de facturas
+    const issuerNameMap = await issuerNamesPromise;
     doc.fontSize(14).text('Facturas Incluidas', 50);
     doc.moveDown(0.5);
 
     // Encabezados de tabla
     const tableTop = doc.y;
-    const col1 = 50;
-    const col2 = 220;
-    const col3 = 340;
-    const col4 = 450;
+    const colDir = 50;
+    const colFecha = 185;
+    const colNro = 255;
+    const colFact = 335;
+    const colImp = 460;
+    const pageRight = 545;
     
     doc.fontSize(10).fillColor('#666');
-    doc.text('Dirección', col1, tableTop);
-    doc.text('Fecha', col2, tableTop);
-    doc.text('Nº Factura', col3, tableTop);
-    doc.text('Importe', col4, tableTop);
+    doc.text('Dirección', colDir, tableTop);
+    doc.text('Fecha', colFecha, tableTop);
+    doc.text('Nº Factura', colNro, tableTop);
+    doc.text('Facturador', colFact, tableTop);
+    doc.text('Importe', colImp, tableTop);
     
     // Línea separadora
-    doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
+    doc.moveTo(50, doc.y + 5).lineTo(pageRight, doc.y + 5).stroke();
     doc.moveDown(2); // Aumentado espacio antes del primer item
 
     // Filas de facturas
-    doc.fillColor('#000');
+    doc.fillColor('#000').font('Helvetica');
     for (const invoice of pendingInvoices) {
       const building = invoice.services?.[0]?.building;
       // Solo mostramos la dirección
@@ -1534,27 +1600,37 @@ const getPackages = async (req, res) => {
       const rawDate = invoice.date || service0?.remitos?.[0]?.date || service0?.visitDate || invoice.createdAt;
       const fecha = rawDate ? new Date(rawDate).toLocaleDateString('es-AR') : 'N/A';
       const numero = invoice.number || invoice.id.substring(0, 8) || 'N/A';
+      const facturador = facturadorLabel(issuerNameMap, invoice.cuitEmisor) || '';
       const importe = `$${(invoice.montoAcordado || invoice.amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-      
+
+      doc.fontSize(9);
+      const addressHeight = doc.heightOfString(address, { width: 130 });
+      const fechaHeight = doc.heightOfString(fecha, { width: 65 });
+      const numeroHeight = doc.heightOfString(numero, { width: 75 });
+      const facturadorHeight = facturador ? doc.heightOfString(facturador, { width: 115 }) : 12;
+      const rowHeight = Math.max(addressHeight, fechaHeight, numeroHeight, facturadorHeight, 12) + 6;
+      if (doc.y + rowHeight > doc.page.height - 50) {
+        doc.addPage();
+      }
       const startY = doc.y;
-      
-      doc.fontSize(9).text(address, col1, startY, { width: 160 });
-      doc.text(fecha, col2, startY, { width: 110 });
-      doc.text(numero, col3, startY, { width: 100 });
-      doc.text(importe, col4, startY, { width: 90, align: 'right' });
-      
-      doc.moveDown(1.5);
+
+      doc.text(address, colDir, startY, { width: 130 });
+      doc.text(fecha, colFecha, startY, { width: 65 });
+      doc.text(numero, colNro, startY, { width: 75 });
+      doc.text(facturador, colFact, startY, { width: 115 });
+      doc.text(importe, colImp, startY, { width: 85, align: 'right' });
+      doc.y = startY + rowHeight;
     }
 
     // Totales
     doc.moveDown();
     doc.fontSize(11).fillColor('#333');
-    doc.text(`Total de Facturas: $${totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.text(`Total de Facturas: $${totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, 280, doc.y, { width: pageRight - 280, align: 'right' });
     doc.moveDown(0.5);
-    doc.text(`Total de Prov: $${totalProv.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.text(`Total de Prov: $${totalProv.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, 280, doc.y, { width: pageRight - 280, align: 'right' });
     doc.moveDown(0.5);
     doc.fontSize(13).fillColor('#000').font('Helvetica-Bold');
-    doc.text(`Neto Total: $${netoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, col4 - 50, doc.y, { align: 'right' });
+    doc.text(`Neto Total: $${netoTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, 280, doc.y, { width: pageRight - 280, align: 'right' });
     doc.font('Helvetica');
 
     // Remitos incluidos

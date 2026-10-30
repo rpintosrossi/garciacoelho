@@ -37,6 +37,7 @@ const getAdministrators = async (req, res) => {
         whereClause = {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
+            { administratorName: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
             { cuit: { contains: search, mode: 'insensitive' } },
             ...(cuitsMatchIds.length > 0 ? [{ id: { in: cuitsMatchIds } }] : [])
@@ -50,6 +51,7 @@ const getAdministrators = async (req, res) => {
         select: {
           id: true,
           name: true,
+          administratorName: true,
           email: true,
           phone: true,
           cuit: true,
@@ -92,6 +94,7 @@ const getAdministrators = async (req, res) => {
       whereClause = {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
+          { administratorName: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
           { cuit: { contains: search, mode: 'insensitive' } },
           ...(cuitsMatchIds.length > 0 ? [{ id: { in: cuitsMatchIds } }] : [])

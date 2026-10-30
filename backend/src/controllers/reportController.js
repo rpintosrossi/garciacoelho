@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
@@ -829,10 +829,300 @@ const getBillingStats = async (req, res) => {
   }
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function emptyTechBucket() {
+  return {
+    jobs: 0,
+    enCurso: 0,
+    sinCobro: 0,
+    conRemito: 0,
+    facturados: 0,
+    remitoTotal: 0,
+    invoiced: 0,
+    collected: 0,
+    unbilled: 0
+  };
+}
+
+function addTechBucket(target, row) {
+  target.jobs += Number(row.jobs) || 0;
+  target.enCurso += Number(row.en_curso) || 0;
+  target.sinCobro += Number(row.sin_cobro) || 0;
+  target.conRemito += Number(row.con_remito) || 0;
+  target.facturados += Number(row.facturados) || 0;
+  target.remitoTotal = roundMoney(target.remitoTotal + roundMoney(row.remito_total));
+  target.invoiced = roundMoney(target.invoiced + roundMoney(row.facturado));
+  target.collected = roundMoney(target.collected + roundMoney(row.cobrado));
+  target.unbilled = roundMoney(target.unbilled + roundMoney(row.sin_facturar));
+}
+
+function withPending(bucket) {
+  return {
+    ...bucket,
+    pending: roundMoney(Math.max(bucket.invoiced - bucket.collected, 0))
+  };
+}
+
+// Trabajos por técnico y mes. El mes es la visita (o el alta si no hay visita).
+// La factura se reparte entre sus servicios según el monto de los remitos.
+const getTechnicianStats = async (req, res) => {
+  try {
+    const today = billingTodayYmd();
+    const startDate = req.query.startDate || shiftBillingMonth(today, -11);
+    const endDate = req.query.endDate || today;
+    const technicianId = typeof req.query.technicianId === 'string' ? req.query.technicianId.trim() : '';
+
+    if (!BILLING_DATE_RE.test(startDate) || !BILLING_DATE_RE.test(endDate)) {
+      return res.status(400).json({ message: 'Las fechas deben tener formato AAAA-MM-DD' });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ message: 'La fecha desde no puede ser posterior a la fecha hasta' });
+    }
+    if (technicianId && !UUID_RE.test(technicianId)) {
+      return res.status(400).json({ message: 'El técnico indicado no es válido' });
+    }
+
+    const keys = monthKeysBetween(startDate, endDate);
+    if (keys.length > 120) {
+      return res.status(400).json({ message: 'El rango máximo es de 10 años' });
+    }
+
+    const rangeStart = utcDayStart(startDate);
+    const rangeEnd = utcDayEndExclusive(endDate);
+    const techFilter = technicianId
+      ? Prisma.sql`AND s."technicianId" = ${technicianId}`
+      : Prisma.empty;
+
+    const rows = await prisma.$queryRaw`
+      WITH range_services AS (
+        SELECT
+          s.id,
+          s."technicianId" AS technician_id,
+          t.name AS technician_name,
+          t.status AS technician_status,
+          s.status::text AS status,
+          TO_CHAR(COALESCE(s."visitDate", s."createdAt") AT TIME ZONE 'UTC', 'YYYY-MM') AS month_key
+        FROM "Service" s
+        JOIN technicians t ON t.id = s."technicianId"
+        WHERE s."technicianId" IS NOT NULL
+          AND (
+            (s."visitDate" >= ${rangeStart} AND s."visitDate" < ${rangeEnd})
+            OR (
+              s."visitDate" IS NULL
+              AND s."createdAt" >= ${rangeStart}
+              AND s."createdAt" < ${rangeEnd}
+            )
+          )
+          ${techFilter}
+      ),
+      invoice_ids AS (
+        SELECT DISTINCT ivs."invoiceId"
+        FROM "InvoiceService" ivs
+        WHERE ivs."serviceId" IN (SELECT id FROM range_services)
+      ),
+      remito_by_service AS (
+        SELECT r."serviceId", COALESCE(SUM(r.amount), 0)::float8 AS remito_total
+        FROM "Remito" r
+        WHERE r."serviceId" IN (
+          SELECT id FROM range_services
+          UNION
+          SELECT ivs."serviceId"
+          FROM "InvoiceService" ivs
+          WHERE ivs."invoiceId" IN (SELECT "invoiceId" FROM invoice_ids)
+        )
+        GROUP BY r."serviceId"
+      ),
+      invoice_services AS (
+        SELECT
+          ivs."invoiceId",
+          ivs."serviceId",
+          COALESCE(rb.remito_total, 0)::float8 AS weight
+        FROM "InvoiceService" ivs
+        LEFT JOIN remito_by_service rb ON rb."serviceId" = ivs."serviceId"
+        WHERE ivs."invoiceId" IN (SELECT "invoiceId" FROM invoice_ids)
+      ),
+      invoice_weights AS (
+        SELECT
+          "invoiceId",
+          SUM(weight)::float8 AS total_weight,
+          COUNT(*)::float8 AS service_count
+        FROM invoice_services
+        GROUP BY "invoiceId"
+      ),
+      shares AS (
+        SELECT
+          a."serviceId",
+          a."invoiceId",
+          CASE
+            WHEN w.total_weight > 0 THEN a.weight / w.total_weight
+            ELSE 1.0 / NULLIF(w.service_count, 0)
+          END AS share
+        FROM invoice_services a
+        JOIN invoice_weights w ON w."invoiceId" = a."invoiceId"
+      ),
+      invoice_paid AS (
+        SELECT pd."invoiceId", COALESCE(SUM(pd.amount), 0)::float8 AS paid
+        FROM "PaymentDocument" pd
+        WHERE pd."invoiceId" IN (SELECT "invoiceId" FROM invoice_ids)
+        GROUP BY pd."invoiceId"
+      ),
+      service_invoice_money AS (
+        SELECT
+          sh."serviceId",
+          COALESCE(SUM(COALESCE(i."impTotal", i.amount) * sh.share), 0)::float8 AS facturado,
+          COALESCE(SUM(
+            (
+              CASE
+                WHEN COALESCE(ip.paid, 0) > 0 THEN LEAST(COALESCE(ip.paid, 0), COALESCE(i."impTotal", i.amount))
+                WHEN i.status::text = 'PAGADA' OR i."paymentMethod" = 'EFECTIVO' THEN COALESCE(i."impTotal", i.amount)
+                ELSE 0
+              END
+            ) * sh.share
+          ), 0)::float8 AS cobrado_factura
+        FROM shares sh
+        JOIN "Invoice" i ON i.id = sh."invoiceId"
+        LEFT JOIN invoice_paid ip ON ip."invoiceId" = sh."invoiceId"
+        GROUP BY sh."serviceId"
+      ),
+      remito_paid AS (
+        SELECT r."serviceId", COALESCE(SUM(pd.amount), 0)::float8 AS cobrado_remito
+        FROM "Remito" r
+        JOIN "PaymentDocument" pd ON pd."remitoId" = r.id
+        WHERE r."serviceId" IN (SELECT id FROM range_services)
+        GROUP BY r."serviceId"
+      ),
+      service_stats AS (
+        SELECT
+          rs.id,
+          rs.technician_id,
+          rs.technician_name,
+          rs.technician_status,
+          rs.month_key,
+          rs.status,
+          COALESCE(rb.remito_total, 0)::float8 AS remito_total,
+          COALESCE(sim.facturado, 0)::float8 AS facturado,
+          CASE
+            WHEN GREATEST(COALESCE(sim.facturado, 0), COALESCE(rb.remito_total, 0)) > 0
+              THEN LEAST(
+                COALESCE(sim.cobrado_factura, 0) + COALESCE(rp.cobrado_remito, 0),
+                GREATEST(COALESCE(sim.facturado, 0), COALESCE(rb.remito_total, 0))
+              )
+            ELSE COALESCE(sim.cobrado_factura, 0) + COALESCE(rp.cobrado_remito, 0)
+          END::float8 AS cobrado
+        FROM range_services rs
+        LEFT JOIN remito_by_service rb ON rb."serviceId" = rs.id
+        LEFT JOIN service_invoice_money sim ON sim."serviceId" = rs.id
+        LEFT JOIN remito_paid rp ON rp."serviceId" = rs.id
+      )
+      SELECT
+        technician_id,
+        technician_name,
+        technician_status,
+        month_key,
+        COUNT(*)::int AS jobs,
+        COUNT(*) FILTER (WHERE status IN ('PENDIENTE', 'ASIGNADO'))::int AS en_curso,
+        COUNT(*) FILTER (WHERE status = 'SIN_COBRO')::int AS sin_cobro,
+        COUNT(*) FILTER (WHERE remito_total > 0.009)::int AS con_remito,
+        COUNT(*) FILTER (WHERE facturado > 0.009)::int AS facturados,
+        COALESCE(SUM(remito_total), 0)::float8 AS remito_total,
+        COALESCE(SUM(facturado), 0)::float8 AS facturado,
+        COALESCE(SUM(cobrado), 0)::float8 AS cobrado,
+        COALESCE(SUM(
+          CASE
+            WHEN status = 'SIN_COBRO' THEN 0
+            ELSE GREATEST(remito_total - facturado, 0)
+          END
+        ), 0)::float8 AS sin_facturar
+      FROM service_stats
+      GROUP BY technician_id, technician_name, technician_status, month_key
+      ORDER BY month_key, technician_name
+    `;
+
+    const technicians = new Map();
+    const byMonth = new Map(keys.map((key) => [key, new Map()]));
+    const summary = emptyTechBucket();
+
+    for (const row of rows) {
+      if (!keys.includes(row.month_key)) continue;
+
+      addTechBucket(summary, row);
+
+      let tech = technicians.get(row.technician_id);
+      if (!tech) {
+        tech = {
+          id: row.technician_id,
+          name: row.technician_name,
+          status: row.technician_status,
+          ...emptyTechBucket()
+        };
+        technicians.set(row.technician_id, tech);
+      }
+      addTechBucket(tech, row);
+
+      const monthBucket = byMonth.get(row.month_key);
+      let monthTech = monthBucket.get(row.technician_id);
+      if (!monthTech) {
+        monthTech = emptyTechBucket();
+        monthBucket.set(row.technician_id, monthTech);
+      }
+      addTechBucket(monthTech, row);
+    }
+
+    const technicianList = [...technicians.values()]
+      .map(withPending)
+      .sort((a, b) => b.jobs - a.jobs || b.invoiced - a.invoiced || a.name.localeCompare(b.name, 'es'));
+
+    const monthly = keys.map((key) => {
+      const monthTotals = emptyTechBucket();
+      const byTechnician = {};
+      for (const [id, bucket] of byMonth.get(key)) {
+        const shaped = withPending(bucket);
+        byTechnician[id] = shaped;
+        monthTotals.jobs += shaped.jobs;
+        monthTotals.enCurso += shaped.enCurso;
+        monthTotals.sinCobro += shaped.sinCobro;
+        monthTotals.conRemito += shaped.conRemito;
+        monthTotals.facturados += shaped.facturados;
+        monthTotals.remitoTotal = roundMoney(monthTotals.remitoTotal + shaped.remitoTotal);
+        monthTotals.invoiced = roundMoney(monthTotals.invoiced + shaped.invoiced);
+        monthTotals.collected = roundMoney(monthTotals.collected + shaped.collected);
+        monthTotals.unbilled = roundMoney(monthTotals.unbilled + shaped.unbilled);
+      }
+
+      const [year, month] = key.split('-');
+      return {
+        monthKey: key,
+        mes: `${BILLING_MONTHS[Number(month) - 1]} ${year}`,
+        ...withPending(monthTotals),
+        byTechnician
+      };
+    });
+
+    const shapedSummary = withPending(summary);
+
+    res.json({
+      range: { startDate, endDate },
+      summary: {
+        ...shapedSummary,
+        averagePerJob: shapedSummary.jobs > 0
+          ? roundMoney(shapedSummary.remitoTotal / shapedSummary.jobs)
+          : 0
+      },
+      technicians: technicianList,
+      monthly
+    });
+  } catch (error) {
+    console.error('Error al obtener estadísticas de técnicos:', error);
+    res.status(500).json({ message: 'Error al obtener estadísticas de técnicos' });
+  }
+};
+
 module.exports = {
   getAdminDebtReport,
   getBuildingDebtReport,
   getAdminDebtPDF,
   getNoChargeStats,
-  getBillingStats
+  getBillingStats,
+  getTechnicianStats
 }; 

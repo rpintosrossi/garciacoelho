@@ -6,6 +6,7 @@ import { cachedApi } from '@/lib/axios';
 interface Administrator {
   id: string;
   name: string;
+  administratorName?: string;
   email: string;
   phone: string;
   phones?: string[];

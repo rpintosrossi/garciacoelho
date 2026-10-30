@@ -1204,6 +1204,7 @@ const getBuildingServiceHistory = async (req, res) => {
           }
         },
         remitos: {
+          orderBy: { createdAt: 'asc' },
           include: {
             paymentDocuments: {
               include: {

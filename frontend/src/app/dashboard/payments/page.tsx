@@ -828,7 +828,7 @@ export default function PaymentsPage() {
           <Box sx={{ pt: 2 }}>
             <Autocomplete
               options={administrators}
-              getOptionLabel={(option) => `${option.name} ${option.cuit || ''} ${(option.cuits || []).join(' ')}`}
+              getOptionLabel={(option) => `${option.name} ${option.administratorName || ''} ${option.cuit || ''} ${(option.cuits || []).join(' ')}`}
               filterOptions={(x) => x}
               loading={loadingAdminSearch}
               onInputChange={(_, value) => {
@@ -864,6 +864,11 @@ export default function PaymentsPage() {
                       <Typography variant="body2" fontWeight="bold">
                         {option.name}
                       </Typography>
+                      {option.administratorName && (
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {option.administratorName}
+                        </Typography>
+                      )}
                       <Typography variant="caption" color="text.secondary">
                         {option.email} | {option.phone}{option.cuit ? ` | CUIT: ${option.cuit}` : ''}
                         {option.cuits?.length > 0 && ` | CUITs: ${option.cuits.join(', ')}`}

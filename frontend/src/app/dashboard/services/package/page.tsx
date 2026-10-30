@@ -44,6 +44,7 @@ interface Transaction {
   type: 'invoice' | 'payment' | 'remito_sin_factura';
   id: string;
   number?: string;
+  facturador?: string | null;
   date?: string;
   amount: number;
   status: string;
@@ -567,7 +568,10 @@ export default function PackagePage() {
                               {transaction.type === 'invoice' && (
                                 <>
                                   <Typography component="span" variant="body2" color="text.secondary" display="block">
-                                    N° Factura: {transaction.number || transaction.id.slice(0, 8)} | Fecha de Factura: {formatDate(transaction.date || transaction.createdAt)}
+                                    N° Factura: {transaction.number || transaction.id.slice(0, 8)}
+                                    {transaction.facturador ? ` · ${transaction.facturador}` : ''}
+                                    {' | '}
+                                    Fecha de Factura: {formatDate(transaction.date || transaction.createdAt)}
                                   </Typography>
                                   {(transaction.remitos?.length ? transaction.remitos : (transaction.service?.remitos || [])).map(r => (
                                     <Typography key={r.id} component="span" variant="body2" color="text.secondary" display="block">

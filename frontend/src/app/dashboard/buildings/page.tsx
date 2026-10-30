@@ -699,7 +699,9 @@ const BuildingsPage = () => {
               <Box display="flex" alignItems="flex-start" gap={1} sx={{ mt: 2 }}>
                 <Autocomplete
                   options={administrators}
-                  getOptionLabel={(option) => option.name}
+                  getOptionLabel={(option) =>
+                    option.administratorName ? `${option.name} — ${option.administratorName}` : option.name
+                  }
                   value={administrators.find(admin => admin.id === formik.values.administratorId) || null}
                   onChange={(_, newValue) => {
                     formik.setFieldValue('administratorId', newValue ? newValue.id : '');

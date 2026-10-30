@@ -418,7 +418,10 @@ const getAdministratorPayments = async (req, res) => {
     if (search) {
       const administrators = await prisma.administrator.findMany({
         where: {
-          name: { contains: search, mode: 'insensitive' }
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { administratorName: { contains: search, mode: 'insensitive' } }
+          ]
         },
         select: { id: true }
       });

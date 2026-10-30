@@ -39,12 +39,14 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EditIcon from '@mui/icons-material/Edit';
+import CloseIcon from '@mui/icons-material/Close';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import FileViewer from '@/components/FileViewer';
 import ElectronicInvoiceModal from '@/components/ElectronicInvoiceModal';
 import { cachedApi } from '@/lib/axios';
 import { useCommonData } from '@/contexts/CommonDataContext';
 import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
+import { formatDate } from '@/utils/formatDate';
 
 interface Service {
   id: string;
@@ -220,6 +222,44 @@ export default function InvoicedServices() {
   const [editRemitoFiles, setEditRemitoFiles] = useState<File[]>([]);
   const [savingRemitoNumber, setSavingRemitoNumber] = useState(false);
   const { confirmIfDuplicate, resetConfirmation, remitoDuplicateDialog } = useRemitoDuplicateCheck();
+
+  const [editingDateRemitoId, setEditingDateRemitoId] = useState<string | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState('');
+  const [savingDate, setSavingDate] = useState(false);
+
+  const handleStartEditDate = (remitoId: string, currentDate: string) => {
+    const match = String(currentDate || '').match(/^(\d{4}-\d{2}-\d{2})/);
+    setEditingDateValue(match ? match[1] : '');
+    setEditingDateRemitoId(remitoId);
+  };
+
+  const handleSaveDate = async (remitoId: string) => {
+    if (!editingDateValue) return;
+    setSavingDate(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.patch(`/remitos/${remitoId}`, { date: editingDateValue }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const iso = `${editingDateValue}T12:00:00.000Z`;
+      setServices(prev => prev.map(service => {
+        if (service.remitos?.[0]?.id !== remitoId) return service;
+        return {
+          ...service,
+          visitDate: iso,
+          remitos: (service.remitos || []).map((remito: any, index: number) =>
+            index === 0 ? { ...remito, date: iso } : remito
+          )
+        };
+      }));
+      setEditingDateRemitoId(null);
+      cachedApi.clearCacheFor('/services');
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Error al actualizar la fecha');
+    } finally {
+      setSavingDate(false);
+    }
+  };
 
   // Estados para selección múltiple
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -858,7 +898,9 @@ export default function InvoicedServices() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} mb={3} alignItems="center">
         <Autocomplete
           options={administrators}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={(option) =>
+            option.administratorName ? `${option.name} — ${option.administratorName}` : option.name
+          }
           value={selectedAdmin}
           onChange={handleAdminChange}
           renderInput={(params) => <TextField {...params} label="Administrador" />}
@@ -987,7 +1029,59 @@ export default function InvoicedServices() {
                 <TableCell>{buildings.find((b: any) => b.id === service.buildingId)?.administrator?.name || '-'}</TableCell>
                 <TableCell>{service.description}</TableCell>
                 <TableCell>{service.technician?.name}</TableCell>
-                <TableCell>{new Date(service.visitDate || service.createdAt).toLocaleDateString()}</TableCell>
+                <TableCell sx={{ minWidth: 160 }}>
+                  {service.remitos?.[0]?.id ? (
+                    editingDateRemitoId === service.remitos[0].id ? (
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <TextField
+                          type="date"
+                          size="small"
+                          value={editingDateValue}
+                          onChange={(e) => setEditingDateValue(e.target.value)}
+                          disabled={savingDate}
+                          sx={{ width: 145 }}
+                          inputProps={{ style: { fontSize: 13, padding: '4px 6px' } }}
+                        />
+                        <IconButton
+                          size="small"
+                          color="success"
+                          disabled={savingDate || !editingDateValue}
+                          onClick={() => handleSaveDate(service.remitos![0].id)}
+                          title="Guardar fecha"
+                        >
+                          <CheckCircleIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          disabled={savingDate}
+                          onClick={() => setEditingDateRemitoId(null)}
+                          title="Cancelar"
+                        >
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ) : (
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                          {formatDate(service.remitos[0].date || service.visitDate || service.createdAt)}
+                        </Typography>
+                        <Tooltip title="Editar fecha">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleStartEditDate(
+                              service.remitos![0].id,
+                              service.remitos![0].date || service.visitDate || service.createdAt
+                            )}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    )
+                  ) : (
+                    formatDate(service.visitDate || service.createdAt)
+                  )}
+                </TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
                     {hasReceipt ? (
@@ -1475,8 +1569,6 @@ export default function InvoicedServices() {
         onSuccess={() => {
           setSelectedServices([]);
           setBulkMode(false);
-          setOpenElectronicInvoice(false);
-          setElectronicInvoiceServices([]);
           cachedApi.clearCacheFor('/services');
           fetchServices();
           localStorage.setItem('servicesLastUpdate', Date.now().toString());

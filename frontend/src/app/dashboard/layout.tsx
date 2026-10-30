@@ -31,6 +31,7 @@ import {
   Settings as SettingsIcon,
   Assessment as AssessmentIcon,
   ReceiptLong as ReceiptLongIcon,
+  Engineering as EngineeringIcon,
   Inventory as InventoryIcon,
   LocationOn as LocationOnIcon,
   Payment as PaymentIcon,
@@ -65,6 +66,12 @@ export default function DashboardLayout({
       }
     }
   }, [user?.role, authLoading, pathname, router]);
+
+  useEffect(() => {
+    if (pathname.startsWith('/dashboard/reports')) {
+      setReportsOpen(true);
+    }
+  }, [pathname]);
 
   // Si es técnico y no está en la ruta correcta, no renderizar nada
   if (authLoading) return null;
@@ -185,6 +192,11 @@ export default function DashboardLayout({
       text: 'Facturación',
       icon: <ReceiptLongIcon sx={{ color: '#2563eb' }} />,
       path: '/dashboard/reports/billing',
+    },
+    {
+      text: 'Técnicos',
+      icon: <EngineeringIcon sx={{ color: '#7c3aed' }} />,
+      path: '/dashboard/reports/technicians',
     },
   ];
 

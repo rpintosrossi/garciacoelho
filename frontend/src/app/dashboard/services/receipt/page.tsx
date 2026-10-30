@@ -368,7 +368,9 @@ export default function ServicesWithReceipt() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} mb={3} alignItems="center">
         <Autocomplete
           options={administrators}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={(option) =>
+            option.administratorName ? `${option.name} — ${option.administratorName}` : option.name
+          }
           value={selectedAdmin}
           onChange={handleAdminChange}
           renderInput={(params) => <TextField {...params} label="Administrador" />}

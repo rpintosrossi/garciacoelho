@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useState } from "react";
-import api from '@/lib/axios';
+import api, { cachedApi } from '@/lib/axios';
 import { jsPDF } from "jspdf";
 import {
   Dialog,
@@ -222,6 +222,8 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       await api.patch(`/remitos/${remitoId}`, { date: editingRemitoDate }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      cachedApi.clearCacheFor('/services');
+      window.dispatchEvent(new Event('servicesChanged'));
       setEditingRemitoId(null);
       fetchHistory();
     } catch (err) {

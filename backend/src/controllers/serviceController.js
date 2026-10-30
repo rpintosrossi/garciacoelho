@@ -193,7 +193,7 @@ const getAllServices = async (req, res) => {
         },
         technician: true,
         ...serviceInvoicesInclude,
-        remitos: true,
+        remitos: { orderBy: { createdAt: 'asc' } },
         workshopRepairs: {
           select: {
             id: true

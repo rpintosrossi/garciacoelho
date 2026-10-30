@@ -157,7 +157,9 @@ export default function ReceiptPage() {
       <Stack spacing={2} mb={2}>
         <Autocomplete
           options={administrators}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={(option) =>
+            option.administratorName ? `${option.name} — ${option.administratorName}` : option.name
+          }
           value={selectedAdmin}
           onChange={(_, newValue) => handleAdminChange(newValue)}
           renderInput={(params) => <TextField {...params} label="Buscar administrador" />}

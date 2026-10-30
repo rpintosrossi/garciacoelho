@@ -139,9 +139,20 @@ const updateRemitoDate = async (req, res) => {
       return res.json(remito);
     }
 
-    const updated = await prisma.remito.update({
-      where: { id },
-      data
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedRemito = await tx.remito.update({
+        where: { id },
+        data
+      });
+      // El historial edita la fecha del remito. Se copia a la visita del servicio
+      // para que Facturación y el resto de las pantallas usen la misma fecha.
+      if (data.date) {
+        await tx.service.update({
+          where: { id: remito.serviceId },
+          data: { visitDate: data.date }
+        });
+      }
+      return updatedRemito;
     });
     res.json(updated);
   } catch (error) {
