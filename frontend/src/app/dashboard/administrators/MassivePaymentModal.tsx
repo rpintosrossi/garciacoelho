@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -18,7 +18,13 @@ import {
 } from "@mui/material";
 import api from '@/lib/axios';
 import { formatCurrency } from "@/utils/formatCurrency";
-import { formatDate } from '@/utils/formatDate';
+import { formatDate, todayYmd } from '@/utils/formatDate';
+import BalanceChip, { compareBalances, isSettledBalance } from '@/components/BalanceChip';
+
+const formatFullAddress = (address?: string | null, locality?: string | null) => {
+  const parts = [address, locality].map(part => (part || '').trim()).filter(Boolean);
+  return parts.join(', ');
+};
 
 interface MassivePaymentModalProps {
   open: boolean;
@@ -38,12 +44,13 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
   const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   const [discountReason, setDiscountReason] = useState("");
   const [comment, setComment] = useState("");
-  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState<string>(todayYmd());
   const [paymentMethod, setPaymentMethod] = useState<any>(null);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [buildingFilter, setBuildingFilter] = useState<string>('');
+  const [balancesByBuilding, setBalancesByBuilding] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (open && adminId) {
@@ -52,11 +59,18 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       const token = localStorage.getItem("token");
       Promise.all([
         api.get(`/administrators/${adminId}/pending-invoices`, { headers: { Authorization: `Bearer ${token}` } }),
-        api.get(`/payment-methods`, { headers: { Authorization: `Bearer ${token}` } })
+        api.get(`/payment-methods`, { headers: { Authorization: `Bearer ${token}` } }),
+        api.get(`/administrators/${adminId}/buildings-balances`, { headers: { Authorization: `Bearer ${token}` } })
+          .catch(() => ({ data: [] }))
       ])
-        .then(([docsRes, methodsRes]) => {
+        .then(([docsRes, methodsRes, balancesRes]) => {
           setPendingDocs(docsRes.data);
           setPaymentMethods(methodsRes.data);
+          const balances: Record<string, number> = {};
+          for (const building of balancesRes.data || []) {
+            balances[building.id] = building.account?.balance ?? 0;
+          }
+          setBalancesByBuilding(balances);
         })
         .catch(() => setError("Error al cargar documentos o medios de pago"))
         .finally(() => setLoadingDocs(false));
@@ -69,9 +83,40 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
       setDiscountReason("");
       setComment("");
       setPaymentMethod(null);
-      setPaymentDate(new Date().toISOString().slice(0, 10));
+      setPaymentDate(todayYmd());
     }
   }, [open, adminId]);
+
+  const buildingOptions = useMemo(() => {
+    const byId = new Map<string, { buildingId: string; buildingName: string; buildingAddress?: string; buildingLocality?: string }>();
+    for (const doc of pendingDocs) {
+      if (!byId.has(doc.buildingId)) {
+        byId.set(doc.buildingId, {
+          buildingId: doc.buildingId,
+          buildingName: doc.buildingName,
+          buildingAddress: doc.buildingAddress,
+          buildingLocality: doc.buildingLocality
+        });
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => {
+      const byBalance = compareBalances(balancesByBuilding[a.buildingId], balancesByBuilding[b.buildingId]);
+      if (byBalance !== 0) return byBalance;
+      return (a.buildingName || '').localeCompare(b.buildingName || '', 'es', { sensitivity: 'base' });
+    });
+  }, [pendingDocs, balancesByBuilding]);
+
+  const visibleDocs = useMemo(() => {
+    return pendingDocs
+      .filter(doc => !buildingFilter || doc.buildingId === buildingFilter)
+      .sort((a, b) => {
+        const byBalance = compareBalances(balancesByBuilding[a.buildingId], balancesByBuilding[b.buildingId]);
+        if (byBalance !== 0) return byBalance;
+        const byName = (a.buildingName || '').localeCompare(b.buildingName || '', 'es', { sensitivity: 'base' });
+        if (byName !== 0) return byName;
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
+  }, [pendingDocs, buildingFilter, balancesByBuilding]);
 
   // Calcular monto original basado en documentos seleccionados
   const calculateOriginalAmount = () => {
@@ -317,20 +362,34 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
         ) : (
           <>
             <Autocomplete
-              options={Array.from(new Map(pendingDocs.map(doc => [doc.buildingId, doc])).values())}
+              options={buildingOptions}
               getOptionLabel={option => `${option.buildingName} - ${option.buildingAddress || ''}`}
-              value={pendingDocs.find(doc => doc.buildingId === buildingFilter) || null}
+              value={buildingOptions.find(option => option.buildingId === buildingFilter) || null}
               onChange={(_, value) => setBuildingFilter(value?.buildingId || '')}
+              isOptionEqualToValue={(option, value) => option.buildingId === value.buildingId}
               renderInput={params => <TextField {...params} label="Filtrar por edificio" fullWidth />}
               renderOption={(props, option) => {
                 const { key, ...otherProps } = props;
+                const balance = balancesByBuilding[option.buildingId];
                 return (
                   <Box component="li" key={key} {...otherProps}>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold">{option.buildingName}</Typography>
-                      {option.buildingAddress && (
-                        <Typography variant="caption" color="text.secondary">{option.buildingAddress}</Typography>
-                      )}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                        gap: 1.5,
+                        opacity: isSettledBalance(balance) ? 0.55 : 1
+                      }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight="bold">{option.buildingName}</Typography>
+                        {option.buildingAddress && (
+                          <Typography variant="caption" color="text.secondary">{option.buildingAddress}</Typography>
+                        )}
+                      </Box>
+                      <BalanceChip balance={balance} />
                     </Box>
                   </Box>
                 );
@@ -339,8 +398,8 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
             />
             <Autocomplete
               multiple
-              options={pendingDocs.filter(doc => !buildingFilter || doc.buildingId === buildingFilter)}
-              groupBy={option => option.buildingName}
+              options={visibleDocs}
+              groupBy={option => option.buildingId}
               getOptionLabel={option => {
                 const tipo = option.type === 'REMITO' ? 'Remito' : 'Factura';
                 const fecha = option.date ? formatDate(option.date) : '-';
@@ -350,6 +409,34 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
               onChange={(_, value) => setSelectedDocs(value)}
               renderInput={params => <TextField {...params} label="Documentos a asociar" fullWidth />}
               isOptionEqualToValue={(option, value) => option.id === value.id}
+              renderGroup={(params) => {
+                const building = buildingOptions.find(option => option.buildingId === params.group);
+                const balance = balancesByBuilding[params.group];
+                return (
+                  <li key={params.key}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 1,
+                        px: 2,
+                        py: 0.75,
+                        position: 'sticky',
+                        top: -8,
+                        bgcolor: 'background.paper',
+                        zIndex: 1
+                      }}
+                    >
+                      <Typography variant="subtitle2">
+                        {formatFullAddress(building?.buildingAddress, building?.buildingLocality) || 'Sin dirección'}
+                      </Typography>
+                      <BalanceChip balance={balance} />
+                    </Box>
+                    <Box component="ul" sx={{ p: 0 }}>{params.children}</Box>
+                  </li>
+                );
+              }}
               renderOption={(props, option) => (
                 <li {...props} key={option.id}>
                   <Box>
@@ -357,7 +444,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                       {option.type === 'REMITO' ? 'Remito' : 'Factura'} - {option.date ? formatDate(option.date) : '-'} - {formatCurrency(option.amount)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {option.buildingName} - {option.description}
+                      {formatFullAddress(option.buildingAddress, option.buildingLocality) || option.buildingName} - {option.description}
                     </Typography>
                   </Box>
                 </li>
@@ -510,7 +597,7 @@ export default function MassivePaymentModal({ open, onClose, adminId, onSuccess 
                               {item.doc.type === 'REMITO' ? 'Remito' : 'Factura'} - {formatDate(item.doc.date)}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {item.doc.buildingName} - {item.doc.description}
+                              {formatFullAddress(item.doc.buildingAddress, item.doc.buildingLocality) || item.doc.buildingName} - {item.doc.description}
                             </Typography>
                           </Box>
                           <Box textAlign="right">

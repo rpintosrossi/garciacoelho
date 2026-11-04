@@ -9,6 +9,7 @@ const {
   serviceInvoicesInclude,
   getServiceInvoices
 } = require('../utils/serviceInvoiceHelpers');
+const { parseCalendarDate } = require('../utils/calendarDate');
 
 // Obtener todos los administradores
 const getAdministrators = async (req, res) => {
@@ -305,7 +306,7 @@ const getPendingInvoicesForAdmin = async (req, res) => {
     const { id } = req.params;
     const buildings = await prisma.building.findMany({
       where: { administratorId: id },
-      select: { id: true, name: true, address: true }
+      select: { id: true, name: true, address: true, locality: true }
     });
 
     if (buildings.length === 0) {
@@ -359,6 +360,7 @@ const getPendingInvoicesForAdmin = async (req, res) => {
             buildingId: building.id,
             buildingName: building.name,
             buildingAddress: building.address,
+            buildingLocality: building.locality,
             description: service.description,
             amount: montoPendiente,
             date: invoice.createdAt
@@ -380,6 +382,7 @@ const getPendingInvoicesForAdmin = async (req, res) => {
             buildingId: building.id,
             buildingName: building.name,
             buildingAddress: building.address,
+            buildingLocality: building.locality,
             description: service.description,
             amount: montoPendiente,
             date: remito.date
@@ -430,12 +433,8 @@ const createAdminMassivePayment = async (req, res) => {
     }
     // Generar número de comprobante simple (timestamp + random)
     const comprobante = `PAGO-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`;
-    // Ajustar la fecha a horario de Argentina (UTC-3)
-    let paymentDate = new Date(date);
-    // Si la fecha viene sin zona horaria (solo YYYY-MM-DD), ajusta a UTC-3
-    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      paymentDate = new Date(date + 'T00:00:00-03:00');
-    }
+    // YYYY-MM-DD es un día calendario de Argentina, no medianoche UTC
+    const paymentDate = parseCalendarDate(date);
     // Crear el pago principal
     console.log('💰 [MASSIVE PAYMENT] Creando pago principal...');
     const pago = await prisma.payment.create({

@@ -6,6 +6,7 @@ const {
   getInvoiceServices,
   withInvoiceServices
 } = require('../utils/serviceInvoiceHelpers');
+const { parseCalendarDate } = require('../utils/calendarDate');
 
 // Registrar un pago y asociar a facturas o remitos
 const createPayment = async (req, res) => {
@@ -71,7 +72,7 @@ const createPayment = async (req, res) => {
       originalAmount: montoOriginal,
       discount: montoDescuento,
       discountReason: discountReason || null,
-      date: new Date(date),
+      date: parseCalendarDate(date),
       paymentMethodId,
       comprobante,
       method: '',
@@ -83,7 +84,7 @@ const createPayment = async (req, res) => {
         originalAmount: montoOriginal,
         discount: montoDescuento,
         discountReason: discountReason || null,
-        date: new Date(date),
+        date: parseCalendarDate(date),
         paymentMethodId,
         comprobante,
         method: '',

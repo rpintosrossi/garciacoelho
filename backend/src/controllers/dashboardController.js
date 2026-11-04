@@ -186,6 +186,39 @@ const getInvoicedVsCollected = async (req, res) => {
   }
 };
 
+// Top técnicos por cantidad de servicios (últimos 12 meses)
+const getTopTechnicians = async (req, res) => {
+  try {
+    const now = new Date();
+    const since = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    const rows = await prisma.$queryRaw`
+      SELECT
+        t.id,
+        t.name,
+        COUNT(*)::int AS servicios
+      FROM "Service" s
+      JOIN technicians t ON t.id = s."technicianId"
+      WHERE s."technicianId" IS NOT NULL
+        AND COALESCE(s."visitDate", s."createdAt") >= ${since}
+      GROUP BY t.id, t.name
+      ORDER BY servicios DESC, t.name ASC
+      LIMIT 10
+    `;
+
+    res.json({
+      data: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        servicios: Number(row.servicios)
+      }))
+    });
+  } catch (error) {
+    console.error('Error al obtener top de técnicos:', error);
+    res.status(500).json({ message: 'Error al obtener el top de técnicos' });
+  }
+};
+
 // Top administradores con pagos más rápidos
 const getFastPaymentAdmins = async (req, res) => {
   try {
@@ -333,5 +366,6 @@ module.exports = {
   getBuildingsWithOverdueDebts,
   getPaymentsByMethod,
   getInvoicedVsCollected,
-  getFastPaymentAdmins
+  getFastPaymentAdmins,
+  getTopTechnicians
 }; 

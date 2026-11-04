@@ -54,6 +54,7 @@ import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
 import BuildingPaymentModal from '../administrators/BuildingPaymentModal';
 import MassivePaymentModal from '../administrators/MassivePaymentModal';
+import BalanceChip, { isSettledBalance } from '@/components/BalanceChip';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -269,7 +270,7 @@ export default function PaymentsPage() {
     setLoadingBuildingSearch(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await api.get(`/buildings/search/autocomplete?search=${encodeURIComponent(searchTerm)}`, {
+      const res = await api.get(`/buildings/search/autocomplete?search=${encodeURIComponent(searchTerm)}&sort=balance`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setBuildings(res.data || []);
@@ -737,7 +738,7 @@ export default function PaymentsPage() {
           setBuildingSearchInput("");
           setBuildings([]);
         }}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>Buscar Edificio para Ingresar Pago</DialogTitle>
@@ -775,20 +776,33 @@ export default function PaymentsPage() {
               )}
               renderOption={(props, option) => {
                 const { key, ...otherProps } = props;
+                const settled = isSettledBalance(option.account?.balance);
                 return (
                   <Box component="li" key={key} {...otherProps}>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold">
-                        {option.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        CUIT: {option.cuit} | <strong>{option.address}</strong>
-                      </Typography>
-                      {option.administrator && (
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          Administrador: {option.administrator.name}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                        gap: 1.5,
+                        opacity: settled ? 0.55 : 1
+                      }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight="bold">
+                          {option.name}
                         </Typography>
-                      )}
+                        <Typography variant="caption" color="text.secondary">
+                          CUIT: {option.cuit} | <strong>{option.address}</strong>
+                        </Typography>
+                        {option.administrator && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Administrador: {option.administrator.name}
+                          </Typography>
+                        )}
+                      </Box>
+                      <BalanceChip balance={option.account?.balance} />
                     </Box>
                   </Box>
                 );

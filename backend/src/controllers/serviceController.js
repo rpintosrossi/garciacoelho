@@ -1829,6 +1829,33 @@ const markServiceNoCharge = async (req, res) => {
   }
 };
 
+const updateServiceHistoryNote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+
+    if (note.length > 2000) {
+      return res.status(400).json({ message: 'La nota no puede superar los 2000 caracteres' });
+    }
+
+    const service = await prisma.service.findUnique({ where: { id } });
+    if (!service) {
+      return res.status(404).json({ message: 'Servicio no encontrado' });
+    }
+
+    const updated = await prisma.service.update({
+      where: { id },
+      data: { historyNote: note || null },
+      select: { id: true, historyNote: true }
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error al actualizar la nota del servicio:', error);
+    res.status(500).json({ message: 'Error al actualizar la nota del servicio' });
+  }
+};
+
 function parseElectronicServiceIds(raw, fallbackId) {
   let ids = [];
   if (Array.isArray(raw)) {
@@ -2424,5 +2451,6 @@ module.exports = {
   getAssignedServicesForTechnician,
   cancelService,
   closeInvoicing,
-  markServiceNoCharge
+  markServiceNoCharge,
+  updateServiceHistoryNote
 }; 

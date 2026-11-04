@@ -11,6 +11,7 @@ const {
   getServiceInvoices,
   withServiceInvoices
 } = require('../utils/serviceInvoiceHelpers');
+const { parseCalendarDate } = require('../utils/calendarDate');
 
 // Función auxiliar para capitalizar la primera letra de cada palabra
 const capitalizeFirstLetter = (str) => {
@@ -1055,8 +1056,8 @@ const createBuildingPayment = async (req, res) => {
     // Crear el pago primero
     console.log('💰 [BUILDING PAYMENT] Creando pago...');
     
-    // Convertir la fecha a objeto Date si viene como string
-    const paymentDate = typeof date === 'string' ? new Date(date) : date;
+    // YYYY-MM-DD es un día calendario de Argentina, no medianoche UTC
+    const paymentDate = parseCalendarDate(date);
     
     const payment = await prisma.payment.create({
       data: {
@@ -1312,6 +1313,7 @@ const getBuildingServiceHistory = async (req, res) => {
           technician: service.technician,
           noChargeReason: service.noChargeReason || null,
           noChargeComment: service.noChargeComment || null,
+          historyNote: service.historyNote || null,
           remitos: service.remitos.map(remito => ({
             id: remito.id,
             number: remito.number,
@@ -1367,10 +1369,29 @@ const getBuildingServiceHistory = async (req, res) => {
 };
 
 // Búsqueda liviana de edificios para autocomplete (no calcula saldos)
+const balanceBucket = (balance) => {
+  if (balance > 0.01) return 0;
+  if (balance < -0.01) return 1;
+  return 2;
+};
+
+// Deuda primero (mayor monto arriba), después saldo a favor, ceros al final.
+const compareBuildingsByBalance = (a, b) => {
+  const balA = a.account?.balance ?? 0;
+  const balB = b.account?.balance ?? 0;
+  const bucketDiff = balanceBucket(balA) - balanceBucket(balB);
+  if (bucketDiff !== 0) return bucketDiff;
+  if (balanceBucket(balA) === 0 && Math.abs(balA - balB) > 0.01) return balB - balA;
+  if (balanceBucket(balA) === 1 && Math.abs(balA - balB) > 0.01) return balA - balB;
+  return compareBuildingNames(a.name, b.name);
+};
+
 const searchBuildingsAutocomplete = async (req, res) => {
   try {
     const search = req.query.search || '';
     if (search.length < 2) return res.json([]);
+
+    const sortByBalance = req.query.sort === 'balance';
 
     const buildings = await prisma.building.findMany({
       where: {
@@ -1387,10 +1408,21 @@ const searchBuildingsAutocomplete = async (req, res) => {
         administrator: true,
         account: true
       },
-      take: 50
+      ...(sortByBalance
+        ? {
+            orderBy: {
+              account: { balance: { sort: 'desc', nulls: 'last' } }
+            },
+            take: 80
+          }
+        : { take: 50 })
     });
 
-    buildings.sort((a, b) => compareBuildingNames(a.name, b.name));
+    if (sortByBalance) {
+      buildings.sort(compareBuildingsByBalance);
+    } else {
+      buildings.sort((a, b) => compareBuildingNames(a.name, b.name));
+    }
     res.json(buildings.slice(0, 20));
   } catch (error) {
     console.error('Error en búsqueda autocomplete:', error);

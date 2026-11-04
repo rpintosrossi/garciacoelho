@@ -23,7 +23,8 @@ const {
   getAssignedServicesForTechnician,
   cancelService,
   closeInvoicing,
-  markServiceNoCharge
+  markServiceNoCharge,
+  updateServiceHistoryNote
 } = require('../controllers/serviceController');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -100,6 +101,9 @@ router.post('/:id/cancel', roleMiddleware(['TECNICO', 'ADMIN', 'OPERADOR']), can
 
 // Ruta para marcar servicio sin cobro económico (solo ADMIN u OPERADOR)
 router.patch('/:id/no-charge', roleMiddleware(['ADMIN', 'OPERADOR']), markServiceNoCharge);
+
+// Nota interna del servicio, editable desde el historial del edificio
+router.patch('/:id/history-note', roleMiddleware(['ADMIN', 'OPERADOR']), updateServiceHistoryNote);
 
 // Cerrar facturación parcial (solo ADMIN u OPERADOR)
 router.post('/:id/close-invoicing', roleMiddleware(['ADMIN', 'OPERADOR']), closeInvoicing);

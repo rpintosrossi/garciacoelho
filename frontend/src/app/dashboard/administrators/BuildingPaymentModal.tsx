@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import api from '@/lib/axios';
-import { formatDate } from '@/utils/formatDate';
+import { formatDate, todayYmd } from '@/utils/formatDate';
 import {
   Dialog,
   DialogTitle,
@@ -62,7 +62,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
   const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   const [discountReason, setDiscountReason] = useState("");
   const [comment, setComment] = useState("");
-  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState<string>(todayYmd());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [saving, setSaving] = useState(false);
@@ -92,7 +92,7 @@ const BuildingPaymentModal: React.FC<BuildingPaymentModalProps> = ({
       setDiscountReason("");
       setComment("");
       setPaymentMethod(null);
-      setPaymentDate(new Date().toISOString().slice(0, 10));
+      setPaymentDate(todayYmd());
     }
   }, [open, buildingId]);
 

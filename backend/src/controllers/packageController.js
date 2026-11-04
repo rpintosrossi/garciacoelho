@@ -18,6 +18,7 @@ const {
   withInvoiceServices,
   getInvoiceServices
 } = require('../utils/serviceInvoiceHelpers');
+const { formatCalendarDate } = require('../utils/calendarDate');
 const { listIssuers, isAfipConfigured } = require('../services/afipClient');
 const { digitsOnly } = require('../utils/afipFiscal');
 
@@ -1020,9 +1021,14 @@ const getPackages = async (req, res) => {
              }
            }
            
-           // Solo agregar facturas que tengan PDF
+           // Facturas con PDF se intercalan con sus remitos.
+           // El cobro sin factura (Prov) no tiene PDF de factura: el remito
+           // cargado igual tiene que entrar al paquete.
            if (invoiceData.pdfBuffer) {
              invoicesWithRemitos.push(invoiceData);
+           } else if (invoiceData.remitos.length > 0) {
+             console.log(`📄 [PACKAGES] Prov ${invoice.number || invoice.id} sin PDF de factura: se agregan ${invoiceData.remitos.length} remito(s)`);
+             orphanRemitoPDFs.push(...invoiceData.remitos);
            }
          }
         
@@ -1182,7 +1188,9 @@ const getPackages = async (req, res) => {
                 const decryptedBuffer = fs.readFileSync(decryptedPath);
                 decryptedOrphanRemitos.push({
                   name: remitoData.name,
-                  buffer: decryptedBuffer
+                  buffer: decryptedBuffer,
+                  buildingAddress: remitoData.buildingAddress || '',
+                  remito: remitoData.remito
                 });
                 
                 console.log(`✅ [PACKAGES] Remito huérfano desencriptado: ${remitoData.name}`);
@@ -1449,7 +1457,7 @@ const getPackages = async (req, res) => {
               // Remitos huérfanos
               for (let idx = 0; idx < decryptedOrphanRemitos.length; idx++) {
                 const remito = decryptedOrphanRemitos[idx];
-                const remitoNum = remito.name.replace('remito_pago_', '');
+                const remitoNum = remito.name.replace(/^remito_(pago_)?/, '');
                 const safeAddress = (remito.buildingAddress || '').replace(/[^a-zA-Z0-9\s\-]/g, '_').replace(/\s+/g, '_').trim().slice(0, 50);
                 const safeNum = remitoNum.replace(/[^a-zA-Z0-9\-_]/g, '_').trim();
                 const orphanFileName = safeAddress ? `${safeAddress}_${safeNum}` : safeNum;
@@ -1664,7 +1672,7 @@ const getPackages = async (req, res) => {
     // Último pago al final de la hoja de resumen
     doc.moveDown(2);
     const lastPaymentLabel = lastPayment
-      ? `Último pago registrado: ${new Date(lastPayment.date).toLocaleDateString('es-AR')}`
+      ? `Último pago registrado: ${formatCalendarDate(lastPayment.date)}`
       : 'Último pago registrado: Sin registros';
     doc.fontSize(11).fillColor('#000').text(lastPaymentLabel, 50);
 

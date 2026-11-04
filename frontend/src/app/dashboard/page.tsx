@@ -99,6 +99,7 @@ export default function DashboardPage() {
   const [paymentsByMethod, setPaymentsByMethod] = useState<{ data: any[], methods: string[] }>({ data: [], methods: [] });
   const [invoicedVsCollected, setInvoicedVsCollected] = useState<any[]>([]);
   const [fastPaymentAdmins, setFastPaymentAdmins] = useState<any[]>([]);
+  const [topTechnicians, setTopTechnicians] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overdueDebts, setOverdueDebts] = useState<any>(null);
@@ -125,13 +126,14 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [quickStatsRes, serviceStatsRes, overdueDebtsRes, paymentsByMethodRes, invoicedVsCollectedRes, fastPaymentAdminsRes] = await Promise.all([
+        const [quickStatsRes, serviceStatsRes, overdueDebtsRes, paymentsByMethodRes, invoicedVsCollectedRes, fastPaymentAdminsRes, topTechniciansRes] = await Promise.all([
           cachedApi.get('/dashboard/quick-stats'),
           cachedApi.get('/services/stats'),
           cachedApi.get('/dashboard/overdue-debts'),
           cachedApi.get('/dashboard/payments-by-method'),
           cachedApi.get('/dashboard/invoiced-vs-collected'),
-          cachedApi.get('/dashboard/fast-payment-admins')
+          cachedApi.get('/dashboard/fast-payment-admins'),
+          cachedApi.get('/dashboard/top-technicians')
         ]);
         setStats(quickStatsRes.data);
         // Formatear datos para el gráfico
@@ -145,6 +147,7 @@ export default function DashboardPage() {
         setPaymentsByMethod(paymentsByMethodRes.data);
         setInvoicedVsCollected(invoicedVsCollectedRes.data.data || []);
         setFastPaymentAdmins(fastPaymentAdminsRes.data.data || []);
+        setTopTechnicians(topTechniciansRes.data.data || []);
       } catch (err: any) {
         setError(err.response?.data?.message || 'Error al cargar estadísticas');
       } finally {
@@ -237,6 +240,46 @@ export default function DashboardPage() {
         </Grid>
       </Grid>
       <Grid container spacing={3} sx={{ mb: 3, width: '100%', margin: 0 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Top técnicos por servicios (últimos 12 meses)
+            </Typography>
+            <Box sx={{ filter: hideValues ? 'blur(8px)' : 'none', pointerEvents: hideValues ? 'none' : 'auto', transition: 'filter 0.2s' }}>
+              {topTechnicians.length === 0 ? (
+                <Box sx={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    No hay servicios asignados a técnicos en los últimos 12 meses.
+                  </Typography>
+                </Box>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart layout="vertical" data={topTechnicians} margin={{ top: 8, right: 32, left: 8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" allowDecimals={false} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={140}
+                      reversed
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value: string) => (value.length > 18 ? `${value.slice(0, 16)}…` : value)}
+                    />
+                    <RechartsTooltip
+                      formatter={(value: number) => [`${value} servicios`, 'Servicios']}
+                    />
+                    <Bar dataKey="servicios" radius={[0, 4, 4, 0]}>
+                      {topTechnicians.map((_, i) => {
+                        const colors = ['#7c3aed', '#8b5cf6', '#a78bfa', '#2563eb', '#3b82f6', '#60a5fa', '#059669', '#10b981', '#34d399', '#6ee7b7'];
+                        return <Cell key={i} fill={colors[i % colors.length]} />;
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Box>
+          </Paper>
+        </Grid>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Typography variant="h6" gutterBottom>

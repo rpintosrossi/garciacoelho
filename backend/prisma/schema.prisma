@@ -89,6 +89,7 @@ model Service {
   cancellationReason   String?
   noChargeReasonId     String?
   noChargeComment      String?
+  historyNote          String?
   remitos              Remito[]
   workshopRepairs      WorkshopRepair[]
   invoiceServices      InvoiceService[]

@@ -1,16 +1,37 @@
+const ARGENTINA_TZ = 'America/Argentina/Buenos_Aires';
+
+/** Hoy en Argentina, como YYYY-MM-DD (el input type="date" no acepta hora). */
+export function todayYmd(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: ARGENTINA_TZ });
+}
+
 /**
- * Formats a date string safely without timezone conversion.
- * Dates from the backend come as UTC ISO strings (e.g. "2026-04-13T00:00:00.000Z").
- * Using `new Date(str).toLocaleDateString()` shifts to local time (UTC-3 in Argentina),
- * causing the date to appear one day earlier. This function extracts the date portion
- * directly from the ISO string to avoid that shift.
+ * Formats a calendar date without shifting the day.
+ * Dates stored as UTC midnight (e.g. "2026-04-13T00:00:00.000Z") are the previous
+ * evening in Argentina. The date portion of the ISO string is the day the user chose.
+ * Instants with a real time are shown in America/Argentina/Buenos_Aires.
  */
 export function formatDate(dateString: string | null | undefined): string {
   if (!dateString) return '-';
-  const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (match) {
-    return `${match[3]}/${match[2]}/${match[1]}`;
+  const match = String(dateString).match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2}))?/
+  );
+  if (!match) {
+    const parsed = new Date(dateString);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleDateString('es-AR', { timeZone: ARGENTINA_TZ });
   }
-  // Fallback for non-ISO formats
-  return new Date(dateString).toLocaleDateString('es-AR');
+
+  const [, year, month, day, hours, minutes, seconds] = match;
+  const isCalendarDay =
+    !hours ||
+    (hours === '00' && minutes === '00' && seconds === '00') ||
+    (hours === '03' && minutes === '00' && seconds === '00') ||
+    (hours === '12' && minutes === '00' && seconds === '00');
+
+  if (isCalendarDay) {
+    return `${day}/${month}/${year}`;
+  }
+
+  return new Date(dateString).toLocaleDateString('es-AR', { timeZone: ARGENTINA_TZ });
 }

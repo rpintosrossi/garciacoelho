@@ -49,6 +49,7 @@ import {
   Download,
   Edit,
   Delete,
+  Comment,
   PictureAsPdf,
   Image as ImageIcon,
   InsertDriveFile
@@ -111,6 +112,7 @@ interface Service {
   invoices?: Invoice[];
   noChargeReason: { id: string; name: string } | null;
   noChargeComment: string | null;
+  historyNote: string | null;
 }
 
 interface BuildingHistoryData {
@@ -163,7 +165,8 @@ const PdfDescRow = React.memo(({ serviceId, date, value, onChange }: {
         fullWidth
         size="small"
         multiline
-        rows={2}
+        minRows={2}
+        maxRows={8}
         value={value}
         onChange={(e) => onChange(serviceId, e.target.value)}
       />
@@ -171,6 +174,25 @@ const PdfDescRow = React.memo(({ serviceId, date, value, onChange }: {
   </TableRow>
 ));
 PdfDescRow.displayName = 'PdfDescRow';
+
+/** Cada renglón o segmento separado por "|" es un ítem del servicio. */
+const splitHistoryItems = (text: string): string[] =>
+  String(text || '')
+    .split(/\r?\n|\s*\|\s*/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+const cleanHistoryItem = (raw: string, buildingName: string, buildingAddress: string): string => {
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return raw
+    .replace(/^servicio[:\s\-]*/i, '')
+    .replace(/\bservicio\b/gi, '')
+    .replace(buildingName ? new RegExp(escapeRegex(buildingName), 'gi') : /$^/, '')
+    .replace(buildingAddress ? new RegExp(escapeRegex(buildingAddress), 'gi') : /$^/, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/^[\s\-]+|[\s\-]+$/g, '')
+    .trim();
+};
 
 const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   open,
@@ -195,6 +217,12 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [deleteServiceOpen, setDeleteServiceOpen] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
   const [deletingService, setDeletingService] = useState(false);
+
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [noteServiceId, setNoteServiceId] = useState<string | null>(null);
+  const [noteValue, setNoteValue] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   // Modal de documentos del servicio
   const [docsModalOpen, setDocsModalOpen] = useState(false);
@@ -328,20 +356,13 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
       const buildingName = data.building.name;
       const buildingAddress = data.building.address;
-      const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
       const initialDescs: Record<string, string> = {};
       allServices.forEach((service) => {
-        let rawDesc = service.description || service.name || '';
-        rawDesc = rawDesc
-          .replace(/^servicio[:\s\-]*/i, '')
-          .replace(/\bservicio\b/gi, '')
-          .replace(new RegExp(escapeRegex(buildingName), 'gi'), '')
-          .replace(new RegExp(escapeRegex(buildingAddress), 'gi'), '')
-          .replace(/\s{2,}/g, ' ')
-          .replace(/^[\s\-]+|[\s\-]+$/g, '')
-          .trim();
-        initialDescs[service.id] = rawDesc || '-';
+        const items = splitHistoryItems(service.description || service.name || '')
+          .map((line) => cleanHistoryItem(line, buildingName, buildingAddress))
+          .filter(Boolean);
+        initialDescs[service.id] = items.join('\n') || '-';
       });
 
       setPdfDescriptions(initialDescs);
@@ -369,7 +390,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     let logoImg: HTMLImageElement | null = null;
     try {
       const imgEl = new Image();
-      imgEl.src = '/logo.png';
+      imgEl.src = '/logo-porteros.png';
       await new Promise<void>((resolve) => {
         imgEl.onload = () => { logoImg = imgEl; resolve(); };
         imgEl.onerror = () => resolve();
@@ -448,22 +469,101 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       }
 
       const date = service.remitos?.[0]?.date ? formatDate(service.remitos[0].date) : '-';
+      const descWidth = pageW - margin * 2 - 36;
+      // getLineHeight() viene en puntos; el documento está en mm.
+      const lineH = doc.getLineHeight() / doc.internal.scaleFactor;
+      const itemGap = 0.6;
+      const items = splitHistoryItems(pdfDescriptions[service.id] ?? '-');
+      const wrapped = (items.length ? items : ['-']).map((item) => {
+        const lines = doc.splitTextToSize(item, descWidth);
+        return (Array.isArray(lines) ? lines : [lines]) as string[];
+      });
+      const historyNote = (service.historyNote || '').trim();
+      doc.setFontSize(8);
+      const noteLineH = doc.getLineHeight();
+      const rawNoteLines = historyNote ? doc.splitTextToSize(`Nota: ${historyNote}`, descWidth) : [];
+      const noteLines = (Array.isArray(rawNoteLines) ? rawNoteLines : [rawNoteLines]) as string[];
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      const blockH =
+        wrapped.reduce((sum, lines) => sum + lines.length * lineH, 0) +
+        Math.max(0, wrapped.length - 1) * itemGap +
+        (noteLines.length ? 1.5 + noteLines.length * noteLineH : 0);
 
-      // Usar la descripción editada para este PDF
-      const descLines = doc.splitTextToSize(pdfDescriptions[service.id] ?? '-', pageW - margin * 2 - 36);
+      if (y + blockH > 278) {
+        doc.addPage();
+        y = 14;
+        y = drawTableHeader(y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+      }
 
       doc.text(date, margin + 1, y);
-      doc.text(descLines, margin + 34, y);
+      let textY = y;
+      wrapped.forEach((lines, index) => {
+        if (index > 0) textY += itemGap;
+        doc.text(lines, margin + 34, textY);
+        textY += lines.length * lineH;
+      });
 
-      const lineHeight = descLines.length * 5;
-      y += Math.max(11, lineHeight + 7);
+      if (noteLines.length) {
+        textY += 1.5;
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(90, 90, 90);
+        doc.text(noteLines, margin + 34, textY);
+        textY += noteLines.length * noteLineH;
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+      }
 
+      y = textY + 1.5;
       doc.setDrawColor(220, 220, 220);
-      doc.line(margin, y - 5, pageW - margin, y - 5);
+      doc.line(margin, y, pageW - margin, y);
+      y += 2;
     });
 
     doc.save(`Historial_${buildingAddress.replace(/\s+/g, '_')}.pdf`);
     setPdfEditOpen(false);
+  };
+
+  const handleOpenHistoryNote = (service: Service) => {
+    setNoteServiceId(service.id);
+    setNoteValue(service.historyNote || '');
+    setNoteError(null);
+    setNoteDialogOpen(true);
+  };
+
+  const handleSaveHistoryNote = async () => {
+    if (!noteServiceId) return;
+    setSavingNote(true);
+    setNoteError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const trimmed = noteValue.trim();
+      await api.patch(
+        `/services/${noteServiceId}/history-note`,
+        { note: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const saved = trimmed || null;
+      setData((prev) => prev ? {
+        ...prev,
+        services: prev.services.map((service) =>
+          service.id === noteServiceId ? { ...service, historyNote: saved } : service
+        )
+      } : prev);
+      setPdfServices((prev) => prev.map((service) =>
+        service.id === noteServiceId ? { ...service, historyNote: saved } : service
+      ));
+      setNoteDialogOpen(false);
+    } catch (err) {
+      console.error('Error al guardar la nota:', err);
+      setNoteError('No se pudo guardar la nota');
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   const handleDeleteServiceClick = (serviceId: string) => {
@@ -847,6 +947,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                       return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
                     }).map((service) => {
                       const isExpanded = expandedServices.has(service.id);
+                      const descriptionItems = splitHistoryItems(service.description);
                       const serviceInvoices = getServiceInvoices(service);
                       const totalService = serviceInvoices.reduce((sum, inv) => sum + (inv.amount || 0), 0)
                         + service.remitos.reduce((sum, r) => sum + r.amount, 0);
@@ -899,9 +1000,51 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                               <Typography variant="body2" fontWeight="medium">
                                 {service.name} - {data.building.address}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {service.description}
-                              </Typography>
+                              <Box sx={{ mt: 0.25 }}>
+                                {(descriptionItems.length ? descriptionItems : [service.description || '-']).map((item, index) => (
+                                  <Typography
+                                    key={`${service.id}-item-${index}`}
+                                    variant="caption"
+                                    color="text.secondary"
+                                    component="div"
+                                    sx={{ lineHeight: 1.45 }}
+                                  >
+                                    {item}
+                                  </Typography>
+                                ))}
+                              </Box>
+                              <Box sx={{ mt: 0.75, display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleOpenHistoryNote(service)}
+                                  title={service.historyNote ? 'Editar nota' : 'Agregar nota'}
+                                  sx={{ p: 0.25 }}
+                                >
+                                  <Comment
+                                    fontSize="small"
+                                    color={service.historyNote ? 'primary' : 'inherit'}
+                                    sx={{ color: service.historyNote ? undefined : 'text.disabled' }}
+                                  />
+                                </IconButton>
+                                {service.historyNote ? (
+                                  <Typography
+                                    variant="caption"
+                                    component="div"
+                                    sx={{ whiteSpace: 'pre-wrap', color: 'primary.main', pt: 0.4 }}
+                                  >
+                                    {service.historyNote}
+                                  </Typography>
+                                ) : (
+                                  <Typography
+                                    variant="caption"
+                                    color="text.disabled"
+                                    sx={{ cursor: 'pointer', pt: 0.45 }}
+                                    onClick={() => handleOpenHistoryNote(service)}
+                                  >
+                                    Agregar nota
+                                  </Typography>
+                                )}
+                              </Box>
                             </TableCell>
                             <TableCell>{service.technician?.name || '-'}</TableCell>
                             <TableCell>
@@ -1537,6 +1680,40 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
           onClick={handleGeneratePDF}
         >
           Generar PDF
+        </Button>
+      </DialogActions>
+    </Dialog>
+
+    <Dialog open={noteDialogOpen} onClose={() => !savingNote && setNoteDialogOpen(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>Nota del servicio</DialogTitle>
+      <DialogContent>
+        <Box sx={{ pt: 1 }}>
+          {noteError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {noteError}
+            </Alert>
+          )}
+          <TextField
+            label="Nota"
+            value={noteValue}
+            onChange={(e) => setNoteValue(e.target.value)}
+            fullWidth
+            multiline
+            minRows={3}
+            maxRows={8}
+            placeholder="Comentario interno sobre este servicio..."
+            autoFocus
+            inputProps={{ maxLength: 2000 }}
+            helperText={`${noteValue.trim().length}/2000`}
+          />
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setNoteDialogOpen(false)} disabled={savingNote}>
+          Cancelar
+        </Button>
+        <Button onClick={handleSaveHistoryNote} variant="contained" disabled={savingNote}>
+          {savingNote ? 'Guardando...' : 'Guardar'}
         </Button>
       </DialogActions>
     </Dialog>
