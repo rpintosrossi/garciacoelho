@@ -144,11 +144,18 @@ export default function ServicesSidebar() {
                 {item.count > 0 && (
                   <Badge
                     badgeContent={item.count}
+                    max={999}
                     color="primary"
                     sx={{ 
-                      mr: 2,
+                      mr: 1,
                       '& .MuiBadge-badge': {
                         backgroundColor: item.icon.props.sx.color,
+                        position: 'relative',
+                        transform: 'none',
+                        fontSize: '0.7rem',
+                        height: 20,
+                        minWidth: 20,
+                        padding: '0 5px',
                       },
                     }}
                   />

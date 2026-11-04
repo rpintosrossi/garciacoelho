@@ -883,6 +883,7 @@ export default function InvoicedServices() {
       <Box display="flex" alignItems="center" mb={2} gap={2} flexWrap="wrap">
         <Badge
           badgeContent={pagination.total}
+          max={999}
           color="primary"
           sx={{ mr: 1 }}
         >
