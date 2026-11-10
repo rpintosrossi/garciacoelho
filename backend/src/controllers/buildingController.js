@@ -1411,7 +1411,7 @@ const searchBuildingsAutocomplete = async (req, res) => {
       ...(sortByBalance
         ? {
             orderBy: {
-              account: { balance: { sort: 'desc', nulls: 'last' } }
+              account: { balance: 'desc' }
             },
             take: 80
           }
