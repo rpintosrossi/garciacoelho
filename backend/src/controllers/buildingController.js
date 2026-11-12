@@ -564,9 +564,14 @@ const getBuildingAccountMovements = async (req, res) => {
         extra: {},
       });
     }
-    // Pagos (por PaymentDocument)
+    // Pagos (por PaymentDocument).
+    // Un cobro en efectivo se guarda en la factura y, en datos viejos, también en el remito
+    // con el mismo monto. Contar las dos líneas resta el pago dos veces.
     for (const pd of paymentDocs) {
       if (!pd.payment) continue;
+      if (pd.remitoId && !pd.invoiceId && pd.payment.documents?.some((doc) => doc.invoiceId)) {
+        continue;
+      }
       if (type && type !== 'PAGO') continue;
       if (from && new Date(pd.payment.date) < new Date(from)) continue;
       if (to && new Date(pd.payment.date) > new Date(to)) continue;
@@ -823,6 +828,9 @@ const getBuildingAccountDetails = async (req, res) => {
         amount: invoice.amount,
         status: isEfectivo ? 'PAGADO' : invoice.status,
         paymentMethod: invoice.paymentMethod,
+        fileUrl: invoice.fileUrl,
+        emissionSource: invoice.emissionSource,
+        cae: invoice.cae,
         createdAt: invoice.createdAt,
         number: invoice.number, // Número de factura real
         service: services.find(s => getServiceInvoices(s).some(inv => inv.id === invoice.id)),
@@ -1321,13 +1329,19 @@ const getBuildingServiceHistory = async (req, res) => {
             date: remito.date,
             status: remito.status,
             receiptImages: remito.receiptImages,
-            payments: remito.paymentDocuments?.map(pd => ({
+            payments: (remito.paymentDocuments || []).filter(pd => {
+              // El mismo cobro en efectivo ya figura en la factura.
+              const linkedToInvoice = service.invoiceServices?.some(iv =>
+                iv.invoice?.paymentDocuments?.some(invPd => invPd.payment?.id === pd.payment?.id)
+              );
+              return !linkedToInvoice;
+            }).map(pd => ({
               id: pd.payment.id,
               amount: pd.amount,
               date: pd.payment.date,
               method: pd.payment.method,
               comprobante: pd.payment.comprobante
-            })) || []
+            }))
           })),
           invoices: enriched.invoices.map(inv => ({
             id: inv.id,
@@ -1336,6 +1350,9 @@ const getBuildingServiceHistory = async (req, res) => {
             date: inv.date,
             status: inv.status,
             fileUrl: inv.fileUrl,
+            paymentMethod: inv.paymentMethod,
+            emissionSource: inv.emissionSource,
+            cae: inv.cae,
             payments: inv.paymentDocuments?.map(pd => ({
               id: pd.payment.id,
               amount: pd.amount,
@@ -1351,6 +1368,9 @@ const getBuildingServiceHistory = async (req, res) => {
             date: invoice.date,
             status: invoice.status,
             fileUrl: invoice.fileUrl,
+            paymentMethod: invoice.paymentMethod,
+            emissionSource: invoice.emissionSource,
+            cae: invoice.cae,
             payments: invoice.paymentDocuments?.map(pd => ({
               id: pd.payment.id,
               amount: pd.amount,

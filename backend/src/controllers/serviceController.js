@@ -1162,7 +1162,8 @@ const createInformalInvoice = async (req, res) => {
       });
 
       if (firstRemito) {
-        // Crear el pago asociado tanto al remito como a la factura
+        // Un solo documento, sobre la factura. La copia en el remito hacía que el mismo
+        // cobro se restara otra vez de la cuenta corriente.
         const payment = await prisma.payment.create({
           data: {
             amount: parseFloat(amount),
@@ -1172,10 +1173,6 @@ const createInformalInvoice = async (req, res) => {
             documents: {
               create: [
                 {
-                  remitoId: firstRemito.id,
-                  amount: parseFloat(amount)
-                },
-                {
                   invoiceId: invoice.id,
                   amount: parseFloat(amount)
                 }
@@ -1184,7 +1181,7 @@ const createInformalInvoice = async (req, res) => {
           }
         });
 
-        console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a remito y factura:', payment);
+        console.log('--- [FACTURA INFORMAL] Pago en efectivo creado y asociado a la factura:', payment);
         
         // Actualizar el estado de la factura a PAGADA
         await prisma.invoice.update({

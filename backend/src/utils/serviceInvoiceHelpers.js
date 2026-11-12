@@ -69,6 +69,17 @@ function getPaymentDocCoverage(pd) {
   return paid + (paid / payment.amount) * payment.discount;
 }
 
+/**
+ * Solo se puede corregir el monto de un cobro en efectivo sin comprobante.
+ * Factura electrónica (AFIP/CAE) o con PDF adjunto quedan fijas.
+ */
+function canEditCashInvoiceAmount(invoice) {
+  if (!invoice || invoice.paymentMethod !== 'EFECTIVO') return false;
+  if (invoice.emissionSource === 'AFIP' || invoice.cae) return false;
+  if (invoice.fileUrl) return false;
+  return true;
+}
+
 /** true si la factura está cubierta (EFECTIVO, PAGADA o pagos + descuentos). */
 function isInvoiceFullyPaid(invoice) {
   if (!invoice) return false;
@@ -143,6 +154,7 @@ module.exports = {
   invoiceServicesInclude,
   getServiceInvoices,
   getInvoiceServices,
+  canEditCashInvoiceAmount,
   isInvoiceFullyPaid,
   getServiceIsPaid,
   withServiceInvoices,

@@ -13,6 +13,8 @@ const { serviceInvoicesInclude, getServiceInvoices } = require('../utils/service
  * NO debe restarse entero a cada edificio; solo la cuota de sus documentos.
  *
  * Las facturas EFECTIVO se consideran ya pagadas (no suman deuda).
+ * El PaymentDocument de ese cobro tampoco se resta: si no, el efectivo
+ * descuenta otra vez la cuenta corriente (el mismo pago queda contado dos veces).
  * Los remitos no entran en el saldo de lista (consistencia histórica).
  */
 
@@ -55,10 +57,14 @@ function getPaymentDocCoverage(pd) {
 function calculateBalanceFromData(invoices, paymentDocs) {
   let totalInvoiced = 0;
   const invoiceIds = new Set();
+  const efectivoInvoiceIds = new Set();
 
   for (const inv of invoices) {
     invoiceIds.add(inv.id);
-    if (inv.paymentMethod === 'EFECTIVO') continue;
+    if (inv.paymentMethod === 'EFECTIVO') {
+      efectivoInvoiceIds.add(inv.id);
+      continue;
+    }
     totalInvoiced += inv.amount || 0;
   }
 
@@ -67,6 +73,7 @@ function calculateBalanceFromData(invoices, paymentDocs) {
 
   for (const pd of paymentDocs) {
     if (!pd.invoiceId || !invoiceIds.has(pd.invoiceId)) continue;
+    if (efectivoInvoiceIds.has(pd.invoiceId)) continue;
     const { paid, discountShare } = getPaymentDocCoverage(pd);
     totalPaid += paid;
     totalDiscounts += discountShare;

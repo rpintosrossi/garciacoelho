@@ -37,6 +37,7 @@ import {
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
+import { canEditCashInvoiceAmount } from '@/utils/canEditCashInvoiceAmount';
 import {
   KeyboardArrowDown,
   KeyboardArrowUp,
@@ -93,6 +94,9 @@ interface Invoice {
   status: string;
   payments: Payment[];
   fileUrl?: string;
+  paymentMethod?: string | null;
+  emissionSource?: string | null;
+  cae?: string | null;
 }
 
 interface Service {
@@ -277,7 +281,6 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<{id: string, amount: number} | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [errorEdit, setErrorEdit] = useState<string | null>(null);
 
@@ -597,7 +600,6 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
   const handleEditClick = (invoice: {id: string, amount: number}) => {
     setSelectedInvoice(invoice);
     setEditAmount(invoice.amount.toString());
-    setInvoiceFile(null);
     setEditInvoiceOpen(true);
     setErrorEdit(null);
   };
@@ -606,7 +608,6 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
     setEditInvoiceOpen(false);
     setSelectedInvoice(null);
     setEditAmount('');
-    setInvoiceFile(null);
     setErrorEdit(null);
   };
 
@@ -624,26 +625,15 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
 
     try {
       const token = localStorage.getItem("token");
-      
-      const formData = new FormData();
-      formData.append('amount', amount.toString());
-      if (invoiceFile) {
-        formData.append('file', invoiceFile);
-      }
-      
-      await api.put(`/invoices/${selectedInvoice.id}`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+      await api.put(`/invoices/${selectedInvoice.id}`, { amount }, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-      
-      // Update local state or refetch
+
       await fetchHistory();
       handleEditClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error actualizando factura:', err);
-      setErrorEdit('Error al actualizar el monto de la factura');
+      setErrorEdit(err?.response?.data?.message || 'Error al actualizar el monto de la factura');
     } finally {
       setSavingInvoice(false);
     }
@@ -1160,18 +1150,20 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                                                 <Typography variant="body2" fontWeight="bold">
                                                   {formatCurrency(invoice.amount)}
                                                 </Typography>
-                                                <IconButton
-                                                  size="small"
-                                                  color="primary"
-                                                  onClick={() => handleEditClick({
-                                                    id: invoice.id,
-                                                    amount: invoice.amount
-                                                  })}
-                                                  sx={{ ml: 0.5, p: 0.5 }}
-                                                  title="Editar monto"
-                                                >
-                                                  <Edit fontSize="small" sx={{ fontSize: '1rem' }} />
-                                                </IconButton>
+                                                {canEditCashInvoiceAmount(invoice) && (
+                                                  <IconButton
+                                                    size="small"
+                                                    color="primary"
+                                                    onClick={() => handleEditClick({
+                                                      id: invoice.id,
+                                                      amount: invoice.amount
+                                                    })}
+                                                    sx={{ ml: 0.5, p: 0.5 }}
+                                                    title="Editar monto en efectivo"
+                                                  >
+                                                    <Edit fontSize="small" sx={{ fontSize: '1rem' }} />
+                                                  </IconButton>
+                                                )}
                                               </Box>
                                             </Box>
                                             <Box>
@@ -1561,7 +1553,7 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
       </Dialog>
 
     <Dialog open={editInvoiceOpen} onClose={handleEditClose} maxWidth="sm" fullWidth>
-        <DialogTitle>Editar Monto de Factura</DialogTitle>
+        <DialogTitle>Editar monto en efectivo</DialogTitle>
         <DialogContent>
           <Box pt={2}>
             {errorEdit && (
@@ -1569,8 +1561,10 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                 {errorEdit}
               </Alert>
             )}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Se actualiza el monto de la factura y el pago en efectivo asociado.
+            </Typography>
             <TextField
-              sx={{ marginTop: 1 }}
               fullWidth
               label="Nuevo monto"
               type="number"
@@ -1580,38 +1574,6 @@ const BuildingHistoryModal: React.FC<BuildingHistoryModalProps> = ({
                 startAdornment: <InputAdornment position="start">$</InputAdornment>,
               }}
             />
-            
-            <Box mt={2} mb={1}>
-              <Typography variant="subtitle2" gutterBottom>
-                Actualizar archivo de factura
-              </Typography>
-              <input
-                accept="application/pdf,image/*"
-                style={{ display: 'none' }}
-                id="invoice-file-upload"
-                type="file"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    setInvoiceFile(e.target.files[0]);
-                  }
-                }}
-              />
-              <label htmlFor="invoice-file-upload">
-                <Button variant="outlined" component="span" fullWidth>
-                  {invoiceFile ? invoiceFile.name : 'Seleccionar Archivo'}
-                </Button>
-              </label>
-              {invoiceFile && (
-                <Button 
-                  size="small" 
-                  color="warning" 
-                  onClick={() => setInvoiceFile(null)}
-                  sx={{ mt: 1 }}
-                >
-                  Quitar archivo seleccionado
-                </Button>
-              )}
-            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

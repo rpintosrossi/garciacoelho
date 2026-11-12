@@ -5,8 +5,10 @@ const {
   getInvoiceServices,
   withInvoiceServices,
   linkInvoiceToServicesData,
-  serviceInvoicesInclude
+  serviceInvoicesInclude,
+  canEditCashInvoiceAmount
 } = require('../utils/serviceInvoiceHelpers');
+const { recalculateBuildingBalance } = require('../services/buildingBalanceService');
 
 const prisma = new PrismaClient();
 
@@ -115,6 +117,7 @@ const updateInvoice = async (req, res) => {
   try {
     const { id } = req.params;
     const { amount, status } = req.body;
+    const changingAmount = amount !== undefined && amount !== null && String(amount).trim() !== '';
     let fileUrl;
 
     if (req.file) {
@@ -125,13 +128,17 @@ const updateInvoice = async (req, res) => {
       }
     }
 
-    // Obtener la factura actual para calcular diferencias si es necesario
     const currentInvoice = await prisma.invoice.findUnique({
       where: { id },
       include: {
         paymentDocuments: {
           include: {
             payment: true
+          }
+        },
+        invoiceServices: {
+          include: {
+            service: { select: { buildingId: true } }
           }
         }
       }
@@ -141,42 +148,72 @@ const updateInvoice = async (req, res) => {
       return res.status(404).json({ message: 'Factura no encontrada' });
     }
 
-    // Actualizar la factura
-    const invoice = await prisma.invoice.update({
-      where: { id },
-      data: {
-        ...(amount !== undefined && { amount: parseFloat(amount) }),
-        ...(status !== undefined && { status }),
-        ...(fileUrl && { fileUrl })
-      },
-      include: invoiceServicesInclude({
-        building: true,
-        technician: true
-      })
+    let newAmount;
+    if (changingAmount) {
+      newAmount = parseFloat(amount);
+      if (!Number.isFinite(newAmount) || newAmount < 0) {
+        return res.status(400).json({ message: 'El monto debe ser un número válido mayor o igual a 0' });
+      }
+      if (!canEditCashInvoiceAmount(currentInvoice)) {
+        return res.status(400).json({
+          message: 'Solo se puede modificar el monto de facturas en efectivo. Las facturas electrónicas o con archivo adjunto no se pueden editar.'
+        });
+      }
+      // Un cobro en efectivo no pasa a ser una factura adjunta.
+      fileUrl = undefined;
+    } else if (req.file && (currentInvoice.emissionSource === 'AFIP' || currentInvoice.cae)) {
+      return res.status(400).json({ message: 'No se puede modificar una factura electrónica.' });
+    }
+
+    const cashDocs = (currentInvoice.paymentDocuments || []).filter(
+      (pd) => pd.payment && pd.payment.method === 'EFECTIVO'
+    );
+    const cashDoc = cashDocs.length
+      ? cashDocs.reduce((best, doc) => (
+          Math.abs(doc.amount - currentInvoice.amount) < Math.abs(best.amount - currentInvoice.amount) ? doc : best
+        ))
+      : null;
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id },
+        data: {
+          ...(changingAmount && { amount: newAmount }),
+          ...(status !== undefined && { status }),
+          ...(fileUrl && { fileUrl })
+        },
+        include: invoiceServicesInclude({
+          building: true,
+          technician: true
+        })
+      });
+
+      if (changingAmount && cashDoc) {
+        const previousDocAmount = cashDoc.amount || 0;
+        const nextDocAmount = cashDocs.length === 1
+          ? newAmount
+          : Math.max(0, previousDocAmount + (newAmount - currentInvoice.amount));
+        await tx.paymentDocument.update({
+          where: { id: cashDoc.id },
+          data: { amount: nextDocAmount }
+        });
+        await tx.payment.update({
+          where: { id: cashDoc.paymentId },
+          data: { amount: Math.max(0, (cashDoc.payment.amount || 0) - previousDocAmount + nextDocAmount) }
+        });
+      }
+
+      return updated;
     });
 
-    // Si hay cambio de monto, verificar si debemos actualizar pagos automáticos (EFECTIVO)
-    if (amount !== undefined && currentInvoice.paymentMethod === 'EFECTIVO' && currentInvoice.status === 'PAGADA') {
-      // Si la factura fue pagada en efectivo automáticamente, actualizamos también el pago asociado
-      // Buscamos el pago asociado que sea de tipo efectivo y tenga el mismo monto original
-      const cashPaymentDoc = currentInvoice.paymentDocuments.find(pd => 
-        pd.payment.method === 'EFECTIVO' && 
-        Math.abs(pd.amount - currentInvoice.amount) < 0.01 // Floating point comparison
-      );
-
-      if (cashPaymentDoc) {
-        // Actualizamos el documento de pago y el pago principal
-        await prisma.$transaction([
-          prisma.paymentDocument.update({
-            where: { id: cashPaymentDoc.id },
-            data: { amount: parseFloat(amount) }
-          }),
-          prisma.payment.update({
-            where: { id: cashPaymentDoc.paymentId },
-            data: { amount: parseFloat(amount) }
-          })
-        ]);
-        console.log(`[UPDATE INVOICE] Monto actualizado también en el pago asociado ${cashPaymentDoc.paymentId}`);
+    if (changingAmount) {
+      const buildingIds = [...new Set(
+        (currentInvoice.invoiceServices || [])
+          .map((link) => link.service?.buildingId)
+          .filter(Boolean)
+      )];
+      for (const buildingId of buildingIds) {
+        await recalculateBuildingBalance(buildingId);
       }
     }
 

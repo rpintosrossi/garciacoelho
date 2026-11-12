@@ -291,7 +291,7 @@ export default function PaymentsPage() {
     setLoadingAdminSearch(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await api.get(`/administrators?search=${searchTerm}`, {
+      const res = await api.get(`/administrators?search=${encodeURIComponent(searchTerm)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAdministrators(res.data.administrators || res.data);

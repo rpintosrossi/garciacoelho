@@ -24,6 +24,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import FileViewer from '@/components/FileViewer';
 import api, { cachedApi } from '@/lib/axios';
 import { useRemitoDuplicateCheck } from '@/hooks/useRemitoDuplicateCheck';
+import { canEditCashInvoiceAmount } from '@/utils/canEditCashInvoiceAmount';
 
 export default function ServiceDetailsPage() {
   const router = useRouter();
@@ -228,11 +229,13 @@ export default function ServiceDetailsPage() {
                   <Typography variant="body2">
                     #{invoice.number || invoice.id.substring(0, 8)} — ${invoice.amount}
                   </Typography>
-                  <Tooltip title="Editar monto">
-                    <IconButton size="small" onClick={() => handleOpenEditInvoice(invoice)} color="primary">
-                      <EditIcon />
-                    </IconButton>
-                  </Tooltip>
+                  {canEditCashInvoiceAmount(invoice) && (
+                    <Tooltip title="Editar monto en efectivo">
+                      <IconButton size="small" onClick={() => handleOpenEditInvoice(invoice)} color="primary">
+                        <EditIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   {invoice.status === 'PAGADA' && (
                     <Chip label="PAGADA" color="success" size="small" />
                   )}
@@ -395,7 +398,7 @@ export default function ServiceDetailsPage() {
         <DialogContent>
             <Box mt={2}>
                 <Typography variant="body2" color="text.secondary" paragraph>
-                    Modificar el monto de la factura. SI la factura ya estaba pagada en efectivo, esto actualizará también el registro de pago y la deuda del edificio.
+                    Se actualiza el monto de la factura en efectivo y el pago asociado.
                 </Typography>
                 <TextField
                     label="Monto"

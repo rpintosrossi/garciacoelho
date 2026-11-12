@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import api from '@/lib/axios';
 import { formatDate } from '@/utils/formatDate';
+import { canEditCashInvoiceAmount } from '@/utils/canEditCashInvoiceAmount';
 import {
   Dialog,
   DialogTitle,
@@ -22,10 +23,11 @@ import {
   Alert,
   Collapse,
   IconButton,
-  Link
+  Link,
+  TextField
 } from "@mui/material";
 import { formatCurrency } from '@/utils/formatCurrency';
-import { Payment, KeyboardArrowDown, KeyboardArrowUp, Description, GetApp } from "@mui/icons-material";
+import { Payment, KeyboardArrowDown, KeyboardArrowUp, Description, GetApp, Edit } from "@mui/icons-material";
 import BuildingPaymentModal from './BuildingPaymentModal';
 
 interface Transaction {
@@ -44,6 +46,9 @@ interface Transaction {
   remaining?: number;
   services?: any[]; // Array de servicios asociados a la factura
   number?: string; // Número de factura real
+  fileUrl?: string;
+  emissionSource?: string | null;
+  cae?: string | null;
   invoice?: {
     fileUrl?: string; // URL del PDF de la factura
   };
@@ -78,6 +83,11 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [openPaymentModal, setOpenPaymentModal] = useState(false);
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+  const [editInvoiceOpen, setEditInvoiceOpen] = useState(false);
+  const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const toggleInvoice = (invoiceId: string) => {
     setExpandedInvoices(prev => {
@@ -154,6 +164,47 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
   };
 
 
+
+  const handleOpenEditInvoice = (transaction: Transaction) => {
+    setEditInvoiceId(transaction.id);
+    setEditAmount(String(transaction.amount ?? ''));
+    setEditError(null);
+    setEditInvoiceOpen(true);
+  };
+
+  const handleCloseEditInvoice = () => {
+    if (savingInvoice) return;
+    setEditInvoiceOpen(false);
+    setEditInvoiceId(null);
+    setEditAmount('');
+    setEditError(null);
+  };
+
+  const handleSaveInvoiceAmount = async () => {
+    if (!editInvoiceId || editAmount.trim() === '') return;
+    const amount = parseFloat(editAmount);
+    if (Number.isNaN(amount) || amount < 0) {
+      setEditError('El monto debe ser un número válido mayor o igual a 0');
+      return;
+    }
+
+    setSavingInvoice(true);
+    setEditError(null);
+    try {
+      const token = localStorage.getItem('token');
+      await api.put(`/invoices/${editInvoiceId}`, { amount }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEditInvoiceOpen(false);
+      setEditInvoiceId(null);
+      setEditAmount('');
+      await fetchAccountDetails();
+    } catch (err: any) {
+      setEditError(err?.response?.data?.message || 'Error al actualizar el monto');
+    } finally {
+      setSavingInvoice(false);
+    }
+  };
 
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
     // Abrir el archivo en una nueva pestaña o descargarlo
@@ -332,13 +383,26 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
                         {transaction.paymentMethod?.name || '-'}
                       </TableCell>
                       <TableCell align="right">
-                        <Typography 
-                          variant="body2"
-                          color={transaction.displayType === 'payment' ? 'success.main' : 'inherit'}
-                        >
-                          {transaction.displayType === 'payment' ? '-' : ''}
-                          {formatCurrency(transaction.amount)}
-                        </Typography>
+                        <Box display="flex" alignItems="center" justifyContent="flex-end">
+                          <Typography 
+                            variant="body2"
+                            color={transaction.displayType === 'payment' ? 'success.main' : 'inherit'}
+                          >
+                            {transaction.displayType === 'payment' ? '-' : ''}
+                            {formatCurrency(transaction.amount)}
+                          </Typography>
+                          {transaction.displayType === 'invoice' && canEditCashInvoiceAmount(transaction) && (
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => handleOpenEditInvoice(transaction)}
+                              title="Editar monto en efectivo"
+                              sx={{ ml: 0.5, p: 0.5 }}
+                            >
+                              <Edit fontSize="small" sx={{ fontSize: '1rem' }} />
+                            </IconButton>
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell>
                         <Chip 
@@ -451,6 +515,40 @@ const BuildingAccountModal: React.FC<BuildingAccountModalProps> = ({
       <DialogActions>
         <Button onClick={onClose}>Cerrar</Button>
       </DialogActions>
+
+      <Dialog open={editInvoiceOpen} onClose={handleCloseEditInvoice} fullWidth maxWidth="xs">
+        <DialogTitle>Editar monto en efectivo</DialogTitle>
+        <DialogContent>
+          <Box mt={1}>
+            {editError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {editError}
+              </Alert>
+            )}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Se actualiza el monto de la factura y el pago en efectivo asociado.
+            </Typography>
+            <TextField
+              label="Monto"
+              type="number"
+              fullWidth
+              value={editAmount}
+              onChange={(e) => setEditAmount(e.target.value)}
+              disabled={savingInvoice}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseEditInvoice} disabled={savingInvoice}>Cancelar</Button>
+          <Button
+            onClick={handleSaveInvoiceAmount}
+            variant="contained"
+            disabled={savingInvoice || editAmount.trim() === ''}
+          >
+            {savingInvoice ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Modal de Pago */}
       {buildingId && (
