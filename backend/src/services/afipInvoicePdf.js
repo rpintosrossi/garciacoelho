@@ -50,15 +50,19 @@ async function generateAfipInvoicePdf(data) {
 
   const qrDataUrl = await buildAfipQrDataUrl(data);
   const html = buildFacturaAfipHtml(data, qrDataUrl);
+  // Logo y QR van embebidos. networkidle0 no llega a cumplirse en Railway y corta a los 30s.
+  const timeout = Number(process.env.AFIP_PDF_TIMEOUT_MS || 60000);
 
   const browser = await puppeteer.launch({
     headless: true,
+    timeout,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
 
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    page.setDefaultTimeout(timeout);
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout });
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
